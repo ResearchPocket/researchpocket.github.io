@@ -11,11 +11,24 @@ use provider::local::LocalItem;
 use site::Site;
 use sqlx::migrate::MigrateDatabase;
 use std::env;
+use std::io;
 use std::path::Path;
 use std::str::FromStr;
 use tokio::fs::{create_dir, metadata, read_to_string, File};
 use tokio::io::AsyncWriteExt;
 use util::absolute_path;
+
+use ratatui::{
+    backend::CrosstermBackend,
+    widgets::{Block, Borders, Paragraph},
+    Terminal,
+};
+use crossterm::{
+    event::{DisableMouseCapture, EnableMouseCapture},
+    execute,
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+};
+use color_eyre::eyre::Result; // Import Result from color_eyre
 
 mod assets;
 mod cli;
@@ -23,10 +36,12 @@ mod db;
 mod handler;
 mod provider;
 mod site;
+mod tui; // Add mod tui
 mod util;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    color_eyre::install()?; // Install color-eyre
     let cli_args = CliArgs::parse();
 
     match &cli_args.subcommand {
@@ -96,10 +111,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             db.update_notes(&url, &notes).await?;
             println!("Notes updated successfully!");
         }
+        Some(Subcommands::Tui) => {
+            let db = DB::init(&cli_args.db).await.map_err(handle_db_error)?;
+            let items = db.get_all_items(None).await?;
+
+            let app = tui::TuiApp::new(items);
+
+            enable_raw_mode()?;
+            let mut stdout = io::stdout();
+            execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+            let backend = CrosstermBackend::new(stdout);
+            let mut terminal = Terminal::new(backend)?;
+
+            let res = tui::run_app(&mut terminal, app);
+
+            disable_raw_mode()?;
+            execute!(
+                terminal.backend_mut(),
+                LeaveAlternateScreen,
+                DisableMouseCapture
+            )?;
+            terminal.show_cursor()?;
+
+            if let Err(err) = res {
+                eprintln!("Error running TUI: {:?}", err);
+                // Convert color_eyre::Report to Box<dyn std::error::Error>
+                // This is a bit verbose, but necessary if main must return Box<dyn Error>
+                // If main could return color_eyre::Result<()>, this would be simpler.
+                return Err(Box::new(err) as Box<dyn std::error::Error>);
+            }
+            return Ok(());
+        }
         None => {
-            eprintln!("No subcommand provided");
-            eprintln!("Please provide a subcommand");
-            eprintln!("Run with --help for more information");
+            // No subcommand, could potentially launch TUI by default in the future?
+            // For now, keep existing behavior.
+            eprintln!("No subcommand provided. Use --help for options or try 'tui' subcommand.");
         }
     }
     Ok(())

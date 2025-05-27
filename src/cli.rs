@@ -114,6 +114,9 @@ pub enum Subcommands {
 
     /// Add or update notes for an item
     Notes(NotesArgs),
+
+    /// Launch the Terminal User Interface
+    Tui,
 }
 
 #[derive(Args)]
