@@ -1,5 +1,7 @@
 use std::env;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::path::PathBuf;
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 use std::process::Command;
 
 pub fn platform_unregister_url() {

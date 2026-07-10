@@ -11,11 +11,11 @@
 <div align="center">
   <!-- Github Actions -->
   <a
-    href="https://github.com/ResearchPocket/ResearchPocket/actions/workflows/ci-biulds.yml"
+    href="https://github.com/ResearchPocket/ResearchPocket/actions/workflows/ci.yml"
   >
     <img
       alt="GitHub Actions Workflow Status"
-      src="https://img.shields.io/github/actions/workflow/status/KorigamiK/ResearchPocket/ci-biulds.yml"
+      src="https://img.shields.io/github/actions/workflow/status/ResearchPocket/ResearchPocket/ci.yml"
     />
   </a>
   <!-- Version -->
@@ -43,13 +43,16 @@
 
 <br />
 
-A self-hostable save-it-later tool that integrates with
-[getpocket.com](https://getpocket.com) (and others soon). works on the web and
-terminal
+ResearchPocket is a local-first reading-list CLI. V2 is rebuilding remote sync
+and hosted editing around an application-level CRDT protocol so Git remains
+storage and transport, never the conflict resolver.
 
-> [!TIP]
-> Find the guide to creating your own static site on GitHub pages here
-> [ResearchPocket/my-list](https://github.com/ResearchPocket/my-list) 📚
+> [!WARNING]
+> Mozilla retired Pocket and its API. Pocket authentication, fetching, and
+> mutations are disabled. Existing V1 SQLite databases are left untouched and
+> remain available for local listing, explicit export, and sanitized static
+> generation. Do not publish a database file: it may contain legacy credentials
+> and private notes.
 
 ## How it works
 
@@ -68,7 +71,7 @@ terminal
 ## Installation
 
 - Get the latest release binary for your desktop through the
-  [releases page](https://github.com/KorigamiK/ResearchPocket/releases)
+  [releases page](https://github.com/ResearchPocket/ResearchPocket/releases)
 
 - Using Cargo
   ```sh
@@ -82,20 +85,21 @@ This requires that you have
 available in your `$PATH`
 
 ```sh
-# Initialize the database
-$ research init
+# Initialize a local database
+$ research init .
 
-# Authenticate with Pocket
-$ research pocket auth
+# Save items locally
+$ research local add https://example.com/article
 
-# Fetch your articles
-$ research fetch
-
-# Generate your site
-# add --download-tailwind if you don't have tailwindcss installed in your $PATH
-$ research --db ./research.sqlite generate .
+# Generate into a dedicated public-output directory. Add --download-tailwind
+# if the Tailwind standalone CLI is not already in PATH.
+$ research --db ./research.sqlite generate ./build
 
 ```
+
+Static generation uses an explicit public-field allowlist. Notes, legacy
+credentials, internal database IDs, and language metadata are excluded. CSV
+export is a private portability feature and intentionally includes notes.
 
 ## URL Handler
 
@@ -194,9 +198,9 @@ Hacktoberfest participation, please check out our
   Usage: research [OPTIONS] [COMMAND]
 
   Commands:
-    pocket    Pocket related actions
+    pocket    Retired Pocket commands; prints a migration warning
     local     Add a new item to the database stored locally
-    fetch     Gets all data from authenticated providers
+    fetch     Retired Pocket fetch alias; prints a migration warning
     list      Lists all items in the database
     init      Initializes the database
     generate  Generate a static site
@@ -261,15 +265,15 @@ Hacktoberfest participation, please check out our
 - Pocket
 
   ```sh
-  Pocket related actions
+  Retired Pocket commands
 
   Usage: research pocket <COMMAND>
 
   Commands:
-    auth      Authenticate using a consumer key
-    fetch     Fetch items from pocket
-    add       Add an item to pocket
-    favorite  Mark an item as favorite in pocket
+    auth      Retired: Pocket authentication is disabled
+    fetch     Retired: Pocket fetching is disabled
+    add       Retired: Pocket mutations are disabled
+    favorite  Retired: Pocket mutations are disabled
     help      Print this message or the help of the given subcommand(s)
 
   Options:
@@ -279,14 +283,8 @@ Hacktoberfest participation, please check out our
 
 - Fetch
 
-  ```sh
-  Gets all data from authenticated providers
-
-  Usage: research fetch
-
-  Options:
-    -h, --help  Print help
-  ```
+  `research fetch` is retained as a compatibility alias that exits with the
+  Pocket retirement warning without reading credentials or making a request.
 
 - Generate
 

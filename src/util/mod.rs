@@ -1,5 +1,3 @@
-pub mod serialize;
-
 use std::path::{Path, PathBuf};
 
 pub fn absolute_path(base: impl AsRef<Path>, path: impl AsRef<Path>) -> PathBuf {

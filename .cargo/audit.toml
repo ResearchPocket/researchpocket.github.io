@@ -1,0 +1,6 @@
+[advisories]
+# Loro's locked postcard metadata includes heapless 0.7's optional
+# atomic-polyfill dependency, but no supported ResearchPocket target or enabled
+# feature builds it (`cargo tree -i atomic-polyfill` is empty). Keep this narrow
+# exception until Loro's lock graph drops that unmaintained optional package.
+ignore = ["RUSTSEC-2023-0089"]

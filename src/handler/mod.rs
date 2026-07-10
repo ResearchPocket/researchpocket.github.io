@@ -12,7 +12,7 @@ use url::Url;
 
 use crate::{
     db::{Tags, DB},
-    provider::{local::LocalItem, Insertable, OnlineProvider, ProviderPocket},
+    provider::{local::LocalItem, Insertable},
 };
 
 pub async fn handle_url(url: &str) -> Result<(), sqlx::Error> {
@@ -44,7 +44,7 @@ pub async fn handle_url(url: &str) -> Result<(), sqlx::Error> {
 
                 #[cfg(target_os = "windows")]
                 {
-                    use winrt_notification::{Duration, Toast};
+                    use tauri_winrt_notification::{Duration, Toast};
                     Toast::new(Toast::POWERSHELL_APP_ID)
                         .title("Handler - Error")
                         .text1(&format!("{}", e))
@@ -147,13 +147,22 @@ async fn handle_research_url(parsed_url: Url) -> Result<(), sqlx::Error> {
         .iter()
         .find(|(k, _)| k == "db_path")
         .map(|(_, v)| v);
+    let provider_name = provider.map(String::as_str).unwrap_or("local");
+    if provider_name != "local" {
+        let message = if provider_name == "pocket" {
+            "Mozilla retired Pocket; ResearchPocket no longer sends saved URLs or credentials to the Pocket API"
+        } else {
+            "Provider not supported"
+        };
+        return Err(sqlx::Error::Protocol(message.into()));
+    }
 
     println!("URL: {:?}", url);
     println!("Provider: {:?}", provider);
     println!("Tags: {:?}", tags);
     println!("Database path: {:?}", db_path);
 
-    let db = DB::init(db_path.unwrap_or(&"research.db".to_string()))
+    let db = DB::init(db_path.map(String::as_str).unwrap_or("research.db"))
         .await
         .map_err(|err| {
             match err {
@@ -170,7 +179,7 @@ async fn handle_research_url(parsed_url: Url) -> Result<(), sqlx::Error> {
         })?;
 
     let provider_id = db
-        .get_provider_id(provider.unwrap_or(&"local".to_string()))
+        .get_provider_id(provider_name)
         .await
         .unwrap_or_else(|_| panic!("Failed to get provider ID for {:?}", provider));
     println!("Provider ID: {:?}", provider_id);
@@ -181,40 +190,8 @@ async fn handle_research_url(parsed_url: Url) -> Result<(), sqlx::Error> {
         .map_err(|e| sqlx::Error::Protocol(format!("Failed to fetch metadata: {}", e)))?;
     println!("Metadata: {:?}", metadata);
 
-    let mut id: Option<i64> = None;
-
-    match provider {
-        Some(p) => match p.as_str() {
-            "local" => {}
-            "pocket" => {
-                let secrets = db.get_secrets().await?;
-                let consumer_key = secrets
-                    .pocket_consumer_key
-                    .expect("Missing pocket consumer key");
-                let access_token = secrets
-                    .pocket_access_token
-                    .expect("Missing pocket access token");
-                let provider = ProviderPocket {
-                    consumer_key,
-                    access_token: Some(access_token),
-                    ..Default::default()
-                };
-                id = provider
-                    .add_item(url, tags.clone().unwrap_or_default())
-                    .await
-                    .map_err(|e| {
-                        eprintln!("Failed to add item to pocket: {}", e);
-                        sqlx::Error::Protocol("Failed to add item to pocket".into())
-                    })?;
-            }
-            _ => {
-                eprintln!("Provider \"{:?}\" not supported", p);
-                return Err(sqlx::Error::Protocol("Provider not supported".into()));
-            }
-        },
-        None => {
-            eprintln!("Provider not specified using default provider \"local\"");
-        }
+    if provider.is_none() {
+        eprintln!("Provider not specified; using default provider \"local\"");
     }
 
     let tags: Vec<Tags> = tags
@@ -226,12 +203,11 @@ async fn handle_research_url(parsed_url: Url) -> Result<(), sqlx::Error> {
         .collect();
 
     let local_item = LocalItem {
-        id,
+        id: None,
         uri: url.to_string(),
         title: Some(metadata.title),
         excerpt: Some(metadata.description),
         time_added: chrono::Utc::now().timestamp(),
-        tags: tags.clone(),
     };
 
     println!("Inserting item into database");
@@ -285,7 +261,7 @@ async fn handle_research_url(parsed_url: Url) -> Result<(), sqlx::Error> {
 
     #[cfg(target_os = "windows")]
     {
-        use winrt_notification::{Duration, Toast};
+        use tauri_winrt_notification::{Duration, Toast};
         Toast::new(Toast::POWERSHELL_APP_ID)
             .title(&title)
             .text1(&message)

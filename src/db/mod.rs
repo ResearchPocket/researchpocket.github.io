@@ -7,7 +7,7 @@ use chrono::{DateTime, Local, TimeZone, Utc};
 use chrono_tz::Tz;
 use csv::WriterBuilder;
 use serde::Serialize;
-use sqlx::{sqlite::SqlitePoolOptions, FromRow, Pool, Row, Sqlite};
+use sqlx::{sqlite::SqlitePoolOptions, FromRow, Pool, QueryBuilder, Row, Sqlite};
 use std::fs::File;
 use std::io;
 
@@ -23,7 +23,7 @@ pub struct Tags {
     pub tag_name: String,
 }
 
-#[derive(Clone, FromRow, Debug, Serialize)]
+#[derive(Clone, FromRow, Debug)]
 pub struct ResearchItem {
     pub id: Option<i64>,
     pub uri: String,
@@ -78,22 +78,6 @@ impl ResearchItem {
     }
 }
 
-#[derive(FromRow, Default)]
-#[allow(dead_code)]
-pub struct Secrets {
-    pub pocket_consumer_key: Option<String>,
-    pub pocket_access_token: Option<String>,
-    pub user_id: i64,
-}
-
-impl Secrets {
-    pub fn new(s: Option<Self>) -> Self {
-        s.unwrap_or_default()
-    }
-}
-
-const DEFAULT_USER_ID: i64 = 0;
-
 pub struct DB {
     pub pool: Pool<Sqlite>,
 }
@@ -124,13 +108,6 @@ impl DB {
     pub async fn migrate(pool: &Pool<Sqlite>) -> Result<(), sqlx::Error> {
         let _ = sqlx::migrate!("./migrations").run(pool).await;
         Ok(())
-    }
-
-    pub async fn get_sqlite_version(&self) -> Result<String, sqlx::Error> {
-        let row = sqlx::query("SELECT sqlite_version()")
-            .fetch_one(&self.pool)
-            .await?;
-        Ok(row.get::<String, _>(0))
     }
 
     pub async fn get_provider_id(&self, name: &str) -> Result<i64, sqlx::Error> {
@@ -198,23 +175,31 @@ impl DB {
         tags: &[String],
         favorite: Option<bool>,
     ) -> Result<Vec<ResearchItem>, sqlx::Error> {
-        let favorite_clause = match favorite {
-            Some(true) => "AND items.favorite = 1",
-            Some(false) => "AND items.favorite = 0",
-            None => "",
-        };
+        if tags.is_empty() {
+            return self.get_all_items(favorite).await;
+        }
 
-        let query = format!(
-            "SELECT items.* FROM items JOIN item_tags ON items.id = item_tags.item_id WHERE item_tags.tag_name IN ({}) {} GROUP BY items.id HAVING COUNT(DISTINCT item_tags.tag_name) = {}",
-            tags.iter().map(|t| format!("'{}'", t)).collect::<Vec<_>>().join(", "),
-            favorite_clause,
-            tags.len()
+        let mut query = QueryBuilder::<Sqlite>::new(
+            "SELECT items.* FROM items JOIN item_tags ON items.id = item_tags.item_id WHERE item_tags.tag_name IN (",
         );
+        let mut separated = query.separated(", ");
+        for tag in tags {
+            separated.push_bind(tag);
+        }
+        separated.push_unseparated(")");
 
-        let items = sqlx::query_as::<_, ResearchItem>(&query)
+        if let Some(favorite) = favorite {
+            query.push(" AND items.favorite = ").push_bind(favorite);
+        }
+
+        query
+            .push(" GROUP BY items.id HAVING COUNT(DISTINCT item_tags.tag_name) = ")
+            .push_bind(tags.len() as i64);
+
+        query
+            .build_query_as::<ResearchItem>()
             .fetch_all(&self.pool)
-            .await?;
-        Ok(items)
+            .await
     }
 
     pub async fn get_item_tags(&self, item_id: i64) -> Result<Vec<Tags>, sqlx::Error> {
@@ -254,26 +239,6 @@ impl DB {
             .await
     }
 
-    pub async fn get_secrets(&self) -> Result<Secrets, sqlx::Error> {
-        let row = sqlx::query_as::<_, Secrets>("SELECT * FROM secrets")
-            .fetch_optional(&self.pool)
-            .await?;
-        Ok(Secrets::new(row))
-    }
-
-    pub async fn set_secret(&self, secrets: Secrets) -> Result<(), sqlx::Error> {
-        let _ = sqlx::query(
-            "UPDATE secrets SET pocket_consumer_key = ?, pocket_access_token = ? WHERE user_id = (?)",
-        )
-        .bind(secrets.pocket_consumer_key)
-        .bind(secrets.pocket_access_token)
-        .bind(DEFAULT_USER_ID)
-        .execute(&self.pool)
-        .await?;
-
-        Ok(())
-    }
-
     /// Comma delimited
     /// Columns: url, folder, title, note, tags, created
     /// url column is required, others are optional
@@ -288,7 +253,9 @@ impl DB {
         };
         let mut wtr = builder.has_headers(true).from_writer(wtr);
 
-        wtr.write_record(["id", "folder", "url", "title", "excerpt", "note", "tags", "created"])?;
+        wtr.write_record([
+            "id", "folder", "url", "title", "excerpt", "note", "tags", "created",
+        ])?;
 
         let items = self.get_all_items(None).await?;
         for item in items {

@@ -17,7 +17,7 @@ pub struct CliArgs {
 
 #[derive(Subcommand)]
 pub enum Subcommands {
-    /// Pocket related actions
+    /// Retired Pocket commands; retained only to provide a migration warning
     Pocket {
         #[clap(subcommand)]
         command: PocketCommands,
@@ -29,7 +29,7 @@ pub enum Subcommands {
         command: LocalCommands,
     },
 
-    /// Gets all data from authenticated providers
+    /// Retired Pocket fetch alias; retained only to provide a migration warning
     Fetch {
         /// Limit the maximum number of items to fetch for each provider
         #[arg(short, long)]
@@ -116,69 +116,19 @@ pub enum Subcommands {
     Notes(NotesArgs),
 }
 
-#[derive(Args)]
-pub struct AuthArgs {
-    /// Consumer key (https://getpocket.com/developer/apps/new)
-    #[arg(short, long, env = "POCKET_CONSUMER_KEY", required = true)]
-    pub key: String,
-}
-
-#[derive(Args)]
-pub struct FetchArgs {
-    /// Pocket Consumer key
-    #[arg(long, env = "POCKET_CONSUMER_KEY", required = true)]
-    pub key: String,
-
-    /// Pocket Access token
-    #[arg(long, env = "POCKET_ACCESS_TOKEN", required = true)]
-    pub access: String,
-
-    /// Limit the maximum number of items to fetch
-    #[arg(short, long)]
-    pub limit: Option<usize>,
-}
-
 #[derive(Subcommand)]
 pub enum PocketCommands {
-    /// Authenticate using a consumer key
-    Auth(AuthArgs),
+    /// Retired: Pocket authentication is disabled
+    Auth,
 
-    /// Fetch items from pocket
-    Fetch(FetchArgs),
+    /// Retired: Pocket fetching is disabled
+    Fetch,
 
-    /// Add an item to pocket
-    Add(PocketAddArgs),
+    /// Retired: Pocket mutations are disabled
+    Add,
 
-    /// Mark an item as favorite in pocket
-    Favorite(PocketFavoriteArgs),
-}
-
-#[derive(Args)]
-pub struct PocketAddArgs {
-    #[clap(flatten)]
-    pub add_args: LocalAddArgs,
-
-    /// Pocket Consumer key
-    #[arg(long, env = "POCKET_CONSUMER_KEY")]
-    pub key: Option<String>,
-
-    /// Pocket Access token
-    #[arg(long, env = "POCKET_ACCESS_TOKEN")]
-    pub access: Option<String>,
-}
-
-#[derive(Args)]
-pub struct PocketFavoriteArgs {
-    #[clap(flatten)]
-    pub fav_args: LocalFavoriteArgs,
-
-    /// Pocket Consumer key
-    #[arg(long, env = "POCKET_CONSUMER_KEY")]
-    pub key: Option<String>,
-
-    /// Pocket Access token
-    #[arg(long, env = "POCKET_ACCESS_TOKEN")]
-    pub access: Option<String>,
+    /// Retired: Pocket mutations are disabled
+    Favorite,
 }
 
 #[derive(Args)]

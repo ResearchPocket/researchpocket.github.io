@@ -100,7 +100,7 @@ To get started with developing ResearchPocket, follow these steps:
 
 ### Prerequisites
 
-- Rust (latest stable version)
+- Rust 1.97.0 (the repository toolchain file installs it through rustup)
 - Cargo (comes with Rust)
 - SQLite
 
@@ -122,8 +122,23 @@ To get started with developing ResearchPocket, follow these steps:
 
 4. Install dependencies:
    ```sh
-   cargo build
+   cargo build --locked
    ```
+
+### Required local checks
+
+Run the same focused gates used by pull-request CI:
+
+```sh
+cargo fmt --all -- --check
+cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+cargo test --locked --workspace --all-targets --all-features
+cargo audit --deny warnings
+```
+
+Add tests only for durable behavior boundaries such as privacy, migration, or
+cross-runtime convergence. Avoid tests that merely mirror implementation
+details.
 
 ### Running the Application
 
