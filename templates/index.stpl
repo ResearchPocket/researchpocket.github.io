@@ -40,7 +40,7 @@
               </a>
               <p class="text-sm text-gray-500 mt-1"><%=&item.excerpt%></p>
               <div class="mt-2 text-xs text-gray-400">
-                <%=&item.format_time_added(TIMEZONE.read().unwrap().clone())%>
+                <%=&item.format_time_added(*TIMEZONE.read().unwrap())%>
                 <span class="mx-1">·</span>
                 <%=
                   match item.uri.split('/').nth(2) {
@@ -53,7 +53,7 @@
             <% if !tags.is_empty() { %>
             <div class="flex flex-col items-end gap-1">
               <% for tag in tags { %>
-              <span class="text-xs px-2 py-0.5 text-gray-500"><%= tag.tag_name %></span>
+              <span class="text-xs px-2 py-0.5 text-gray-500"><%= tag %></span>
               <% } %>
             </div>
             <% } %>

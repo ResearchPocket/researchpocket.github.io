@@ -1,8 +1,9 @@
+use sha2::{Digest, Sha256};
+use std::env;
 use std::fs::File;
 use std::io::Write;
 use std::path::{self, Path};
 use std::process::Command;
-use std::{env, io};
 
 pub async fn build_css(
     output_dir: &Path,
@@ -57,32 +58,47 @@ pub async fn download_tailwind_binary(
     binary_path: &path::Path,
     major_version: u8,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let double = match (env::consts::OS, env::consts::ARCH) {
-        ("linux", "x86_64") => "linux-x64",
-        ("linux", "aarch64") => "linux-arm64",
-        ("linux", "arm") => "linux-armv7",
-        ("macos", "x86_64") => "macos-x64",
-        ("macos", "aarch64") => "macos-arm64",
-        ("windows", "x86_64") => "windows-x64.exe",
-        ("windows", "aarch64") => "windows-arm64.exe",
-        _ => "linux-x64",
+    let (target, expected_sha256) = match (env::consts::OS, env::consts::ARCH) {
+        ("linux", "x86_64") => (
+            "linux-x64",
+            "5036c4fb4328e0bcdbb6065c70d8ac9452e0d4c947113a788a8f94fd390425c1",
+        ),
+        ("linux", "aarch64") => (
+            "linux-arm64",
+            "394ddccc2402cfa3abd97dfba56f3587781a3d6e6ce66e65ceada14beb7664b8",
+        ),
+        ("macos", "x86_64") => (
+            "macos-x64",
+            "cef8f110471e889c3c4409055cf8aff33076f58a081867b0dfc6534b290bfbb0",
+        ),
+        ("macos", "aarch64") => (
+            "macos-arm64",
+            "b800b0659dc64b9f03ede5660244d9415d777d5739ae2889280877ca37be742a",
+        ),
+        ("windows", "x86_64") => (
+            "windows-x64.exe",
+            "224a62a8351d3b8da9d950a4eb1d7176dc901dc4735b47f816f3dfcbc67d8654",
+        ),
+        (os, arch) => {
+            return Err(format!("Tailwind does not publish a binary for {os}/{arch}").into())
+        }
     };
-    let binary_path = binary_path.join("tailwindcss");
-    // tested versions that i'm sure will work
     let version_tag = match major_version {
-        4 => "v4.0.7",
+        4 => "v4.3.2",
         _ => return Err(format!("Unsupported Tailwind major version: {major_version}").into()),
     };
+    let binary_path = binary_path.join(format!("tailwindcss-{version_tag}-{target}"));
     if !binary_path.exists() {
         eprintln!("Downloading Tailwind {version_tag} binary to {binary_path:?}");
         let url = format!(
-            "https://github.com/tailwindlabs/tailwindcss/releases/download/{version_tag}/tailwindcss-{double}"
+            "https://github.com/tailwindlabs/tailwindcss/releases/download/{version_tag}/tailwindcss-{target}"
         );
         let response = reqwest::get(&url).await?;
         if response.status().is_success() {
+            let content = response.bytes().await?;
+            verify_sha256(&content, expected_sha256)?;
             let mut file = File::create(&binary_path)?;
-            let mut content = io::Cursor::new(response.bytes().await?);
-            io::copy(&mut content, &mut file)?;
+            file.write_all(&content)?;
 
             // On non-Windows platforms, we need to mark the file as executable
             #[cfg(target_family = "unix")]
@@ -93,14 +109,29 @@ pub async fn download_tailwind_binary(
             }
         } else {
             return Err(format!(
-                "Failed to download Tailwind {version_tag} for {double}: {}",
+                "Failed to download Tailwind {version_tag} for {target}: {}",
                 response.status()
             )
             .into());
         }
     } else {
+        verify_sha256(&std::fs::read(&binary_path)?, expected_sha256)?;
         eprintln!("Tailwind binary already exists at {binary_path:?}");
     }
 
     Ok(binary_path.to_str().unwrap().to_owned())
+}
+
+fn verify_sha256(bytes: &[u8], expected: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let actual = Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    if actual != expected {
+        return Err(format!(
+            "Tailwind binary checksum mismatch: expected {expected}, received {actual}"
+        )
+        .into());
+    }
+    Ok(())
 }

@@ -1,19 +1,17 @@
 use crate::assets::css::build_css;
-use crate::provider::{Insertable, OnlineProvider, ProviderPocket};
+use crate::provider::Insertable;
 use chrono_tz::Tz;
 use clap::Parser;
-use cli::{
-    AuthArgs, CliArgs, FetchArgs, LocalAddArgs, LocalCommands, LocalFavoriteArgs, NotesArgs,
-    PocketAddArgs, PocketCommands, PocketFavoriteArgs, Subcommands,
-};
+use cli::{CliArgs, LocalAddArgs, LocalCommands, LocalFavoriteArgs, NotesArgs, Subcommands};
 use db::{ResearchItem, Tags, DB};
 use provider::local::LocalItem;
 use site::Site;
 use sqlx::migrate::MigrateDatabase;
 use std::env;
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use tokio::fs::{create_dir, metadata, read_to_string, File};
+use tokio::fs::{create_dir_all, metadata, read_to_string, File};
 use tokio::io::AsyncWriteExt;
 use util::absolute_path;
 
@@ -30,13 +28,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli_args = CliArgs::parse();
 
     match &cli_args.subcommand {
-        Some(Subcommands::Pocket { command }) => {
-            handle_pocket_command(command, &cli_args).await?
+        Some(Subcommands::Pocket { .. }) | Some(Subcommands::Fetch { .. }) => {
+            return Err("Mozilla retired Pocket and its API. ResearchPocket has disabled every Pocket network command to protect existing V1 data. Local list, export, and static generation remain available.".into());
         }
         Some(Subcommands::Local { command }) => {
             handle_local_command(command, &cli_args).await?
         }
-        Some(Subcommands::Fetch { limit }) => handle_fetch_command(&cli_args, *limit).await?,
         Some(Subcommands::List {
             tags,
             limit,
@@ -89,11 +86,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Some(Subcommands::Notes(NotesArgs { url, notes })) => {
             let db = DB::init(&cli_args.db).await.map_err(handle_db_error)?;
-            if db.get_item_id(&url).await?.is_none() {
+            if db.get_item_id(url).await?.is_none() {
                 eprintln!("Item with URL {} not found in the database", url);
                 return Ok(());
             }
-            db.update_notes(&url, &notes).await?;
+            db.update_notes(url, notes).await?;
             println!("Notes updated successfully!");
         }
         None => {
@@ -138,7 +135,6 @@ async fn handle_local_command(
                         .map_or(metadata.description, |excerpt| excerpt.clone()),
                 ),
                 time_added: chrono::Utc::now().timestamp(),
-                tags: tags.clone(),
             };
 
             db.insert_item(local_item.to_research_item(), &tags, provider_id)
@@ -161,130 +157,6 @@ async fn handle_local_command(
             println!("Item marked as favorite: {mark}");
         }
     }
-    Ok(())
-}
-
-async fn handle_pocket_command(
-    pocket_command: &PocketCommands,
-    cli_args: &CliArgs,
-) -> Result<(), Box<dyn std::error::Error>> {
-    match pocket_command {
-        PocketCommands::Auth(AuthArgs { key }) => {
-            let db = DB::init(&cli_args.db).await.map_err(handle_db_error)?;
-
-            let provider = ProviderPocket {
-                consumer_key: key.to_string(),
-                ..Default::default()
-            };
-            let secrets = provider.authenticate().await?;
-            db.set_secret(secrets).await?;
-            println!("Success: Access token saved to the database! You can now run `pocket fetch` to fetch items from Pocket.")
-        }
-        PocketCommands::Fetch(FetchArgs { key, access, limit }) => {
-            // Handle fetching items from Pocket with the provided keys
-            fetch_from_pocket(&cli_args.db, key.to_string(), access.to_string(), *limit)
-                .await?;
-        }
-        PocketCommands::Add(PocketAddArgs {
-            add_args: LocalAddArgs { uri, tag, .. },
-            key,
-            access,
-        }) => {
-            // Handle adding an item to Pocket with the provided URI and tags
-            let db = DB::init(&cli_args.db).await.map_err(handle_db_error)?;
-            let secrets = db.get_secrets().await?;
-            let consumer_key = secrets.pocket_consumer_key.or(key.clone()).expect(
-                "Consumer key not found in the database, consider generating one from https://getpocket.com/developer/apps/new and running `pocket auth`",
-            );
-            let access_token = secrets.pocket_access_token.or(access.clone()).expect(
-                "Access token not found in the database, consider running 'pocket auth'",
-            );
-            let provider = ProviderPocket {
-                consumer_key,
-                access_token: Some(access_token),
-                ..Default::default()
-            };
-            let item_id = provider
-                .add_item(
-                    uri,
-                    tag.as_ref().map_or(Vec::new(), |tags| {
-                        tags.iter().map(|tag| tag.as_str()).collect()
-                    }),
-                )
-                .await?;
-
-            // add item to db
-            let tags: Vec<Tags> = tag.as_ref().map_or(Vec::new(), |tags| {
-                tags.iter()
-                    .map(|tag| Tags {
-                        tag_name: tag.clone(),
-                    })
-                    .collect()
-            });
-
-            println!("Saving item to database");
-            let metadata = handler::fetch_metadata(uri).await?;
-            let insertable_item = ResearchItem {
-                id: item_id,
-                uri: uri.to_string(),
-                title: metadata.title,
-                excerpt: metadata.description,
-                time_added: chrono::Utc::now().timestamp(),
-                favorite: false,
-                lang: None,
-                notes: None,
-            };
-            let provider_id = db.get_provider_id("pocket").await?;
-            println!("Item: {insertable_item:?}");
-            db.insert_item(insertable_item, &tags, provider_id).await?;
-        }
-        PocketCommands::Favorite(PocketFavoriteArgs {
-            fav_args:
-                LocalFavoriteArgs {
-                    uri,
-                    mark: favorite,
-                },
-            access,
-            key,
-        }) => {
-            // Handle adding an item to Pocket with the provided URI and tags
-            let db = DB::init(&cli_args.db).await.map_err(handle_db_error)?;
-            let secrets = db.get_secrets().await?;
-            let consumer_key = secrets.pocket_consumer_key.or(key.clone()).expect(
-                "Consumer key not found in the database, consider generating one from https://getpocket.com/developer/apps/new and running `pocket auth`",
-            );
-            let access_token = secrets.pocket_access_token.or(access.clone()).expect(
-                "Access token not found in the database, consider running 'pocket auth'",
-            );
-            let provider = ProviderPocket {
-                consumer_key,
-                access_token: Some(access_token),
-                ..Default::default()
-            };
-            let item_id = db
-                .get_item_id(uri)
-                .await?
-                .expect("Item uri not found in the database");
-            provider.mark_as_favorite(item_id, *favorite).await?;
-            db.mark_as_favorite(item_id, *favorite).await?;
-            println!("Item marked as favorite: {favorite}");
-        }
-    }
-    Ok(())
-}
-
-async fn handle_fetch_command(
-    cli_args: &CliArgs,
-    limit: Option<usize>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    // Handle fetching data from authenticated providers
-    let db = DB::init(&cli_args.db).await.map_err(handle_db_error)?;
-    let secrets = db.get_secrets().await?;
-    let consumer_key = secrets.pocket_consumer_key.expect("Consumer key not found in the database, consider generating one from https://getpocket.com/developer/apps/new and running `pocket auth`");
-    let access_token = secrets
-        .pocket_access_token
-        .expect("Access token not found in the database, consider running 'pocket auth'");
-    fetch_from_pocket(&cli_args.db, consumer_key, access_token, limit).await?;
     Ok(())
 }
 
@@ -347,6 +219,9 @@ async fn handle_generate_command(
     timezone: Option<Tz>,
     cli_args: &CliArgs,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    eprintln!(
+        "Warning: V1 static generation is deprecated. Generated pages are public and intentionally exclude private notes, credentials, internal IDs, and language metadata."
+    );
     // Handle generating a static site with the provided options
     metadata(&assets_dir)
         .await
@@ -359,8 +234,9 @@ async fn handle_generate_command(
     }
 
     let output_dir = Path::new(output_dir);
+    validate_publish_output(output_dir, &cli_args.db)?;
     if !output_dir.exists() {
-        create_dir(output_dir).await?;
+        create_dir_all(output_dir).await?;
     }
 
     let db = DB::init(&cli_args.db).await.map_err(handle_db_error)?;
@@ -393,37 +269,95 @@ async fn handle_generate_command(
         .write_all(read_to_string(&search_js).await?.as_bytes())
         .await?;
 
+    validate_publish_output(output_dir, &cli_args.db)?;
+
     Ok(())
 }
 
-async fn fetch_from_pocket(
-    db_url: &str,
-    consumer_key: String,
-    access_token: String,
-    limit: Option<usize>,
+fn validate_publish_output(
+    output_dir: &Path,
+    database_url: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let provider = ProviderPocket {
-        consumer_key,
-        access_token: Some(access_token),
-        ..Default::default()
-    };
+    let current_dir = fs::canonicalize(env::current_dir()?)?;
+    let output_dir = canonical_or_absolute(output_dir, &current_dir)?;
 
-    let db = DB::init(db_url).await?;
-    println!("Sqlite version: {}", db.get_sqlite_version().await?);
+    if output_dir == current_dir || current_dir.starts_with(&output_dir) {
+        return Err(
+            "Static output must be a dedicated directory, not the project root or its parent"
+                .into(),
+        );
+    }
 
-    let provider_id = db.get_provider_id("pocket").await?;
-    let items = provider.fetch_items(limit).await?;
-    eprintln!("Items: {}", items.len());
+    let database_path = database_url
+        .strip_prefix("sqlite://")
+        .or_else(|| database_url.strip_prefix("sqlite:"))
+        .unwrap_or(database_url);
+    let database_path = canonical_or_absolute(Path::new(database_path), &current_dir)?;
+    if database_path.starts_with(&output_dir) {
+        return Err(
+            "Refusing to generate a public site around the operational SQLite database".into(),
+        );
+    }
 
-    for item in items {
-        let insertable_item = item.to_research_item();
-        let tags = item.to_tags();
-        let title = &insertable_item.title.chars().take(8).collect::<String>();
-        eprint!("{:?} ", title);
-        db.insert_item(insertable_item, &tags, provider_id).await?;
+    if !output_dir.exists() {
+        return Ok(());
+    }
+
+    let mut pending = vec![output_dir.clone()];
+    while let Some(directory) = pending.pop() {
+        for entry in fs::read_dir(&directory)? {
+            let entry = entry?;
+            let path = entry.path();
+            let relative = path.strip_prefix(&output_dir)?;
+            let file_type = entry.file_type()?;
+            if file_type.is_symlink() {
+                return Err(format!(
+                    "Static output cannot contain symbolic links: {}",
+                    path.display()
+                )
+                .into());
+            }
+            if file_type.is_dir() {
+                if relative != Path::new("assets") {
+                    return Err(format!(
+                        "Static output is not dedicated: unexpected directory {}",
+                        path.display()
+                    )
+                    .into());
+                }
+                pending.push(path);
+                continue;
+            }
+
+            let allowed = matches!(
+                relative.to_str(),
+                Some("index.html" | "search.html" | "assets/dist.css" | "assets/search.js")
+            );
+            if !allowed {
+                return Err(format!(
+                    "Static output is not dedicated: refusing to publish {}",
+                    path.display()
+                )
+                .into());
+            }
+        }
     }
 
     Ok(())
+}
+
+fn canonical_or_absolute(
+    path: &Path,
+    current_dir: &Path,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    if path.exists() {
+        return Ok(fs::canonicalize(path)?);
+    }
+
+    let absolute = absolute_path(current_dir, path);
+    let parent = absolute.parent().ok_or("Path has no parent directory")?;
+    let name = absolute.file_name().ok_or("Path has no final component")?;
+    Ok(fs::canonicalize(parent)?.join(name))
 }
 
 fn handle_db_error(err: sqlx::Error) -> sqlx::Error {

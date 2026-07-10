@@ -1,9 +1,6 @@
-use crate::db::{ResearchItem, Tags};
+use crate::db::ResearchItem;
 
-use super::{Insertable, Provider};
-
-#[derive(Debug, Default)]
-pub struct ProviderLocal;
+use super::Insertable;
 
 pub struct LocalItem {
     // shouldn't be needed for local items
@@ -12,11 +9,6 @@ pub struct LocalItem {
     pub title: Option<String>,
     pub excerpt: Option<String>,
     pub time_added: i64,
-    pub tags: Vec<Tags>,
-}
-
-impl Provider for ProviderLocal {
-    type Item = LocalItem;
 }
 
 impl Insertable for LocalItem {
@@ -31,9 +23,5 @@ impl Insertable for LocalItem {
             lang: Some("en".into()),
             notes: None,
         }
-    }
-
-    fn to_tags(&self) -> Vec<crate::db::Tags> {
-        self.tags.clone()
     }
 }

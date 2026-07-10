@@ -250,10 +250,11 @@ Run the smallest relevant checks while iterating and the complete applicable set
 before review. The current Rust baseline is:
 
 ```sh
-cargo fmt --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test --all-targets --all-features
-cargo build --release
+cargo fmt --all -- --check
+cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+cargo test --locked --workspace --all-targets --all-features
+cargo audit --deny warnings
+cargo build --locked --release
 ```
 
 Once the V2 workspace and web package land, the repository-wide gates also
@@ -262,12 +263,14 @@ locked install, lint, unit test, browser test, and production build commands.
 Document the exact commands in the root README and CI rather than relying on
 developer-global tooling.
 
-Some baseline gates may fail before their dedicated foundation issues are
-completed. Track each known failure in Project #2 before enforcing that gate in
-CI. Do not hide, ignore, or weaken a new failure, and do not expand an unrelated
-change merely to repair pre-existing debt.
+Tests are deliberately sparse and contract-focused. Add a test only when it
+protects essential behavior that would be expensive, unsafe, or difficult to
+verify manually. Prefer one representative scenario at the highest useful
+boundary; do not repeat the same assertion across unit, integration, browser,
+and end-to-end layers. Do not add tests for trivial accessors, framework wiring,
+or implementation details.
 
-Required coverage for the affected subsystem includes:
+Depending on the risk being changed, choose the smallest relevant scenario from:
 
 - randomized two-to-five-client convergence with reordered, duplicated,
   delayed, and partitioned updates;
@@ -286,6 +289,10 @@ Required coverage for the affected subsystem includes:
 - local and hosted web end-to-end tests, TUI interaction tests, and supported
   Linux/macOS/Windows CLI checks.
 
+This is a risk catalog, not a requirement to exercise every item for every
+feature. A change should normally add no test unless it establishes or modifies
+one of these durable contracts.
+
 ## Definition of Done
 
 A change is done only when:
@@ -294,8 +301,8 @@ A change is done only when:
 - code follows the boundaries and invariants above without duplicating domain
   logic in an interface or transport;
 - migrations and protocol changes are compatible, recoverable, and documented;
-- relevant unit, integration, convergence, security, privacy, and end-to-end
-  tests pass, with any pre-existing baseline exception linked to an issue;
+- the smallest relevant contract tests pass without duplicating coverage across
+  layers;
 - user-facing CLI/API/schema and operational documentation are updated;
 - no credential, private field, raw database, or unsafe generated artifact is
   introduced;

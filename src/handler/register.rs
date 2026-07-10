@@ -1,7 +1,11 @@
 use std::env;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::fs::File;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::io::Write;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::path::PathBuf;
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 use std::process::Command;
 
 pub fn platform_register_url() {
@@ -22,10 +26,32 @@ fn register_windows() {
     let executable_path_str = executable_path.to_str().unwrap();
     let reg_cmd = format!("{} handle --url \"%1\"", executable_path_str);
     let commands = vec![
-        vec!["REG", "ADD", "HKEY_CLASSES_ROOT\\research", "/ve", "/d", "Research Pocket Url Handler", "/f"],
-        vec!["REG", "ADD", "HKEY_CLASSES_ROOT\\research", "/v", "URL Protocol", "/d", "", "/f"],
+        vec![
+            "REG",
+            "ADD",
+            "HKEY_CLASSES_ROOT\\research",
+            "/ve",
+            "/d",
+            "Research Pocket Url Handler",
+            "/f",
+        ],
+        vec![
+            "REG",
+            "ADD",
+            "HKEY_CLASSES_ROOT\\research",
+            "/v",
+            "URL Protocol",
+            "/d",
+            "",
+            "/f",
+        ],
         vec!["REG", "ADD", "HKEY_CLASSES_ROOT\\research\\shell", "/f"],
-        vec!["REG", "ADD", "HKEY_CLASSES_ROOT\\research\\shell\\open", "/f"],
+        vec![
+            "REG",
+            "ADD",
+            "HKEY_CLASSES_ROOT\\research\\shell\\open",
+            "/f",
+        ],
         vec![
             "REG",
             "ADD",
@@ -57,7 +83,7 @@ fn register_windows() {
 
     #[cfg(target_os = "windows")]
     {
-        use winrt_notification::{Duration, Toast};
+        use tauri_winrt_notification::{Duration, Toast};
         Toast::new(Toast::POWERSHELL_APP_ID)
             .title("ResearchPocket Handler")
             .text1("Handler registered!")

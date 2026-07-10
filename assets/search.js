@@ -1,5 +1,5 @@
 /// <reference types="./types.d.ts" />
-import Fuse from "https://cdn.jsdelivr.net/npm/fuse.js@7.0.0/dist/fuse.mjs";
+import Fuse from "https://cdn.jsdelivr.net/npm/fuse.js@7.4.2/dist/fuse.mjs";
 
 const options = {
   includeScore: true,
@@ -39,7 +39,7 @@ function renderResults(items) {
     clone.querySelector("a").href = item.uri;
     clone.querySelector("h3").textContent = item.title;
     clone.querySelector("p").textContent = item.excerpt || "No excerpt available";
-    clone.querySelector(".time-added").textContent = new Date(item.time_added).toLocaleDateString();
+    clone.querySelector(".time-added").textContent = new Date(item.time_added * 1000).toLocaleDateString();
 
     const domain = item.uri.split('/')[2];
     clone.querySelector(".domain").textContent = domain || item.uri.slice(0, 10);
