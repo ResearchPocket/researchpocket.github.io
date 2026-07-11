@@ -1,0 +1,30 @@
+{
+  "name": "research-pocket-web",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "npm run wasm && vite",
+    "wasm": "node ./scripts/build-wasm.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test src/data/db.test.mjs",
+    "build": "npm run wasm && npm run typecheck && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "idb": "8.0.3",
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.3",
+    "fake-indexeddb": "6.2.5",
+    "typescript": "7.0.2",
+    "vite": "8.1.4"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}

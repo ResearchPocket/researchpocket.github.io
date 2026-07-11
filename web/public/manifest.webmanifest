@@ -1,0 +1,11 @@
+{
+  "name": "ResearchPocket",
+  "short_name": "ResearchPocket",
+  "description": "A private, offline-first home for the links you want to keep.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f2efe8",
+  "theme_color": "#f2efe8"
+}

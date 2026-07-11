@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use chrono::{DateTime, FixedOffset};
 use loro::VersionVector;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -100,11 +101,7 @@ impl UpdateEnvelope {
                 actual: path.to_owned(),
             });
         }
-        if self.created_at.trim().is_empty() {
-            return Err(DomainError::InvalidState(
-                "envelope creation time cannot be blank".into(),
-            ));
-        }
+        validate_timestamp(&self.created_at)?;
         for (peer, counter) in &self.causal_frontier {
             if peer.parse::<u64>().is_err() || *counter < 0 {
                 return Err(DomainError::InvalidState(format!(
@@ -142,6 +139,17 @@ impl UpdateEnvelope {
         }
         Ok(payload)
     }
+}
+
+fn validate_timestamp(value: &str) -> DomainResult<()> {
+    let parsed: DateTime<FixedOffset> = DateTime::parse_from_rfc3339(value)
+        .map_err(|_| DomainError::InvalidState("invalid operation creation time".into()))?;
+    if parsed.offset().local_minus_utc() != 0 {
+        return Err(DomainError::InvalidState(
+            "operation creation time is not in UTC".into(),
+        ));
+    }
+    Ok(())
 }
 
 const fn default_domain_schema_version() -> u16 {

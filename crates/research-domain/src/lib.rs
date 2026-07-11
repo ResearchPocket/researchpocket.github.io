@@ -8,6 +8,8 @@ mod envelope;
 mod genesis;
 mod identity;
 mod projection;
+#[cfg(target_arch = "wasm32")]
+mod wasm;
 
 pub use document::{DomainError, DomainResult, ItemSeed, Library, validate_item_url};
 pub use envelope::{DOMAIN_SCHEMA_VERSION, LORO_CODEC, PROTOCOL_VERSION, UpdateEnvelope};
@@ -15,6 +17,10 @@ pub use genesis::{LibraryGenesis, SYNC_FORMAT};
 pub use projection::{
     CanonicalItem, CanonicalProjection, LifecycleRevision, LifecycleState, LifecycleView,
     ScalarRevision, ScalarView,
+};
+#[cfg(target_arch = "wasm32")]
+pub use wasm::{
+    apply_mutation, apply_remote_envelopes, initialize_library, materialize_library,
 };
 
 const ITEM_ID: &str = "0197f2b5-93d7-7ad4-8c67-21e98f0c7341";
