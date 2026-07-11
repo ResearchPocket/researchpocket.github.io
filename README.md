@@ -105,8 +105,10 @@ choose application values or require the owner to resolve library conflicts.
 ## Development
 
 The engineering and privacy contract is in [AGENTS.md](AGENTS.md), with the V2
-[product contract](docs/v2/PRODUCT.md), [privacy threat model](docs/v2/THREAT_MODEL.md),
-and [delivery roadmap](docs/v2/ROADMAP.md) alongside this CLI slice.
+[product contract](docs/v2/PRODUCT.md),
+[synchronization protocol](docs/v2/SYNC_PROTOCOL.md),
+[privacy threat model](docs/v2/THREAT_MODEL.md), and
+[delivery roadmap](docs/v2/ROADMAP.md) alongside this CLI slice.
 
 Use the smallest relevant verification while iterating. Tests are intentionally
 sparse and protect only essential persistence, migration, convergence, or privacy

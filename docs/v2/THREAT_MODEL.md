@@ -1,7 +1,9 @@
 # ResearchPocket V2 privacy threat model
 
 Status: security boundary for synchronization, hosted owner mode, and
-publication
+publication. The immutable paths, envelopes, retries, receipts, and version
+negotiation are specified by the
+[synchronization protocol](./SYNC_PROTOCOL.md).
 
 Last verified against GitHub and CSP documentation: 2026-07-11
 

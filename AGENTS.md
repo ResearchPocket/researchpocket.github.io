@@ -220,9 +220,12 @@ JavaScript, source maps, feeds, caches, or other output. Preview and deployed
 projection use the same code path. Publication provides static HTML, JSON, RSS,
 and JSON Feed; it is not a second editable database.
 
-The security decisions and residual risks for these surfaces are defined in
+The wire format, immutable repository layout, retries, checkpoints, and version
+negotiation are defined in
+[`docs/v2/SYNC_PROTOCOL.md`](docs/v2/SYNC_PROTOCOL.md). The security decisions
+and residual risks for these surfaces are defined in
 [`docs/v2/THREAT_MODEL.md`](docs/v2/THREAT_MODEL.md). Sync, hosted-editor, and
-publisher changes must preserve that boundary.
+publisher changes must preserve both contracts.
 
 ## Change Workflow
 
