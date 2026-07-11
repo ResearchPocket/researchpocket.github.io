@@ -4,6 +4,7 @@ use std::process::ExitCode;
 use cli::CliArgs;
 
 mod cli;
+mod sync;
 mod v2;
 
 #[tokio::main]

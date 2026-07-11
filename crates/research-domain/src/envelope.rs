@@ -5,7 +5,7 @@ use loro::VersionVector;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::{DomainError, DomainResult};
+use crate::{DomainError, DomainResult, identity::validate_uuid_v7};
 
 pub const PROTOCOL_VERSION: u8 = 1;
 pub const DOMAIN_SCHEMA_VERSION: u16 = 2;
@@ -43,12 +43,12 @@ impl UpdateEnvelope {
         causal_frontier: &VersionVector,
         created_at: &str,
         update: &[u8],
-    ) -> Self {
+    ) -> DomainResult<Self> {
         let causal_frontier = causal_frontier
             .iter()
             .map(|(peer, counter)| (peer.to_string(), *counter))
             .collect();
-        Self {
+        let envelope = Self {
             protocol_version: PROTOCOL_VERSION,
             domain_schema_version: DOMAIN_SCHEMA_VERSION,
             loro_codec: LORO_CODEC.to_owned(),
@@ -62,14 +62,61 @@ impl UpdateEnvelope {
             created_at: created_at.to_owned(),
             payload: STANDARD.encode(update),
             payload_sha256: sha256_hex(update),
-        }
+        };
+        envelope.validate_identity(library_id, &envelope.path())?;
+        Ok(envelope)
     }
 
     pub fn path(&self) -> String {
         format!("sync/v1/ops/{}/{}.json", self.device_id, self.sequence)
     }
 
+    pub fn validate_identity(&self, expected_library_id: &str, path: &str) -> DomainResult<()> {
+        validate_uuid_v7(&self.library_id, "library ID")?;
+        validate_uuid_v7(&self.device_id, "device ID")?;
+        validate_uuid_v7(expected_library_id, "expected library ID")?;
+        if self.library_id != expected_library_id {
+            return Err(DomainError::Integrity {
+                path: path.to_owned(),
+                expected: expected_library_id.to_owned(),
+                actual: self.library_id.clone(),
+            });
+        }
+        let valid_sequence = self.sequence.len() == 20
+            && self.sequence.bytes().all(|byte| byte.is_ascii_digit())
+            && self.sequence != "00000000000000000000"
+            && self.sequence.parse::<u64>().is_ok();
+        if !valid_sequence {
+            return Err(DomainError::InvalidState(format!(
+                "batch sequence {:?} is not a nonzero fixed-width decimal",
+                self.sequence
+            )));
+        }
+        let expected_path = self.path();
+        if path != expected_path {
+            return Err(DomainError::Integrity {
+                path: path.to_owned(),
+                expected: expected_path,
+                actual: path.to_owned(),
+            });
+        }
+        if self.created_at.trim().is_empty() {
+            return Err(DomainError::InvalidState(
+                "envelope creation time cannot be blank".into(),
+            ));
+        }
+        for (peer, counter) in &self.causal_frontier {
+            if peer.parse::<u64>().is_err() || *counter < 0 {
+                return Err(DomainError::InvalidState(format!(
+                    "invalid causal frontier entry {peer:?}"
+                )));
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn verified_payload(&self) -> DomainResult<Vec<u8>> {
+        self.validate_identity(&self.library_id, &self.path())?;
         if self.protocol_version != PROTOCOL_VERSION {
             return Err(DomainError::UnsupportedProtocol(self.protocol_version));
         }

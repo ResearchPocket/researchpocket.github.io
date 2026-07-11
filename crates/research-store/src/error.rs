@@ -32,4 +32,10 @@ pub enum StoreError {
     NoChanges,
     #[error("invalid mutation input: {0}")]
     InvalidInput(String),
+    #[error("synchronization is not configured")]
+    SyncNotConfigured,
+    #[error("cannot adopt remote library {0}: the local library is not pristine")]
+    SyncLibraryMismatch(String),
+    #[error("synchronization integrity failure: {0}")]
+    SyncIntegrity(String),
 }

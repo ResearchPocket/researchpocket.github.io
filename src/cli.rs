@@ -64,6 +64,12 @@ pub enum Commands {
     /// Search URLs, authored fields, private notes, and tags
     Search(SearchArgs),
 
+    /// Connect and synchronize through a private GitHub repository
+    Sync {
+        #[command(subcommand)]
+        command: SyncCommands,
+    },
+
     /// Show local library, import, outbox, and sync state
     Status,
 }
@@ -216,7 +222,34 @@ pub struct SearchArgs {
     pub filters: ListArgs,
 }
 
-#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+#[derive(Subcommand)]
+pub enum SyncCommands {
+    /// Connect this library to an existing private GitHub repository and sync now
+    Connect(SyncConnectArgs),
+
+    /// Pull, apply, and upload immutable updates
+    Run(SyncRunArgs),
+}
+
+#[derive(Args)]
+pub struct SyncConnectArgs {
+    /// Private GitHub repository written as OWNER/NAME
+    #[arg(value_name = "OWNER/NAME")]
+    pub repository: String,
+
+    /// Repository branch; defaults to the repository's default branch
+    #[arg(long)]
+    pub branch: Option<String>,
+}
+
+#[derive(Args)]
+pub struct SyncRunArgs {
+    /// Repeat in the foreground at this interval; use NDJSON for machine output
+    #[arg(long, value_name = "SECONDS", value_parser = parse_sync_interval)]
+    pub every: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
 #[value(rename_all = "lower")]
 pub enum OutputFormat {
     #[default]
@@ -233,4 +266,14 @@ fn parse_limit(value: &str) -> Result<usize, String> {
         return Err("limit must be between 1 and 10000".to_owned());
     }
     Ok(limit)
+}
+
+fn parse_sync_interval(value: &str) -> Result<u64, String> {
+    let seconds = value
+        .parse::<u64>()
+        .map_err(|_| "sync interval must be an integer".to_owned())?;
+    if !(15..=86_400).contains(&seconds) {
+        return Err("sync interval must be between 15 and 86400 seconds".to_owned());
+    }
+    Ok(seconds)
 }

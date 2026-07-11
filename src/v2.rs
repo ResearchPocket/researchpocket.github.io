@@ -1,6 +1,7 @@
 use std::error::Error;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use directories::ProjectDirs;
 use research_store::{
@@ -9,7 +10,8 @@ use research_store::{
 use serde::Serialize;
 use serde_json::{Value, json};
 
-use crate::cli::{CliArgs, Commands, ImportCommands, OutputFormat};
+use crate::cli::{CliArgs, Commands, ImportCommands, OutputFormat, SyncCommands};
+use crate::sync;
 
 type CliResult<T> = Result<T, Box<dyn Error>>;
 
@@ -116,8 +118,89 @@ pub async fn handle(args: &CliArgs) -> CliResult<()> {
             let output = command_output("search", result)?;
             write_search(args.format, &output)
         }
+        Commands::Sync { command } => handle_sync(&data_dir, args.format, command).await,
         Commands::Status => handle_status(&data_dir, args.format).await,
     }
+}
+
+async fn handle_sync(
+    data_dir: &Path,
+    format: OutputFormat,
+    command: &SyncCommands,
+) -> CliResult<()> {
+    let store = V2Store::open(data_dir).await?;
+    match command {
+        SyncCommands::Connect(connect) => {
+            let result =
+                sync::connect(&store, &connect.repository, connect.branch.as_deref()).await?;
+            let output = command_output("sync_connect", result)?;
+            write_single(format, &output, human_sync_connect)
+        }
+        SyncCommands::Run(run) => {
+            if run.every.is_some() && format == OutputFormat::Json {
+                return Err(io::Error::other(
+                    "--every produces a stream; use --format ndjson or human output",
+                )
+                .into());
+            }
+            let Some(seconds) = run.every else {
+                let result = sync::run_once(&store).await?;
+                let output = command_output("sync_run", result)?;
+                return write_single(format, &output, human_sync_run);
+            };
+            loop {
+                let retry_after = match sync::run_once(&store).await {
+                    Ok(result) => {
+                        let output = command_output("sync_run", result)?;
+                        write_single(format, &output, human_sync_run)?;
+                        None
+                    }
+                    Err(error) if error.is_retryable() => {
+                        write_sync_retry(format, &error)?;
+                        error.retry_after()
+                    }
+                    Err(error) => return Err(error.into()),
+                };
+                let delay = retry_after
+                    .map(|retry_after| retry_after.max(Duration::from_secs(seconds)))
+                    .unwrap_or_else(|| Duration::from_secs(seconds));
+                tokio::select! {
+                    result = tokio::signal::ctrl_c() => {
+                        result?;
+                        return Ok(());
+                    }
+                    () = tokio::time::sleep(delay) => {}
+                }
+            }
+        }
+    }
+}
+
+fn write_sync_retry(format: OutputFormat, error: &sync::SyncError) -> CliResult<()> {
+    match format {
+        OutputFormat::Human => {
+            eprintln!("Synchronization will retry: {error}");
+        }
+        OutputFormat::Ndjson => {
+            write_json(
+                &json!({
+                    "schema_version": OUTPUT_SCHEMA_VERSION,
+                    "command": "sync_run",
+                    "type": "sync_error",
+                    "error_kind": error.kind(),
+                    "retryable": true
+                }),
+                false,
+            )?;
+        }
+        OutputFormat::Json => {
+            return Err(io::Error::other(
+                "periodic synchronization cannot emit one JSON document",
+            )
+            .into());
+        }
+    }
+    Ok(())
 }
 
 fn optional_text_update(value: &Option<String>, clear: bool) -> Option<OptionalTextUpdate> {
@@ -343,6 +426,43 @@ fn human_import(value: &Value) {
     print_bool(value, "source_unchanged", "Source unchanged");
 }
 
+fn human_sync_connect(value: &Value) {
+    println!("Connected private synchronization repository");
+    print_remote(value.get("remote"));
+    print_bool(value, "adopted_remote_library", "Adopted remote library");
+    if let Some(cycle) = value.get("cycle") {
+        print_sync_counts(cycle);
+    }
+}
+
+fn human_sync_run(value: &Value) {
+    println!("Synchronization complete");
+    print_remote(value.get("remote"));
+    print_sync_counts(value);
+}
+
+fn print_remote(remote: Option<&Value>) {
+    let Some(remote) = remote else {
+        return;
+    };
+    let owner = remote.get("owner").and_then(Value::as_str);
+    let repository = remote.get("repository").and_then(Value::as_str);
+    if let (Some(owner), Some(repository)) = (owner, repository) {
+        println!("Repository: {owner}/{repository}");
+    }
+    print_string(remote, "branch", "Branch");
+}
+
+fn print_sync_counts(value: &Value) {
+    print_number(value, "remote_batches_seen", "Remote batches observed");
+    print_number(value, "downloaded", "Downloaded");
+    print_number(value, "applied", "Applied");
+    print_number(value, "already_applied", "Already applied");
+    print_number(value, "acknowledged", "Acknowledged");
+    print_number(value, "uploaded", "Uploaded");
+    print_number(value, "pending", "Pending");
+}
+
 fn human_status(value: &Value) {
     let initialized = value
         .get("initialized")
@@ -363,6 +483,7 @@ fn human_status(value: &Value) {
     print_number(value, "active_items", "Active saves");
     print_number(value, "deleted_items", "Deleted saves");
     print_number(value, "pending_updates", "Pending updates");
+    print_number(value, "deferred_updates", "Deferred remote updates");
     let sync_state = value
         .get("sync")
         .and_then(|sync| sync.get("state"))
@@ -370,6 +491,11 @@ fn human_status(value: &Value) {
         .or_else(|| value.get("sync_state").and_then(Value::as_str));
     if let Some(state) = sync_state {
         println!("Sync: {state}");
+    }
+    if let Some(remote) = value.get("sync_remote") {
+        print_remote(Some(remote));
+        print_string(remote, "last_success_at", "Last successful sync");
+        print_string(remote, "last_error_kind", "Last sync error");
     }
 }
 
