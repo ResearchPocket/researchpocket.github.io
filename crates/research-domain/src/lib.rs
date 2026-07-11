@@ -7,7 +7,7 @@ mod document;
 mod envelope;
 mod projection;
 
-pub use document::{DomainError, DomainResult, ItemSeed, Library};
+pub use document::{DomainError, DomainResult, ItemSeed, Library, validate_item_url};
 pub use envelope::UpdateEnvelope;
 pub use projection::{
     CanonicalItem, CanonicalProjection, LifecycleRevision, LifecycleState, LifecycleView,

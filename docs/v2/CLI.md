@@ -6,6 +6,10 @@ The shipped CLI is the V2 surface:
 
 ```text
 research init
+research add <URL>
+research edit <ITEM_ID>
+research delete <ITEM_ID>
+research restore <ITEM_ID>
 research import v1 <SOURCE_DB>
 research list
 research status
@@ -49,6 +53,43 @@ research init
 Initialization creates a library and device identity, applies the V2 schema, and
 prints the resolved location. It is idempotent for an existing valid V2 library.
 It refuses to overwrite a nonempty directory that is not a V2 library.
+
+## Capture
+
+```sh
+research add https://example.com/article
+research add https://example.com/article \
+  --title "Worth reading" \
+  --excerpt "Human-authored context" \
+  --tag reading,rust \
+  --favorite \
+  --note "Come back to section three"
+```
+
+Capture is immediate and makes no network request. Only the URL is required.
+Title, excerpt, language, note, favorite state, tags, and an optional original
+`--saved-at <UNIX_SECONDS>` value are stored exactly as supplied. Saving the same
+URL twice creates two distinct items.
+
+## Edit and lifecycle
+
+Use the UUID shown by `research list`:
+
+```sh
+research edit "$ITEM_ID" --title "A deliberate title" --favorite true
+research edit "$ITEM_ID" --note "" --add-tag reviewed --remove-tag reading
+research edit "$ITEM_ID" --clear-title --clear-excerpt --clear-language
+research delete "$ITEM_ID"
+research restore "$ITEM_ID"
+```
+
+`--title ""`, `--excerpt ""`, and `--language ""` store explicit empty text;
+the corresponding `--clear-*` option stores absence. Tags retain exact spelling.
+An edit may change several fields but commits as one local mutation and one
+durable outbound batch. Delete is a recoverable lifecycle transition, not
+physical erasure. Repeating delete on an already deleted item, repeating restore
+on an active item, or submitting an empty edit fails without changing local
+state or the outbox.
 
 ## Import V1
 
@@ -98,6 +139,10 @@ Human output and machine data go to stdout. Progress, warnings, and import
 diagnostics go to stderr. Machine timestamps use RFC 3339 UTC. A top-level
 `schema_version` versions CLI output independently of library and synchronization
 protocol versions.
+
+Create, edit, delete, and restore JSON output use the same materialized item
+shape as list entries, plus top-level `schema_version` and `command` fields. They
+do not expose causal revisions, CRDT bytes, or transport payloads.
 
 JSON list output has one document:
 

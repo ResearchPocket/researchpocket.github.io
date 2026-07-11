@@ -3,7 +3,9 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use directories::ProjectDirs;
-use research_store::{ListQuery, V2Store};
+use research_store::{
+    CreateItemRequest, EditItemRequest, ListQuery, OptionalTextUpdate, V2Store,
+};
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -19,6 +21,54 @@ pub async fn handle(args: &CliArgs) -> CliResult<()> {
 
     match &args.command {
         Commands::Init => handle_init(&data_dir, args.format).await,
+        Commands::Add(add) => {
+            let store = V2Store::open(&data_dir).await?;
+            let item = store
+                .create_item(CreateItemRequest {
+                    url: add.url.clone(),
+                    title: add.title.clone(),
+                    excerpt: add.excerpt.clone(),
+                    favorite: add.favorite,
+                    language: add.language.clone(),
+                    saved_at: add.saved_at,
+                    note: add.note.clone().unwrap_or_default(),
+                    tags: add.tag.clone(),
+                })
+                .await?;
+            let output = command_output("add", item)?;
+            write_single(args.format, &output, human_add)
+        }
+        Commands::Edit(edit) => {
+            let store = V2Store::open(&data_dir).await?;
+            let item = store
+                .edit_item(EditItemRequest {
+                    item_id: edit.item_id.clone(),
+                    url: edit.url.clone(),
+                    title: optional_text_update(&edit.title, edit.clear_title),
+                    excerpt: optional_text_update(&edit.excerpt, edit.clear_excerpt),
+                    favorite: edit.favorite,
+                    language: optional_text_update(&edit.language, edit.clear_language),
+                    saved_at: edit.saved_at,
+                    note: edit.note.clone(),
+                    add_tags: edit.add_tag.clone(),
+                    remove_tags: edit.remove_tag.clone(),
+                })
+                .await?;
+            let output = command_output("edit", item)?;
+            write_single(args.format, &output, human_edit)
+        }
+        Commands::Delete(item) => {
+            let store = V2Store::open(&data_dir).await?;
+            let item = store.delete_item(&item.item_id).await?;
+            let output = command_output("delete", item)?;
+            write_single(args.format, &output, human_delete)
+        }
+        Commands::Restore(item) => {
+            let store = V2Store::open(&data_dir).await?;
+            let item = store.restore_item(&item.item_id).await?;
+            let output = command_output("restore", item)?;
+            write_single(args.format, &output, human_restore)
+        }
         Commands::Import {
             command: ImportCommands::V1(import),
         } => {
@@ -47,6 +97,14 @@ pub async fn handle(args: &CliArgs) -> CliResult<()> {
             write_list(args.format, &output)
         }
         Commands::Status => handle_status(&data_dir, args.format).await,
+    }
+}
+
+fn optional_text_update(value: &Option<String>, clear: bool) -> Option<OptionalTextUpdate> {
+    if clear {
+        Some(OptionalTextUpdate::Clear)
+    } else {
+        value.clone().map(OptionalTextUpdate::Set)
     }
 }
 
@@ -199,6 +257,31 @@ fn human_init(value: &Value) {
     print_string(value, "library_id", "Library");
     print_string(value, "data_dir", "Data directory");
     print_string(value, "database_path", "Database");
+}
+
+fn human_add(value: &Value) {
+    human_mutation("Saved", value);
+}
+
+fn human_edit(value: &Value) {
+    human_mutation("Updated", value);
+}
+
+fn human_delete(value: &Value) {
+    human_mutation("Deleted", value);
+}
+
+fn human_restore(value: &Value) {
+    human_mutation("Restored", value);
+}
+
+fn human_mutation(action: &str, value: &Value) {
+    println!("{action} item");
+    print_string(value, "id", "ID");
+    print_string(value, "url", "URL");
+    print_string(value, "title", "Title");
+    print_string(value, "saved_at", "Saved");
+    print_string(value, "state", "State");
 }
 
 fn human_import(value: &Value) {

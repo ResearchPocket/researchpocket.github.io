@@ -40,6 +40,18 @@ pub enum Commands {
     /// Initialize a V2 library in the platform data directory
     Init,
 
+    /// Save a URL immediately without network access
+    Add(AddArgs),
+
+    /// Edit one saved item by UUID
+    Edit(EditArgs),
+
+    /// Delete one saved item without erasing its history
+    Delete(ItemIdArgs),
+
+    /// Restore one deleted item
+    Restore(ItemIdArgs),
+
     /// Import data into the V2 library
     Import {
         #[command(subcommand)]
@@ -51,6 +63,100 @@ pub enum Commands {
 
     /// Show local library, import, outbox, and sync state
     Status,
+}
+
+#[derive(Args)]
+pub struct AddArgs {
+    /// Absolute HTTP(S) URL to save
+    pub url: String,
+
+    /// Optional title; an explicit empty string remains empty
+    #[arg(long)]
+    pub title: Option<String>,
+
+    /// Optional excerpt; an explicit empty string remains empty
+    #[arg(long)]
+    pub excerpt: Option<String>,
+
+    /// Optional language; an explicit empty string remains empty
+    #[arg(long)]
+    pub language: Option<String>,
+
+    /// Mark the new save as a favorite
+    #[arg(long)]
+    pub favorite: bool,
+
+    /// Private note text
+    #[arg(long)]
+    pub note: Option<String>,
+
+    /// Exact tag text; repeat or comma-separate
+    #[arg(short, long, value_delimiter = ',', num_args = 1..)]
+    pub tag: Vec<String>,
+
+    /// Original saved time as Unix seconds; defaults to now
+    #[arg(long, value_name = "UNIX_SECONDS")]
+    pub saved_at: Option<i64>,
+}
+
+#[derive(Args)]
+pub struct EditArgs {
+    /// UUID of the saved item
+    pub item_id: String,
+
+    /// Replace the URL
+    #[arg(long)]
+    pub url: Option<String>,
+
+    /// Set the title; an explicit empty string remains empty
+    #[arg(long, conflicts_with = "clear_title")]
+    pub title: Option<String>,
+
+    /// Set the title to absent
+    #[arg(long)]
+    pub clear_title: bool,
+
+    /// Set the excerpt; an explicit empty string remains empty
+    #[arg(long, conflicts_with = "clear_excerpt")]
+    pub excerpt: Option<String>,
+
+    /// Set the excerpt to absent
+    #[arg(long)]
+    pub clear_excerpt: bool,
+
+    /// Set the language; an explicit empty string remains empty
+    #[arg(long, conflicts_with = "clear_language")]
+    pub language: Option<String>,
+
+    /// Set the language to absent
+    #[arg(long)]
+    pub clear_language: bool,
+
+    /// Set favorite state explicitly
+    #[arg(long, value_name = "BOOL")]
+    pub favorite: Option<bool>,
+
+    /// Replace the private note; pass an empty string to clear it
+    #[arg(long)]
+    pub note: Option<String>,
+
+    /// Replace the saved time using Unix seconds
+    #[arg(long, value_name = "UNIX_SECONDS")]
+    pub saved_at: Option<i64>,
+
+    /// Add exact tag text; repeat or comma-separate
+    #[arg(long, value_delimiter = ',', num_args = 1..)]
+    pub add_tag: Vec<String>,
+
+    /// Remove exact tag text; repeat or comma-separate
+    #[arg(long, value_delimiter = ',', num_args = 1..)]
+    pub remove_tag: Vec<String>,
+}
+
+#[derive(Args)]
+pub struct ItemIdArgs {
+    /// UUID of the saved item
+    pub item_id: String,
 }
 
 #[derive(Subcommand)]

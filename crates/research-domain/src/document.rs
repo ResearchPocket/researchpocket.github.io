@@ -114,7 +114,7 @@ impl Library {
     pub fn create_item(&self, seed: &ItemSeed, operation_prefix: &str) -> DomainResult<()> {
         validate_item_id(&seed.item_id)?;
         validate_operation_prefix(operation_prefix)?;
-        validate_url(&seed.url)?;
+        validate_item_url(&seed.url)?;
         let tags = seed
             .tags
             .iter()
@@ -191,7 +191,7 @@ impl Library {
     }
 
     pub fn write_url(&self, item_id: &str, revision_id: &str, value: &str) -> DomainResult<()> {
-        validate_url(value)?;
+        validate_item_url(value)?;
         self.write_scalar(item_id, URL, revision_id, value.to_owned())
     }
 
@@ -294,12 +294,20 @@ impl Library {
         let revisions = self.lifecycle_revisions_mut(item_id)?;
         let existing = read_records::<LifecycleRevision>(&revisions)?;
         let parents = causal_heads(&existing, |revision| &revision.parents);
-        if state == LifecycleState::Active && !existing.is_empty() {
+        if !existing.is_empty() {
             let visible = lifecycle_view(existing.clone())?;
-            if visible.state != LifecycleState::Deleted {
-                return Err(DomainError::InvalidState(
-                    "restore requires an observed deleted lifecycle head".into(),
-                ));
+            match (visible.state, state) {
+                (LifecycleState::Active, LifecycleState::Active) => {
+                    return Err(DomainError::InvalidState(
+                        "restore requires an observed deleted lifecycle head".into(),
+                    ));
+                }
+                (LifecycleState::Deleted, LifecycleState::Deleted) => {
+                    return Err(DomainError::InvalidState(
+                        "delete requires an observed active lifecycle head".into(),
+                    ));
+                }
+                _ => {}
             }
         }
         let generation = parents
@@ -457,9 +465,13 @@ fn validate_operation_prefix(prefix: &str) -> DomainResult<()> {
     Ok(())
 }
 
-fn validate_url(url: &str) -> DomainResult<()> {
-    if url.trim().is_empty() {
-        return Err(DomainError::InvalidState("URL cannot be blank".into()));
+pub fn validate_item_url(url: &str) -> DomainResult<()> {
+    let parsed = url::Url::parse(url)
+        .map_err(|_| DomainError::InvalidState("URL must be an absolute HTTP(S) URL".into()))?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+        return Err(DomainError::InvalidState(
+            "URL must be an absolute HTTP(S) URL".into(),
+        ));
     }
     Ok(())
 }

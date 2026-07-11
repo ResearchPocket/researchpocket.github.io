@@ -7,14 +7,18 @@ resolver.
 
 ## Current V2 CLI
 
-The first usable V2 slice initializes a private local library, imports an existing
-V1 ResearchPocket database, lists migrated saves, and reports library status:
+The V2 CLI initializes a private local library, captures and curates saves fully
+offline, imports an existing V1 ResearchPocket database, and lists local state:
 
 ```sh
 research init
+research add https://example.com/article --tag reading
 research import v1 /path/to/v1/research.sqlite
-research status
 research list
+research edit "$ITEM_ID" --title "A better title" --favorite true
+research delete "$ITEM_ID"
+research restore "$ITEM_ID"
+research status
 ```
 
 The old Pocket-era command surface is no longer part of the shipped binary.
@@ -89,9 +93,9 @@ The complete command and output contract is in [docs/v2/CLI.md](docs/v2/CLI.md).
 
 ## Current boundary
 
-This slice is local-only. GitHub synchronization, scheduled synchronization,
-new-device restoration, hosted owner editing, TUI/local web management, and V2
-publication are not implemented yet.
+This slice is local-only. Search, GitHub synchronization, scheduled
+synchronization, new-device restoration, hosted owner editing, TUI/local web
+management, and V2 publication are not implemented yet.
 
 When synchronization lands, clients will exchange immutable CRDT update batches.
 Git commits, branches, merges, rebases, timestamps, and last-push order will never
