@@ -120,7 +120,8 @@ granted only the permissions required to read and append synchronization data.
 It must not be embedded in generated files, URLs, logs, analytics, persistent
 browser storage, or service-worker caches. Owner mode must remain usable when
 the token expires or is revoked: local pending changes stay queued until the
-owner supplies valid credentials.
+owner supplies valid credentials. The complete trust boundary and token
+lifecycle are defined in the [privacy threat model](./THREAT_MODEL.md).
 
 ## Success criteria
 
