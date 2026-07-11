@@ -1594,7 +1594,7 @@ dependencies = [
  "pest_derive",
  "postcard",
  "pretty_assertions",
- "rand 0.8.6",
+ "rand 0.8.7",
  "rustc-hash",
  "serde",
  "serde_columnar",
@@ -1648,7 +1648,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aca7180674d0273ddf37049a5efcde4547fd5330d24abb7519bb9d9eb6780d5b"
 dependencies = [
  "once_cell",
- "rand 0.8.6",
+ "rand 0.8.7",
  "serde",
 ]
 
@@ -2074,9 +2074,9 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "rand"
-version = "0.8.6"
+version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ca0ecfa931c29007047d1bc58e623ab12e5590e8c7cc53200d5202b69266d8a"
+checksum = "22f6172bdec972074665ed81ed53b71da00bfc44b65a753cfde883ec4c702a1a"
 dependencies = [
  "libc",
  "rand_chacha",
@@ -2236,6 +2236,7 @@ name = "research-domain"
 version = "0.0.0"
 dependencies = [
  "base64",
+ "chrono",
  "loro",
  "serde",
  "serde_json",

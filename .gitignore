@@ -21,6 +21,7 @@ cli/search.html
 dist.css
 search.html
 index.html
+!web/index.html
 research.sqlite
 research.sqlite-shm
 research.sqlite-wal

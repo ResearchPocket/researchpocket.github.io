@@ -103,6 +103,24 @@ the CLI never asks you to merge or rebase saves. See the complete
 [CLI workflow](docs/v2/CLI.md#private-github-synchronization) and
 [sync protocol](docs/v2/SYNC_PROTOCOL.md).
 
+## Hosted owner application
+
+The V2 static owner app now runs the same Rust domain core through WASM and
+keeps its private replica in IndexedDB. Capture, search, edit, favorite, tag,
+delete, and restore work offline; each action creates one durable outbox update
+in the same browser transaction as the new snapshot and projection.
+
+```sh
+cd web
+npm ci
+npm run dev
+```
+
+The production build is deployed as a credential-free GitHub Pages shell. PAT
+onboarding and browser pull/push are the next hosted-owner slice; this foundation
+does not claim that browser-only changes are remotely backed up yet. See the
+[hosted application contract](docs/v2/WEB.md).
+
 ## Human and machine output
 
 Every command accepts `--format human|json|ndjson`. Options are global and may be
@@ -122,10 +140,11 @@ The complete command and output contract is in [docs/v2/CLI.md](docs/v2/CLI.md).
 
 ## Current boundary
 
-The CLI now supports private GitHub synchronization, new-device restoration, and
-an optional foreground periodic loop. Hosted owner editing, installed background
-scheduling, checkpoints, TUI/local web management, and V2 publication are not
-implemented yet.
+The CLI supports private GitHub synchronization, new-device restoration, and an
+optional foreground periodic loop. The static owner UI supports offline local
+editing through the shared WASM core. Browser GitHub synchronization, installed
+background scheduling, checkpoints, TUI/local web management, and V2 publication
+are not implemented yet.
 
 Clients exchange immutable CRDT update batches. Git commits, branches, merges,
 rebases, timestamps, and last-push order never choose application values or
@@ -136,6 +155,7 @@ require the owner to resolve library conflicts.
 The engineering and privacy contract is in [AGENTS.md](AGENTS.md), with the V2
 [product contract](docs/v2/PRODUCT.md),
 [synchronization protocol](docs/v2/SYNC_PROTOCOL.md),
+[hosted application contract](docs/v2/WEB.md),
 [privacy threat model](docs/v2/THREAT_MODEL.md), and
 [delivery roadmap](docs/v2/ROADMAP.md) alongside this CLI slice.
 

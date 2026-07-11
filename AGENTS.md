@@ -224,8 +224,10 @@ The wire format, immutable repository layout, retries, checkpoints, and version
 negotiation are defined in
 [`docs/v2/SYNC_PROTOCOL.md`](docs/v2/SYNC_PROTOCOL.md). The security decisions
 and residual risks for these surfaces are defined in
-[`docs/v2/THREAT_MODEL.md`](docs/v2/THREAT_MODEL.md). Sync, hosted-editor, and
-publisher changes must preserve both contracts.
+[`docs/v2/THREAT_MODEL.md`](docs/v2/THREAT_MODEL.md). The browser persistence and
+static-shell implementation boundary is defined in
+[`docs/v2/WEB.md`](docs/v2/WEB.md). Sync, hosted-editor, and publisher changes
+must preserve all three contracts.
 
 ## Change Workflow
 

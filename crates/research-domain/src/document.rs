@@ -87,11 +87,19 @@ impl Library {
         }
     }
 
-    /// Deterministic peer IDs are fixture-only. Production sessions use `new()`.
-    pub fn with_peer_id_for_fixture(peer_id: u64) -> DomainResult<Self> {
+    /// Start an empty replica with a caller-owned, durable Loro peer identity.
+    ///
+    /// JavaScript callers pass this identity as decimal text at the WASM
+    /// boundary so it is never rounded through an IEEE-754 number.
+    pub fn with_peer_id(peer_id: u64) -> DomainResult<Self> {
         let library = Self::new();
         library.doc.set_peer_id(peer_id).map_err(loro_error)?;
         Ok(library)
+    }
+
+    /// Fixture-facing alias that makes deterministic peer selection explicit.
+    pub fn with_peer_id_for_fixture(peer_id: u64) -> DomainResult<Self> {
+        Self::with_peer_id(peer_id)
     }
 
     /// Restore a complete local replica and assign a fresh peer ID for new work.
