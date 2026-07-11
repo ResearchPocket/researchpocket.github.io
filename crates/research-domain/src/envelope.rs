@@ -28,6 +28,7 @@ impl UpdateEnvelope {
         device_id: &str,
         sequence: u64,
         causal_frontier: &VersionVector,
+        created_at: &str,
         update: &[u8],
     ) -> Self {
         let causal_frontier = causal_frontier
@@ -40,8 +41,8 @@ impl UpdateEnvelope {
             device_id: device_id.to_owned(),
             sequence: format!("{sequence:020}"),
             causal_frontier,
-            // Time is audit metadata only; the fixture is deterministic.
-            created_at: "2026-07-10T00:00:00Z".to_owned(),
+            // Time is caller-supplied audit metadata, never merge input.
+            created_at: created_at.to_owned(),
             payload: STANDARD.encode(update),
             payload_sha256: sha256_hex(update),
         }

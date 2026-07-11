@@ -46,10 +46,13 @@ deferred capability as part of unrelated work.
 
 ## Current Baseline and Target Shape
 
-The current repository is a single Rust crate. Its Pocket-era commands include
-`pocket`, `local`, `fetch`, `list`, `init`, `generate`, `export`, `handle`, and
-`notes`. Treat these as legacy compatibility and migration inputs. Do not add new
-Pocket dependencies or design new V2 behavior around the discontinued service.
+The shipped binary and workspace are V2-first. The root crate provides the V2
+CLI, `crates/research-domain` owns convergence semantics, and
+`crates/research-store` owns local persistence and V1 import. Pocket-era source
+files and migrations remain only as migration references; their former commands
+are not compatibility requirements and are not compiled into the binary. Do not
+add new Pocket dependencies or design V2 behavior around the discontinued
+service.
 
 V2 consolidates product development in this repository. `my-list` and
 `ResearchGarden` are migration references until V2 reaches publishing parity;

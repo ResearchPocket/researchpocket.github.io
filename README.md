@@ -1,314 +1,108 @@
-<div class="oranda-hide" align="center">
+# ResearchPocket
 
-# Research Pocket 🔖
+ResearchPocket is a URL-first, local-first personal library. V2 keeps saves under
+your control, supports deliberate human organization, and uses application-level
+CRDT convergence so Git can remain storage and transport rather than a conflict
+resolver.
 
-</div>
+## Current V2 CLI
 
-<div align="center">
-  <strong> The <em>last</em> save-it-later tool you'll ever need </strong>
-</div>
-<br />
-<div align="center">
-  <!-- Github Actions -->
-  <a
-    href="https://github.com/ResearchPocket/ResearchPocket/actions/workflows/ci.yml"
-  >
-    <img
-      alt="GitHub Actions Workflow Status"
-      src="https://img.shields.io/github/actions/workflow/status/ResearchPocket/ResearchPocket/ci.yml"
-    />
-  </a>
-  <!-- Version -->
-  <a href="https://crates.io/crates/research">
-    <img
-      src="https://img.shields.io/crates/v/research.svg?style=flat-square"
-      alt="Crates.io version"
-    />
-  </a>
-  <!-- Docs -->
-  <a href="https://docs.rs/research">
-    <img
-      src="https://img.shields.io/badge/docs-latest-blue.svg?style=flat-square"
-      alt="docs.rs docs"
-    />
-  </a>
-  <!-- Downloads -->
-  <a href="https://crates.io/crates/research">
-    <img
-      src="https://img.shields.io/crates/d/research.svg?style=flat-square"
-      alt="Download"
-    />
-  </a>
-</div>
-
-<br />
-
-ResearchPocket is a local-first reading-list CLI. V2 is rebuilding remote sync
-and hosted editing around an application-level CRDT protocol so Git remains
-storage and transport, never the conflict resolver.
-
-> [!WARNING]
-> Mozilla retired Pocket and its API. Pocket authentication, fetching, and
-> mutations are disabled. Existing V1 SQLite databases are left untouched and
-> remain available for local listing, explicit export, and sanitized static
-> generation. Do not publish a database file: it may contain legacy credentials
-> and private notes.
-
-## How it works
-
-<picture>
-  <source
-    media="(prefers-color-scheme: dark)"
-    srcset="./.github/explainer-dark.png"
-  />
-  <source
-    media="(prefers-color-scheme: light)"
-    srcset="./.github/explainer.png"
-  />
-  <img alt="Hashnode logo" src="./.github/explainer.png" />
-</picture>
-
-## Installation
-
-- Get the latest release binary for your desktop through the
-  [releases page](https://github.com/ResearchPocket/ResearchPocket/releases)
-
-- Using Cargo
-  ```sh
-  $ cargo install research
-  ```
-
-## Generate your site
-
-This requires that you have
-[tailwindcss](https://tailwindcss.com/blog/standalone-cli) installed and
-available in your `$PATH`
+The first usable V2 slice initializes a private local library, imports an existing
+V1 ResearchPocket database, lists migrated saves, and reports library status:
 
 ```sh
-# Initialize a local database
-$ research init .
-
-# Save items locally
-$ research local add https://example.com/article
-
-# Generate into a dedicated public-output directory. Add --download-tailwind
-# if the Tailwind standalone CLI is not already in PATH.
-$ research --db ./research.sqlite generate ./build
-
+research init
+research import v1 /path/to/v1/research.sqlite
+research status
+research list
 ```
 
-Static generation uses an explicit public-field allowlist. Notes, legacy
-credentials, internal database IDs, and language metadata are excluded. CSV
-export is a private portability feature and intentionally includes notes.
+The old Pocket-era command surface is no longer part of the shipped binary.
+Pocket authentication, fetching, and mutations are retired with Mozilla's Pocket
+service. The old Rust modules remain in the repository only as migration
+references.
 
-## URL Handler
-
-Research Pocket includes a custom URL handler for the `research://` protocol.
-This allows you to save web pages directly from your browser using a
-bookmarklet.
-
-### Registering the URL Handler
-
-To register the URL handler on your system, use the following command:
+## Install from this repository
 
 ```sh
-$ research register
+cargo build --locked --release
+./target/release/research --help
 ```
 
-This will set up the necessary configurations for your operating system to
-recognize and handle `research://` URLs.
+## Library location
 
-### Unregistering the URL Handler
+ResearchPocket uses the operating system's local application-data directory by
+default:
 
-If you want to remove the URL handler, use:
+- Linux: `${XDG_DATA_HOME:-~/.local/share}/researchpocket`
+- macOS: `~/Library/Application Support/io.github.ResearchPocket.ResearchPocket`
+- Windows: `%LOCALAPPDATA%\ResearchPocket\ResearchPocket\data`
+
+Override it for a separate library or a temporary test:
 
 ```sh
-$ research unregister
+research --data-dir /path/to/private/library init
 ```
 
-### Bookmarklet
+`RESEARCHPOCKET_DATA_DIR` provides the same override. The local
+`library.sqlite3` contains private state. Do not commit, upload, publish, or copy
+it as a synchronization mechanism.
 
-You can use the following bookmarklet to quickly save web pages to Research
-Pocket:
+## Migrate an existing library
 
-```javascript
-javascript: (function () {
-  var currentUrl = encodeURIComponent(window.location.href);
-  var tags = prompt("Enter tags (comma-separated):", "");
-  var dbPath = "/path/to/research.sqlite";
-  if (tags !== null && dbPath !== null) {
-    var encodedTags = encodeURIComponent(tags);
-    var encodedDbPath = encodeURIComponent(dbPath);
-    var researchUrl =
-      `research://save?url=${currentUrl}&provider=local&tags=${encodedTags}&db_path=${encodedDbPath}`;
-    window.location.href = researchUrl;
-  }
-})();
-```
+The importer stages a private copy and never opens the source database as its
+working database. It never queries or imports legacy secrets, deletes the staging
+copy after use, preserves supported save fields and exact tag spelling, reports
+malformed fields or records, and records per-row receipts so a repeated import is
+idempotent.
 
-To use this bookmarklet:
-
-1. Create a new bookmark in your browser.
-2. Set the name to something like "Save to Research Pocket".
-3. In the URL or location field, paste the above JavaScript code.
-4. Replace `/path/to/research.sqlite` with the actual path to your Research
-   Pocket database.
-
-Now, when you click this bookmarklet on any web page, it will prompt you for
-tags and then save the page to your Research Pocket
-
-## Adding Notes
-
-You can add notes to any saved item locallh the `notes` command:
+For the recovered library in this workspace:
 
 ```sh
-# Add or update notes for an item
-$ research notes <url> "Your notes here"
+export RESEARCHPOCKET_DATA_DIR="$HOME/Developer/pocket/recovered/i-like-to-save-it-save-it-2025-08-30/v2-library"
+research init
+research import v1 \
+  "$HOME/Developer/pocket/recovered/i-like-to-save-it-save-it-2025-08-30/current-db/research.sqlite"
+research status
+research list --limit 20
 ```
 
-Notes will be displayed when listing items and included in CSV exports. For existing databases, the notes feature will be automatically enabled the next time you run any command.
+See the [migration guide](docs/v2/MIGRATION.md) for preservation and recovery
+details.
 
-## Contributing
+## Human and machine output
 
-We welcome contributions to ResearchPocket! If you're interested in helping out,
-here are a few ways you can contribute:
+Every command accepts `--format human|json|ndjson`. Options are global and may be
+placed before or after a command:
 
-- Reporting bugs
-- Suggesting enhancements
-- Writing documentation
-- Submitting pull requests
+```sh
+research status --format json
+research list --format ndjson --all > saves.ndjson
+research list --tags rust,sqlite --favorite-only
+```
 
-We participate in Hacktoberfest! During October, we encourage contributors to
-join us in improving ResearchPocket. Look for issues tagged with `hacktoberfest`
-to get started.
+Machine data goes to stdout. Progress, warnings, and import diagnostics go to
+stderr. JSON and NDJSON output is schema-versioned; raw CRDT containers,
+transport updates, and credentials are never list output.
 
-For more detailed information about contributing to this project, including our
-Hacktoberfest participation, please check out our
-[CONTRIBUTING.md](CONTRIBUTING.md) guide.
+The complete command and output contract is in [docs/v2/CLI.md](docs/v2/CLI.md).
 
-## Cli help
+## Current boundary
 
-- Basic Help
+This slice is local-only. GitHub synchronization, scheduled synchronization,
+new-device restoration, hosted owner editing, TUI/local web management, and V2
+publication are not implemented yet.
 
-  ```sh
-  RESEARCH 🔖
+When synchronization lands, clients will exchange immutable CRDT update batches.
+Git commits, branches, merges, rebases, timestamps, and last-push order will never
+choose application values or require the owner to resolve library conflicts.
 
-  Manage your reading lists and generate a static site with your saved articles.
+## Development
 
-  Usage: research [OPTIONS] [COMMAND]
+The engineering and privacy contract is in [AGENTS.md](AGENTS.md), with the V2
+[product contract](docs/v2/PRODUCT.md) and [delivery roadmap](docs/v2/ROADMAP.md)
+alongside this CLI slice.
 
-  Commands:
-    pocket    Retired Pocket commands; prints a migration warning
-    local     Add a new item to the database stored locally
-    fetch     Retired Pocket fetch alias; prints a migration warning
-    list      Lists all items in the database
-    init      Initializes the database
-    generate  Generate a static site
-    export    Export data from the current database
-    handle    Handle operations related to the research:// URL scheme
-    notes     Add or update notes for an item
-    help      Print this message or the help of the given subcommand(s)
-
-  Options:
-        --db <DB>   Database url [env: DATABASE_URL=] [default: ./research.sqlite]
-    -d, --debug...  Turn debugging information on
-    -h, --help      Print help
-    -V, --version   Print version
-  ```
-
-- List
-
-  ```sh
-  Lists all items in the database
-
-  Usage: research list [OPTIONS]
-
-  Options:
-    -t, --tags <TAGS>...       Filter by tags separated by commas Example: --tags rust,sql
-    -l, --limit <LIMIT>        Limit the number of items to display
-    -f, --favorite-only        Favorite items only (Default: false)
-        --timezone <TIMEZONE>  Optional timezone (e.g., "America/New_York", "UTC")
-    -h, --help                 Print help
-  ```
-
-- Init
-
-  ```sh
-  Initializes the database
-
-  Usage: research init <PATH>
-
-  Arguments:
-    <PATH>
-
-  Options:
-    -h, --help  Print help
-  ```
-
-- Local
-
-  ```sh
-  Add a new item to the database stored locally
-
-  Usage: research local <COMMAND>
-
-  Commands:
-    add       Add an item to the local provider in the database
-    list      List all items in the local provider
-    favorite  Mark an item as favorite in the local provider
-    help      Print this message or the help of the given subcommand(s)
-
-  Options:
-    -h, --help  Print help
-  ```
-
-- Pocket
-
-  ```sh
-  Retired Pocket commands
-
-  Usage: research pocket <COMMAND>
-
-  Commands:
-    auth      Retired: Pocket authentication is disabled
-    fetch     Retired: Pocket fetching is disabled
-    add       Retired: Pocket mutations are disabled
-    favorite  Retired: Pocket mutations are disabled
-    help      Print this message or the help of the given subcommand(s)
-
-  Options:
-    -h, --help  Print help
-
-  ```
-
-- Fetch
-
-  `research fetch` is retained as a compatibility alias that exits with the
-  Pocket retirement warning without reading credentials or making a request.
-
-- Generate
-
-  Here's an example of how to generate a static site:
-
-  ```sh
-  $ research --db <path/to/research.sqlite> generate --assets <path/to/assets> <path/to/output>
-  ```
-
-  Optionally add `--download-tailwind` to download and reuse the `tailwindcss`
-  binary in the assets directory.
-
-  ```sh
-  Generate a static site
-
-  Usage: research generate [OPTIONS] <OUTPUT>
-
-  Arguments:
-    <OUTPUT>  The path to the output directory
-
-  Options:
-        --assets <ASSETS>      Path to required site assets (main.css, search.js, tailwind.config.js) [default: ./assets]
-        --download-tailwind    Download Tailwind binary to <ASSETS>/tailwindcss if not found
-        --timezone <TIMEZONE>  Optional timezone (e.g., "America/New_York", "UTC")
-    -h, --help                 Print help
-
-  ```
+Use the smallest relevant verification while iterating. Tests are intentionally
+sparse and protect only essential persistence, migration, convergence, or privacy
+contracts.

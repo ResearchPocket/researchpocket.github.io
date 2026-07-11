@@ -1,14 +1,16 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use loro::{
-    Container, ExportMode, LoroDoc, LoroMap, LoroText, ToJson, ValueOrContainer, VersionVector,
+    Container, EncodedBlobMode, ExportMode, LoroDoc, LoroMap, LoroText, ToJson,
+    ValueOrContainer, VersionVector,
 };
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::ScalarRevision;
 use crate::{
-    CanonicalItem, CanonicalProjection, LifecycleRevision, LifecycleState, UpdateEnvelope,
+    CanonicalItem, CanonicalProjection, LifecycleRevision, LifecycleState, ScalarRevision,
+    ScalarView, UpdateEnvelope,
     projection::{causal_heads, lifecycle_view, scalar_view},
 };
 
@@ -20,6 +22,12 @@ const TAGS: &str = "tags";
 const ADDS: &str = "adds";
 const REMOVES: &str = "removes";
 const LIFECYCLE: &str = "lifecycle";
+const URL: &str = "url";
+const TITLE: &str = "title";
+const EXCERPT: &str = "excerpt";
+const FAVORITE: &str = "favorite";
+const LANGUAGE: &str = "language";
+const SAVED_AT: &str = "saved_at";
 
 pub type DomainResult<T> = Result<T, DomainError>;
 
@@ -43,6 +51,24 @@ pub enum DomainError {
     InvalidState(String),
 }
 
+/// Complete canonical input for creating one URL-first library item.
+///
+/// The caller owns identity generation. `item_id` must be a canonical lowercase
+/// UUIDv7 string, and `operation_prefix` passed to [`Library::create_item`] must
+/// be unique for this item creation.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ItemSeed {
+    pub item_id: String,
+    pub url: String,
+    pub title: Option<String>,
+    pub excerpt: Option<String>,
+    pub favorite: bool,
+    pub language: Option<String>,
+    pub saved_at: i64,
+    pub note: String,
+    pub tags: Vec<String>,
+}
+
 pub struct Library {
     doc: LoroDoc,
 }
@@ -61,23 +87,95 @@ impl Library {
         Ok(library)
     }
 
+    /// Restore a complete local replica and assign a fresh peer ID for new work.
+    pub fn from_snapshot(snapshot: &[u8], fresh_peer_id: u64) -> DomainResult<Self> {
+        let metadata = LoroDoc::decode_import_blob_meta(snapshot, true).map_err(loro_error)?;
+        if metadata.mode != EncodedBlobMode::Snapshot {
+            return Err(DomainError::InvalidState(format!(
+                "expected a full snapshot, got {}",
+                metadata.mode
+            )));
+        }
+        let library = Self::new();
+        library.doc.set_peer_id(fresh_peer_id).map_err(loro_error)?;
+        library.doc.import(snapshot).map_err(loro_error)?;
+        Ok(library)
+    }
+
+    /// Export complete history and state for crash-safe local persistence.
+    pub fn export_snapshot(&self) -> DomainResult<Vec<u8>> {
+        self.doc.export(ExportMode::Snapshot).map_err(loro_error)
+    }
+
     pub fn version(&self) -> VersionVector {
         self.doc.oplog_vv()
     }
 
-    pub fn initialize_item(
-        &self,
-        item_id: &str,
-        note: &str,
-        title_revision: &str,
-        title: &str,
-        lifecycle_revision: &str,
-    ) -> DomainResult<()> {
-        self.note_mut(item_id)?
-            .splice_utf16(0, 0, note)
+    pub fn create_item(&self, seed: &ItemSeed, operation_prefix: &str) -> DomainResult<()> {
+        validate_item_id(&seed.item_id)?;
+        validate_operation_prefix(operation_prefix)?;
+        validate_url(&seed.url)?;
+        let tags = seed
+            .tags
+            .iter()
+            .map(|tag| validate_tag(tag))
+            .collect::<DomainResult<BTreeSet<_>>>()?;
+        if self.doc.get_map(ITEMS).get(&seed.item_id).is_some() {
+            return Err(DomainError::InvalidState(format!(
+                "item {} already exists",
+                seed.item_id
+            )));
+        }
+
+        self.note_mut(&seed.item_id)?
+            .splice_utf16(0, 0, &seed.note)
             .map_err(loro_error)?;
-        self.write_scalar(item_id, "title", title_revision, title)?;
-        self.transition_lifecycle(item_id, lifecycle_revision, LifecycleState::Active)
+        self.write_url(
+            &seed.item_id,
+            &operation_id(operation_prefix, URL),
+            &seed.url,
+        )?;
+        self.write_title(
+            &seed.item_id,
+            &operation_id(operation_prefix, TITLE),
+            seed.title.as_deref(),
+        )?;
+        self.write_excerpt(
+            &seed.item_id,
+            &operation_id(operation_prefix, EXCERPT),
+            seed.excerpt.as_deref(),
+        )?;
+        self.write_favorite(
+            &seed.item_id,
+            &operation_id(operation_prefix, FAVORITE),
+            seed.favorite,
+        )?;
+        self.write_language(
+            &seed.item_id,
+            &operation_id(operation_prefix, LANGUAGE),
+            seed.language.as_deref(),
+        )?;
+        self.write_saved_at(
+            &seed.item_id,
+            &operation_id(operation_prefix, SAVED_AT),
+            seed.saved_at,
+        )?;
+
+        self.item_mut(&seed.item_id)?
+            .ensure_mergeable_map(TAGS)
+            .map_err(loro_error)?;
+        for (index, tag) in tags.into_iter().enumerate() {
+            self.add_tag(
+                &seed.item_id,
+                &tag,
+                &operation_id(operation_prefix, &format!("tag/{index:020}")),
+            )?;
+        }
+        self.transition_lifecycle(
+            &seed.item_id,
+            &operation_id(operation_prefix, LIFECYCLE),
+            LifecycleState::Active,
+        )
     }
 
     pub fn splice_note_utf16(
@@ -92,29 +190,77 @@ impl Library {
             .map_err(loro_error)
     }
 
-    pub fn write_scalar(
+    pub fn write_url(&self, item_id: &str, revision_id: &str, value: &str) -> DomainResult<()> {
+        validate_url(value)?;
+        self.write_scalar(item_id, URL, revision_id, value.to_owned())
+    }
+
+    pub fn write_title(
+        &self,
+        item_id: &str,
+        revision_id: &str,
+        value: Option<&str>,
+    ) -> DomainResult<()> {
+        self.write_scalar(item_id, TITLE, revision_id, value.map(str::to_owned))
+    }
+
+    pub fn write_excerpt(
+        &self,
+        item_id: &str,
+        revision_id: &str,
+        value: Option<&str>,
+    ) -> DomainResult<()> {
+        self.write_scalar(item_id, EXCERPT, revision_id, value.map(str::to_owned))
+    }
+
+    pub fn write_favorite(
+        &self,
+        item_id: &str,
+        revision_id: &str,
+        value: bool,
+    ) -> DomainResult<()> {
+        self.write_scalar(item_id, FAVORITE, revision_id, value)
+    }
+
+    pub fn write_language(
+        &self,
+        item_id: &str,
+        revision_id: &str,
+        value: Option<&str>,
+    ) -> DomainResult<()> {
+        self.write_scalar(item_id, LANGUAGE, revision_id, value.map(str::to_owned))
+    }
+
+    pub fn write_saved_at(
+        &self,
+        item_id: &str,
+        revision_id: &str,
+        value: i64,
+    ) -> DomainResult<()> {
+        self.write_scalar(item_id, SAVED_AT, revision_id, value)
+    }
+
+    fn write_scalar<T>(
         &self,
         item_id: &str,
         field: &str,
         revision_id: &str,
-        value: &str,
-    ) -> DomainResult<()> {
-        if field != "title" {
-            return Err(DomainError::InvalidState(format!(
-                "field {field:?} is not allowlisted"
-            )));
-        }
+        value: T,
+    ) -> DomainResult<()>
+    where
+        T: Clone + DeserializeOwned + Serialize,
+    {
         let revisions = self.scalar_revisions_mut(item_id, field)?;
-        let existing = read_records::<ScalarRevision>(&revisions)?;
+        let existing = read_records::<ScalarRevision<T>>(&revisions)?;
         let revision = ScalarRevision {
             parents: causal_heads(&existing, |revision| &revision.parents),
-            value: value.to_owned(),
+            value,
         };
         insert_immutable_record(&revisions, revision_id, &revision)
     }
 
     pub fn add_tag(&self, item_id: &str, tag: &str, add_dot: &str) -> DomainResult<()> {
-        let tag = normalize_tag(tag)?;
+        let tag = validate_tag(tag)?;
         let tags = self
             .item_mut(item_id)?
             .ensure_mergeable_map(TAGS)
@@ -125,7 +271,7 @@ impl Library {
     }
 
     pub fn remove_tag(&self, item_id: &str, tag: &str) -> DomainResult<()> {
-        let tag = normalize_tag(tag)?;
+        let tag = validate_tag(tag)?;
         let tags = self
             .item_mut(item_id)?
             .ensure_mergeable_map(TAGS)
@@ -176,13 +322,19 @@ impl Library {
         library_id: &str,
         device_id: &str,
         sequence: u64,
+        created_at: &str,
     ) -> DomainResult<UpdateEnvelope> {
+        if created_at.trim().is_empty() {
+            return Err(DomainError::InvalidState(
+                "envelope creation time cannot be blank".into(),
+            ));
+        }
         let update = self
             .doc
             .export(ExportMode::updates(from))
             .map_err(loro_error)?;
         Ok(UpdateEnvelope::new(
-            library_id, device_id, sequence, from, &update,
+            library_id, device_id, sequence, from, created_at, &update,
         ))
     }
 
@@ -198,11 +350,14 @@ impl Library {
         let mut projected = BTreeMap::new();
         for item_id in map_keys(&items) {
             let item = map_child(&items, &item_id)?;
-            // Explicit allowlist: title, note, tags, and lifecycle only.
+            // Explicit allowlist: canonical scalar values, note, tags, and lifecycle only.
             let scalars = map_child(&item, SCALARS)?;
-            let title = map_child(&scalars, "title")?;
-            let title_revisions = map_child(&title, REVISIONS)?;
-            let title = scalar_view(read_records(&title_revisions)?)?;
+            let url = project_scalar::<String>(&scalars, URL)?;
+            let title = project_scalar::<Option<String>>(&scalars, TITLE)?;
+            let excerpt = project_scalar::<Option<String>>(&scalars, EXCERPT)?;
+            let favorite = project_scalar::<bool>(&scalars, FAVORITE)?;
+            let language = project_scalar::<Option<String>>(&scalars, LANGUAGE)?;
+            let saved_at = project_scalar::<i64>(&scalars, SAVED_AT)?;
             let note = text_child(&item, NOTE)?.to_string();
             let tags = project_tags(map_child(&item, TAGS)?)?;
             let lifecycle = map_child(&item, LIFECYCLE)?;
@@ -211,7 +366,12 @@ impl Library {
             projected.insert(
                 item_id,
                 CanonicalItem {
+                    url,
                     title,
+                    excerpt,
+                    favorite,
+                    language,
+                    saved_at,
                     note,
                     tags,
                     lifecycle,
@@ -219,7 +379,7 @@ impl Library {
             );
         }
         Ok(CanonicalProjection {
-            schema_version: 1,
+            schema_version: 2,
             items: projected,
         })
     }
@@ -266,12 +426,53 @@ fn loro_error(error: impl std::fmt::Display) -> DomainError {
     DomainError::Loro(error.to_string())
 }
 
-fn normalize_tag(tag: &str) -> DomainResult<String> {
-    let normalized = tag.trim().to_lowercase();
-    if normalized.is_empty() {
+fn validate_item_id(item_id: &str) -> DomainResult<()> {
+    let bytes = item_id.as_bytes();
+    let valid = bytes.len() == 36
+        && bytes[8] == b'-'
+        && bytes[13] == b'-'
+        && bytes[14] == b'7'
+        && bytes[18] == b'-'
+        && matches!(bytes[19], b'8' | b'9' | b'a' | b'b')
+        && bytes[23] == b'-'
+        && bytes.iter().enumerate().all(|(index, byte)| {
+            matches!(index, 8 | 13 | 18 | 23)
+                || byte.is_ascii_digit()
+                || matches!(byte, b'a'..=b'f')
+        });
+    if !valid {
+        return Err(DomainError::InvalidState(format!(
+            "item ID {item_id:?} is not a canonical lowercase UUIDv7"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_operation_prefix(prefix: &str) -> DomainResult<()> {
+    if prefix.trim().is_empty() {
+        return Err(DomainError::InvalidState(
+            "operation prefix cannot be blank".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_url(url: &str) -> DomainResult<()> {
+    if url.trim().is_empty() {
+        return Err(DomainError::InvalidState("URL cannot be blank".into()));
+    }
+    Ok(())
+}
+
+fn validate_tag(tag: &str) -> DomainResult<String> {
+    if tag.trim().is_empty() {
         return Err(DomainError::InvalidState("tag cannot be empty".into()));
     }
-    Ok(normalized)
+    Ok(tag.to_owned())
+}
+
+fn operation_id(prefix: &str, suffix: &str) -> String {
+    format!("{prefix}/{suffix}")
 }
 
 fn insert_boolean_dot(map: &LoroMap, dot: &str) -> DomainResult<()> {
@@ -339,6 +540,15 @@ fn text_child(parent: &LoroMap, key: &str) -> DomainResult<LoroText> {
             "text child {key:?} is missing"
         ))),
     }
+}
+
+fn project_scalar<T>(scalars: &LoroMap, field: &str) -> DomainResult<ScalarView<T>>
+where
+    T: Clone + DeserializeOwned,
+{
+    let scalar = map_child(scalars, field)?;
+    let revisions = map_child(&scalar, REVISIONS)?;
+    scalar_view(read_records(&revisions)?)
 }
 
 fn project_tags(tags: LoroMap) -> DomainResult<Vec<String>> {

@@ -97,7 +97,7 @@ V2 must preserve the following boundaries throughout delivery:
 - Implement the V2 SQLite projection, full-text index, transactional outbox,
   idempotent replay, checkpoint format, and rebuild path.
 - Implement read-only, idempotent import from V1 into a new platform data
-  directory. Credentials from V1 are never copied.
+  directory. Credentials from V1 are never queried or copied into V2 state.
 - Consolidate V2 application code in ResearchPocket and mark `my-list` and
   `ResearchGarden` as legacy migration references.
 

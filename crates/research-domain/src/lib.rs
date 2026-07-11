@@ -7,7 +7,7 @@ mod document;
 mod envelope;
 mod projection;
 
-pub use document::{DomainError, DomainResult, Library};
+pub use document::{DomainError, DomainResult, ItemSeed, Library};
 pub use envelope::UpdateEnvelope;
 pub use projection::{
     CanonicalItem, CanonicalProjection, LifecycleRevision, LifecycleState, LifecycleView,
@@ -15,9 +15,7 @@ pub use projection::{
 };
 
 const ITEM_ID: &str = "0197f2b5-93d7-7ad4-8c67-21e98f0c7341";
-const BASE_TITLE_REVISION: &str = "device-base/00000000000000000001";
-const BASE_TAG_DOT: &str = "device-base/00000000000000000002";
-const BASE_LIFECYCLE_REVISION: &str = "device-base/00000000000000000003";
+const BASE_OPERATION_PREFIX: &str = "device-base/00000000000000000001";
 const ALICE_TITLE_REVISION: &str = "device-alice/00000000000000000001";
 const BOB_TITLE_REVISION: &str = "device-bob/00000000000000000001";
 const ALICE_DELETE_REVISION: &str = "device-alice/00000000000000000002";
@@ -28,25 +26,34 @@ const FINAL_TITLE_REVISION: &str = "device-merge/00000000000000000001";
 const FINAL_RESTORE_REVISION: &str = "device-merge/00000000000000000002";
 
 /// Fixed output shared by native and browser-WASM tests.
-pub const GOLDEN_CANONICAL_JSON: &str = r#"{"schema_version":1,"items":{"0197f2b5-93d7-7ad4-8c67-21e98f0c7341":{"title":{"value":"Resolved title","winner":"device-merge/00000000000000000001","heads":["device-merge/00000000000000000001"],"revisions":{"device-alice/00000000000000000001":{"parents":["device-base/00000000000000000001"],"value":"Alice"},"device-base/00000000000000000001":{"parents":[],"value":"Original"},"device-bob/00000000000000000001":{"parents":["device-base/00000000000000000001"],"value":"Bob"},"device-merge/00000000000000000001":{"parents":["device-alice/00000000000000000001","device-bob/00000000000000000001"],"value":"Resolved title"}}},"note":"A😀<A><B>B!","tags":[],"lifecycle":{"state":"active","generation":3,"heads":["device-merge/00000000000000000002"],"revisions":{"device-alice/00000000000000000002":{"generation":1,"parents":["device-base/00000000000000000003"],"state":"deleted"},"device-alice/00000000000000000003":{"generation":2,"parents":["device-alice/00000000000000000002"],"state":"active"},"device-base/00000000000000000003":{"generation":0,"parents":[],"state":"active"},"device-bob/00000000000000000002":{"generation":1,"parents":["device-base/00000000000000000003"],"state":"deleted"},"device-merge/00000000000000000002":{"generation":3,"parents":["device-alice/00000000000000000003","device-bob/00000000000000000002"],"state":"active"}}}}}}"#;
+pub const GOLDEN_CANONICAL_JSON: &str = r#"{"schema_version":2,"items":{"0197f2b5-93d7-7ad4-8c67-21e98f0c7341":{"url":{"value":"https://example.com/original","winner":"device-base/00000000000000000001/url","heads":["device-base/00000000000000000001/url"],"revisions":{"device-base/00000000000000000001/url":{"parents":[],"value":"https://example.com/original"}}},"title":{"value":"Resolved title","winner":"device-merge/00000000000000000001","heads":["device-merge/00000000000000000001"],"revisions":{"device-alice/00000000000000000001":{"parents":["device-base/00000000000000000001/title"],"value":"Alice"},"device-base/00000000000000000001/title":{"parents":[],"value":"Original"},"device-bob/00000000000000000001":{"parents":["device-base/00000000000000000001/title"],"value":"Bob"},"device-merge/00000000000000000001":{"parents":["device-alice/00000000000000000001","device-bob/00000000000000000001"],"value":"Resolved title"}}},"excerpt":{"value":"An excerpt","winner":"device-base/00000000000000000001/excerpt","heads":["device-base/00000000000000000001/excerpt"],"revisions":{"device-base/00000000000000000001/excerpt":{"parents":[],"value":"An excerpt"}}},"favorite":{"value":false,"winner":"device-base/00000000000000000001/favorite","heads":["device-base/00000000000000000001/favorite"],"revisions":{"device-base/00000000000000000001/favorite":{"parents":[],"value":false}}},"language":{"value":"","winner":"device-base/00000000000000000001/language","heads":["device-base/00000000000000000001/language"],"revisions":{"device-base/00000000000000000001/language":{"parents":[],"value":""}}},"saved_at":{"value":1700000000,"winner":"device-base/00000000000000000001/saved_at","heads":["device-base/00000000000000000001/saved_at"],"revisions":{"device-base/00000000000000000001/saved_at":{"parents":[],"value":1700000000}}},"note":"A😀<A><B>B!","tags":[],"lifecycle":{"state":"active","generation":3,"heads":["device-merge/00000000000000000002"],"revisions":{"device-alice/00000000000000000002":{"generation":1,"parents":["device-base/00000000000000000001/lifecycle"],"state":"deleted"},"device-alice/00000000000000000003":{"generation":2,"parents":["device-alice/00000000000000000002"],"state":"active"},"device-base/00000000000000000001/lifecycle":{"generation":0,"parents":[],"state":"active"},"device-bob/00000000000000000002":{"generation":1,"parents":["device-base/00000000000000000001/lifecycle"],"state":"deleted"},"device-merge/00000000000000000002":{"generation":3,"parents":["device-alice/00000000000000000003","device-bob/00000000000000000002"],"state":"active"}}}}}}"#;
 
 /// Run the complete deterministic convergence scenario used by both targets.
 pub fn run_convergence_scenario() -> DomainResult<String> {
     let base = Library::with_peer_id_for_fixture(101)?;
     let base_before = base.version();
-    base.initialize_item(
-        ITEM_ID,
-        "A😀BCD",
-        BASE_TITLE_REVISION,
-        "Original",
-        BASE_LIFECYCLE_REVISION,
+    base.create_item(
+        &ItemSeed {
+            item_id: ITEM_ID.to_owned(),
+            url: "https://example.com/original".to_owned(),
+            title: Some("Original".to_owned()),
+            excerpt: Some("An excerpt".to_owned()),
+            favorite: false,
+            language: Some(String::new()),
+            saved_at: 1_700_000_000,
+            note: "A😀BCD".to_owned(),
+            tags: vec!["Rust".to_owned()],
+        },
+        BASE_OPERATION_PREFIX,
     )?;
-    base.add_tag(ITEM_ID, "rust", BASE_TAG_DOT)?;
+    let base_snapshot = base.export_snapshot()?;
+    let base = Library::from_snapshot(&base_snapshot, 111)?;
     let base_envelope = base.export_envelope(
         &base_before,
         "library-fixture",
         "00000000-0000-7000-8000-000000000101",
         1,
+        "2026-07-10T00:00:00Z",
     )?;
 
     let alice = Library::with_peer_id_for_fixture(202)?;
@@ -54,8 +61,8 @@ pub fn run_convergence_scenario() -> DomainResult<String> {
     let alice_before = alice.version();
     alice.splice_note_utf16(ITEM_ID, 3, 0, "<A>")?;
     alice.splice_note_utf16(ITEM_ID, 7, 1, "")?;
-    alice.write_scalar(ITEM_ID, "title", ALICE_TITLE_REVISION, "Alice")?;
-    alice.remove_tag(ITEM_ID, "rust")?;
+    alice.write_title(ITEM_ID, ALICE_TITLE_REVISION, Some("Alice"))?;
+    alice.remove_tag(ITEM_ID, "Rust")?;
     alice.transition_lifecycle(ITEM_ID, ALICE_DELETE_REVISION, LifecycleState::Deleted)?;
     alice.transition_lifecycle(ITEM_ID, ALICE_RESTORE_REVISION, LifecycleState::Active)?;
     let alice_envelope = alice.export_envelope(
@@ -63,6 +70,7 @@ pub fn run_convergence_scenario() -> DomainResult<String> {
         "library-fixture",
         "00000000-0000-7000-8000-000000000202",
         1,
+        "2026-07-10T00:00:01Z",
     )?;
 
     let bob = Library::with_peer_id_for_fixture(303)?;
@@ -70,14 +78,15 @@ pub fn run_convergence_scenario() -> DomainResult<String> {
     let bob_before = bob.version();
     bob.splice_note_utf16(ITEM_ID, 3, 0, "<B>")?;
     bob.splice_note_utf16(ITEM_ID, 8, 1, "!")?;
-    bob.write_scalar(ITEM_ID, "title", BOB_TITLE_REVISION, "Bob")?;
-    bob.add_tag(ITEM_ID, "rust", BOB_TAG_DOT)?;
+    bob.write_title(ITEM_ID, BOB_TITLE_REVISION, Some("Bob"))?;
+    bob.add_tag(ITEM_ID, "Rust", BOB_TAG_DOT)?;
     bob.transition_lifecycle(ITEM_ID, BOB_DELETE_REVISION, LifecycleState::Deleted)?;
     let bob_envelope = bob.export_envelope(
         &bob_before,
         "library-fixture",
         "00000000-0000-7000-8000-000000000303",
         1,
+        "2026-07-10T00:00:02Z",
     )?;
 
     let merged = Library::with_peer_id_for_fixture(404)?;
@@ -108,12 +117,14 @@ pub fn run_convergence_scenario() -> DomainResult<String> {
             intermediate_item.note
         )));
     }
-    if intermediate_item.title.revisions.len() != 3 || intermediate_item.title.value != "Bob" {
+    if intermediate_item.title.revisions.len() != 3
+        || intermediate_item.title.value.as_deref() != Some("Bob")
+    {
         return Err(DomainError::InvalidState(
             "concurrent scalar revisions were not retained deterministically".into(),
         ));
     }
-    if intermediate_item.tags != ["rust"] {
+    if intermediate_item.tags != ["Rust"] {
         return Err(DomainError::InvalidState(
             "an unseen concurrent tag add did not win".into(),
         ));
@@ -125,14 +136,15 @@ pub fn run_convergence_scenario() -> DomainResult<String> {
     }
 
     let final_before = merged.version();
-    merged.write_scalar(ITEM_ID, "title", FINAL_TITLE_REVISION, "Resolved title")?;
-    merged.remove_tag(ITEM_ID, "rust")?;
+    merged.write_title(ITEM_ID, FINAL_TITLE_REVISION, Some("Resolved title"))?;
+    merged.remove_tag(ITEM_ID, "Rust")?;
     merged.transition_lifecycle(ITEM_ID, FINAL_RESTORE_REVISION, LifecycleState::Active)?;
     let final_envelope = merged.export_envelope(
         &final_before,
         "library-fixture",
         "00000000-0000-7000-8000-000000000404",
         1,
+        "2026-07-10T00:00:03Z",
     )?;
 
     let envelopes = [base_envelope, alice_envelope, bob_envelope, final_envelope];
@@ -148,8 +160,13 @@ pub fn run_convergence_scenario() -> DomainResult<String> {
         .items
         .get(ITEM_ID)
         .ok_or_else(|| DomainError::InvalidState("fixture item is missing".into()))?;
-    if final_item.title.value != "Resolved title"
+    if final_item.title.value.as_deref() != Some("Resolved title")
         || final_item.title.revisions.len() != 4
+        || final_item.url.value != "https://example.com/original"
+        || final_item.excerpt.value.as_deref() != Some("An excerpt")
+        || final_item.favorite.value
+        || final_item.language.value.as_deref() != Some("")
+        || final_item.saved_at.value != 1_700_000_000
         || !final_item.tags.is_empty()
         || final_item.lifecycle.state != LifecycleState::Active
         || final_item.lifecycle.generation != 3
