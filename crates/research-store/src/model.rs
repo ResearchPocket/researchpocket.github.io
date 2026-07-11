@@ -84,6 +84,23 @@ pub struct ListResult {
     pub items: Vec<StoredItem>,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct SearchQuery {
+    pub text: String,
+    pub tags: Vec<String>,
+    pub favorite_only: bool,
+    pub include_deleted: bool,
+    pub limit: Option<usize>,
+    pub offset: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SearchResult {
+    pub query: String,
+    pub page: ListPage,
+    pub items: Vec<StoredItem>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct StoreStatus {
     pub library_id: String,

@@ -9,7 +9,7 @@ mod store;
 pub use error::{StoreError, StoreResult};
 pub use model::{
     CreateItemRequest, EditItemRequest, ImportRejection, ImportResult, ListPage, ListQuery,
-    ListResult, OptionalTextUpdate, SourceBundleReceipt, SourceFileReceipt, StoreStatus,
-    StoredItem,
+    ListResult, OptionalTextUpdate, SearchQuery, SearchResult, SourceBundleReceipt,
+    SourceFileReceipt, StoreStatus, StoredItem,
 };
 pub use store::V2Store;

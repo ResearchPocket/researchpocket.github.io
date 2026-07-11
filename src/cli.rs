@@ -61,6 +61,9 @@ pub enum Commands {
     /// List saves in the V2 library
     List(ListArgs),
 
+    /// Search URLs, authored fields, private notes, and tags
+    Search(SearchArgs),
+
     /// Show local library, import, outbox, and sync state
     Status,
 }
@@ -202,6 +205,15 @@ pub struct ListArgs {
     /// Skip this many matching items
     #[arg(long, default_value_t = 0)]
     pub offset: usize,
+}
+
+#[derive(Args)]
+pub struct SearchArgs {
+    /// SQLite FTS5 query
+    pub query: String,
+
+    #[command(flatten)]
+    pub filters: ListArgs,
 }
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
