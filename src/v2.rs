@@ -1,0 +1,335 @@
+use std::error::Error;
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
+
+use directories::ProjectDirs;
+use research_store::{ListQuery, V2Store};
+use serde::Serialize;
+use serde_json::{Value, json};
+
+use crate::cli::{CliArgs, Commands, ImportCommands, OutputFormat};
+
+type CliResult<T> = Result<T, Box<dyn Error>>;
+
+const OUTPUT_SCHEMA_VERSION: u8 = 1;
+const DATABASE_FILE: &str = "library.sqlite3";
+
+pub async fn handle(args: &CliArgs) -> CliResult<()> {
+    let data_dir = resolve_data_dir(args.data_dir.as_deref())?;
+
+    match &args.command {
+        Commands::Init => handle_init(&data_dir, args.format).await,
+        Commands::Import {
+            command: ImportCommands::V1(import),
+        } => {
+            let store = V2Store::open(&data_dir).await?;
+            let result = store.import_v1(&import.source).await?;
+            let output = command_output("import_v1", result)?;
+            report_rejections(&output);
+            write_single(args.format, &output, human_import)
+        }
+        Commands::List(list) => {
+            let store = V2Store::open(&data_dir).await?;
+            let result = store
+                .list(ListQuery {
+                    tags: list.tags.clone(),
+                    favorite_only: list.favorite_only,
+                    include_deleted: list.include_deleted,
+                    limit: if list.all {
+                        None
+                    } else {
+                        Some(list.limit.unwrap_or(50))
+                    },
+                    offset: list.offset,
+                })
+                .await?;
+            let output = command_output("list", result)?;
+            write_list(args.format, &output)
+        }
+        Commands::Status => handle_status(&data_dir, args.format).await,
+    }
+}
+
+async fn handle_init(data_dir: &Path, format: OutputFormat) -> CliResult<()> {
+    let created = !data_dir.join(DATABASE_FILE).is_file();
+    let store = V2Store::init(data_dir).await?;
+    let status = store.status().await?;
+    let mut output = command_output("init", status)?;
+    let object = output
+        .as_object_mut()
+        .ok_or_else(|| io::Error::other("V2 status did not serialize as an object"))?;
+    object.insert("created".into(), Value::Bool(created));
+    object.insert(
+        "data_dir".into(),
+        Value::String(data_dir.display().to_string()),
+    );
+    object.insert(
+        "database_path".into(),
+        Value::String(store.database_path().display().to_string()),
+    );
+    write_single(format, &output, human_init)
+}
+
+async fn handle_status(data_dir: &Path, format: OutputFormat) -> CliResult<()> {
+    if !data_dir.join(DATABASE_FILE).is_file() {
+        let output = json!({
+            "schema_version": OUTPUT_SCHEMA_VERSION,
+            "command": "status",
+            "initialized": false,
+            "data_dir": data_dir.display().to_string(),
+            "database_path": data_dir.join(DATABASE_FILE).display().to_string(),
+            "sync_state": "not_configured"
+        });
+        return write_single(format, &output, human_status);
+    }
+
+    let store = V2Store::open(data_dir).await?;
+    let status = store.status().await?;
+    let mut output = command_output("status", status)?;
+    let object = output
+        .as_object_mut()
+        .ok_or_else(|| io::Error::other("V2 status did not serialize as an object"))?;
+    object.insert("initialized".into(), Value::Bool(true));
+    object.insert(
+        "data_dir".into(),
+        Value::String(data_dir.display().to_string()),
+    );
+    object.insert(
+        "database_path".into(),
+        Value::String(store.database_path().display().to_string()),
+    );
+    write_single(format, &output, human_status)
+}
+
+fn resolve_data_dir(explicit: Option<&Path>) -> CliResult<PathBuf> {
+    if let Some(path) = explicit {
+        return Ok(path.to_path_buf());
+    }
+
+    let project = ProjectDirs::from("io.github", "ResearchPocket", "ResearchPocket")
+        .ok_or_else(|| io::Error::other("this platform has no application data directory"))?;
+    Ok(project.data_local_dir().to_path_buf())
+}
+
+fn command_output(command: &str, value: impl Serialize) -> CliResult<Value> {
+    let value = serde_json::to_value(value)?;
+    let mut object = match value {
+        Value::Object(object) => object,
+        _ => {
+            return Err(io::Error::other(format!(
+                "V2 {command} result did not serialize as an object"
+            ))
+            .into());
+        }
+    };
+    object.insert("schema_version".into(), Value::from(OUTPUT_SCHEMA_VERSION));
+    object.insert("command".into(), Value::String(command.to_owned()));
+    Ok(Value::Object(object))
+}
+
+fn write_single(format: OutputFormat, value: &Value, human: fn(&Value)) -> CliResult<()> {
+    match format {
+        OutputFormat::Human => human(value),
+        OutputFormat::Json => write_json(value, true)?,
+        OutputFormat::Ndjson => write_json(value, false)?,
+    }
+    Ok(())
+}
+
+fn write_list(format: OutputFormat, value: &Value) -> CliResult<()> {
+    match format {
+        OutputFormat::Human => human_list(value),
+        OutputFormat::Json => write_json(value, true)?,
+        OutputFormat::Ndjson => {
+            let object = value
+                .as_object()
+                .ok_or_else(|| io::Error::other("V2 list output is not an object"))?;
+            let items = object
+                .get("items")
+                .and_then(Value::as_array)
+                .ok_or_else(|| io::Error::other("V2 list output has no items array"))?;
+            let page = json!({
+                "schema_version": OUTPUT_SCHEMA_VERSION,
+                "type": "list_page",
+                "total": value.pointer("/page/total").cloned().unwrap_or(Value::from(items.len())),
+                "offset": value.pointer("/page/offset").cloned().unwrap_or(Value::from(0)),
+                "returned": value.pointer("/page/returned").cloned().unwrap_or(Value::from(items.len()))
+            });
+            write_json(&page, false)?;
+            for item in items {
+                write_json(
+                    &json!({
+                        "schema_version": OUTPUT_SCHEMA_VERSION,
+                        "type": "item",
+                        "item": item
+                    }),
+                    false,
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn write_json(value: &Value, pretty: bool) -> CliResult<()> {
+    let stdout = io::stdout();
+    let mut output = stdout.lock();
+    if pretty {
+        serde_json::to_writer_pretty(&mut output, value)?;
+    } else {
+        serde_json::to_writer(&mut output, value)?;
+    }
+    writeln!(output)?;
+    Ok(())
+}
+
+fn human_init(value: &Value) {
+    let created = value
+        .get("created")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    println!(
+        "{} ResearchPocket V2 library",
+        if created {
+            "Initialized"
+        } else {
+            "Using existing"
+        }
+    );
+    print_string(value, "library_id", "Library");
+    print_string(value, "data_dir", "Data directory");
+    print_string(value, "database_path", "Database");
+}
+
+fn human_import(value: &Value) {
+    let diagnostics = value
+        .get("rejection_count")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    println!(
+        "{}",
+        if diagnostics == 0 {
+            "V1 import complete"
+        } else {
+            "V1 import complete with migration diagnostics"
+        }
+    );
+    print_string(value, "source_sha256", "Source SHA-256");
+    print_string(value, "source_bundle_sha256", "Source bundle SHA-256");
+    print_number(value, "scanned", "Scanned");
+    print_number(value, "imported", "Imported");
+    print_number(value, "skipped", "Skipped");
+    print_number(value, "rejection_count", "Diagnostics");
+    print_number(value, "tags_imported", "Distinct tags imported");
+    print_bool(value, "source_unchanged", "Source unchanged");
+}
+
+fn human_status(value: &Value) {
+    let initialized = value
+        .get("initialized")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    println!(
+        "ResearchPocket V2: {}",
+        if initialized {
+            "initialized"
+        } else {
+            "not initialized"
+        }
+    );
+    print_string(value, "library_id", "Library");
+    print_string(value, "device_id", "Device");
+    print_string(value, "data_dir", "Data directory");
+    print_string(value, "database_path", "Database");
+    print_number(value, "active_items", "Active saves");
+    print_number(value, "deleted_items", "Deleted saves");
+    print_number(value, "pending_updates", "Pending updates");
+    let sync_state = value
+        .get("sync")
+        .and_then(|sync| sync.get("state"))
+        .and_then(Value::as_str)
+        .or_else(|| value.get("sync_state").and_then(Value::as_str));
+    if let Some(state) = sync_state {
+        println!("Sync: {state}");
+    }
+}
+
+fn human_list(value: &Value) {
+    let Some(items) = value.get("items").and_then(Value::as_array) else {
+        println!("No saves found");
+        return;
+    };
+    let total = value
+        .pointer("/page/total")
+        .and_then(Value::as_u64)
+        .unwrap_or(items.len() as u64);
+    println!("Showing {} of {total} saves", items.len());
+
+    for item in items {
+        println!();
+        let favorite = item
+            .get("favorite")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let title = item
+            .get("title")
+            .and_then(Value::as_str)
+            .unwrap_or("Untitled");
+        println!("{}{}", if favorite { "★ " } else { "" }, title);
+        print_indented_string(item, "url", "URL");
+        print_indented_string(item, "id", "ID");
+        print_indented_string(item, "saved_at", "Saved");
+        if let Some(tags) = item.get("tags").and_then(Value::as_array) {
+            let tags = tags.iter().filter_map(Value::as_str).collect::<Vec<_>>();
+            if !tags.is_empty() {
+                println!("  tags: {}", tags.join(", "));
+            }
+        }
+        if item.get("state").and_then(Value::as_str) == Some("deleted") {
+            println!("  state: deleted");
+        }
+    }
+}
+
+fn report_rejections(value: &Value) {
+    let Some(rejections) = value.get("rejections").and_then(Value::as_array) else {
+        return;
+    };
+    for rejection in rejections {
+        let id = rejection
+            .get("legacy_id")
+            .and_then(Value::as_i64)
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| "unknown row".to_owned());
+        let reason = rejection
+            .get("reason")
+            .or_else(|| rejection.get("message"))
+            .and_then(Value::as_str)
+            .unwrap_or("invalid record");
+        eprintln!("V1 import diagnostic for row {id}: {reason}");
+    }
+}
+
+fn print_string(value: &Value, field: &str, label: &str) {
+    if let Some(text) = value.get(field).and_then(Value::as_str) {
+        println!("{label}: {text}");
+    }
+}
+
+fn print_number(value: &Value, field: &str, label: &str) {
+    if let Some(number) = value.get(field).and_then(Value::as_u64) {
+        println!("{label}: {number}");
+    }
+}
+
+fn print_bool(value: &Value, field: &str, label: &str) {
+    if let Some(flag) = value.get(field).and_then(Value::as_bool) {
+        println!("{label}: {}", if flag { "yes" } else { "no" });
+    }
+}
+
+fn print_indented_string(value: &Value, field: &str, label: &str) {
+    if let Some(text) = value.get(field).and_then(Value::as_str) {
+        println!("  {label}: {text}");
+    }
+}

@@ -5,9 +5,9 @@ use serde::{Deserialize, Serialize};
 use crate::{DomainError, DomainResult};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct ScalarRevision {
+pub struct ScalarRevision<T> {
     pub parents: Vec<String>,
-    pub value: String,
+    pub value: T,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -25,11 +25,11 @@ pub struct LifecycleRevision {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct ScalarView {
-    pub value: String,
+pub struct ScalarView<T> {
+    pub value: T,
     pub winner: String,
     pub heads: Vec<String>,
-    pub revisions: BTreeMap<String, ScalarRevision>,
+    pub revisions: BTreeMap<String, ScalarRevision<T>>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -42,14 +42,19 @@ pub struct LifecycleView {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct CanonicalItem {
-    pub title: ScalarView,
+    pub url: ScalarView<String>,
+    pub title: ScalarView<Option<String>>,
+    pub excerpt: ScalarView<Option<String>>,
+    pub favorite: ScalarView<bool>,
+    pub language: ScalarView<Option<String>>,
+    pub saved_at: ScalarView<i64>,
     pub note: String,
     pub tags: Vec<String>,
     pub lifecycle: LifecycleView,
 }
 
 /// Explicit private-state projection used by the cross-runtime golden test.
-/// No raw containers, unknown fields, timestamps, or transport metadata leak in.
+/// No raw containers, unknown fields, transport timestamps, or envelope metadata leak in.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct CanonicalProjection {
     pub schema_version: u8,
@@ -71,9 +76,9 @@ pub(crate) fn causal_heads<T>(
         .collect()
 }
 
-pub(crate) fn scalar_view(
-    revisions: BTreeMap<String, ScalarRevision>,
-) -> DomainResult<ScalarView> {
+pub(crate) fn scalar_view<T: Clone>(
+    revisions: BTreeMap<String, ScalarRevision<T>>,
+) -> DomainResult<ScalarView<T>> {
     let heads = causal_heads(&revisions, |revision| &revision.parents);
     let winner = heads
         .last()
