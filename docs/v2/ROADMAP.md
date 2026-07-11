@@ -68,8 +68,8 @@ V2 must preserve the following boundaries throughout delivery:
   toolchains, dependency locks, and third-party Actions.
 - Disable Pocket-dependent deployment paths and prevent V1 static generation
   from serializing private notes or credentials.
-- Document the privacy threat model, repository topology, PAT permissions,
-  browser token lifecycle, and publication boundary.
+- Adopt the [privacy threat model](./THREAT_MODEL.md), repository topology, PAT
+  permissions, browser token lifecycle, and publication boundary.
 - Build representative, sanitized fixtures for supported V1 databases and
   legacy exports.
 
