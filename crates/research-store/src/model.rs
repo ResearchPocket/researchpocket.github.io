@@ -108,10 +108,51 @@ pub struct StoreStatus {
     pub active_items: u64,
     pub deleted_items: u64,
     pub pending_updates: u64,
+    pub deferred_updates: u64,
     pub imported_items: u64,
     pub import_sources: u64,
     pub next_sequence: u64,
     pub sync_state: String,
+    pub sync_remote: Option<SyncConfiguration>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SyncConfiguration {
+    pub owner: String,
+    pub repository: String,
+    pub branch: String,
+    pub configured_at: String,
+    pub last_success_at: Option<String>,
+    pub last_error_kind: Option<String>,
+    pub last_error_at: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SyncIdentity {
+    pub library_id: String,
+    pub device_id: String,
+    pub pristine: bool,
+}
+
+pub struct PendingBatch {
+    pub device_id: String,
+    pub sequence: String,
+    pub path: String,
+    pub payload_sha256: String,
+    pub envelope_json: String,
+    pub attempts: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RemoteBatchDisposition {
+    Applied,
+    AlreadyApplied,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RemoteBatchResult {
+    pub disposition: RemoteBatchDisposition,
+    pub acknowledged_outbox: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

@@ -2,13 +2,14 @@
 
 ResearchPocket is a URL-first, local-first personal library. V2 keeps saves under
 your control, supports deliberate human organization, and uses application-level
-CRDT convergence so Git can remain storage and transport rather than a conflict
-resolver.
+CRDT convergence so a private GitHub repository can remain storage and transport
+rather than a conflict resolver.
 
 ## Current V2 CLI
 
 The V2 CLI initializes a private local library, captures and curates saves fully
-offline, imports an existing V1 ResearchPocket database, and lists local state:
+offline, imports an existing V1 ResearchPocket database, searches local state,
+and synchronizes immutable updates through a private GitHub repository:
 
 ```sh
 research init
@@ -19,6 +20,8 @@ research search 'rust sqlite'
 research edit "$ITEM_ID" --title "A better title" --favorite true
 research delete "$ITEM_ID"
 research restore "$ITEM_ID"
+research sync connect OWNER/PRIVATE_REPOSITORY
+research sync run
 research status
 ```
 
@@ -75,6 +78,31 @@ research list --limit 20
 See the [migration guide](docs/v2/MIGRATION.md) for preservation and recovery
 details.
 
+## Synchronize privately without a backend
+
+Create an empty private GitHub repository and a fine-grained PAT limited to that
+repository with `Contents: read/write` and an expiry of at most 90 days. Keep the
+PAT out of shell history by providing it through the process environment:
+
+```sh
+export RESEARCHPOCKET_GITHUB_TOKEN='github_pat_...'
+research sync connect OWNER/PRIVATE_REPOSITORY
+research sync run
+```
+
+The first command creates immutable protocol genesis, drains the durable outbox,
+and verifies the final remote state. For another device, run `research init` in
+a fresh data directory and connect it to the same repository; a pristine device
+adopts the remote library identity and rebuilds its local database while keeping
+a unique device identity.
+
+`research sync run --every 60` provides an optional foreground periodic loop.
+Network, rate-limit, server, and branch-head failures retain the exact queued
+updates for retry. Git commits and their order never choose field values, and
+the CLI never asks you to merge or rebase saves. See the complete
+[CLI workflow](docs/v2/CLI.md#private-github-synchronization) and
+[sync protocol](docs/v2/SYNC_PROTOCOL.md).
+
 ## Human and machine output
 
 Every command accepts `--format human|json|ndjson`. Options are global and may be
@@ -94,13 +122,14 @@ The complete command and output contract is in [docs/v2/CLI.md](docs/v2/CLI.md).
 
 ## Current boundary
 
-This slice is local-only. GitHub synchronization, scheduled synchronization,
-new-device restoration, hosted owner editing, TUI/local web management, and V2
-publication are not implemented yet.
+The CLI now supports private GitHub synchronization, new-device restoration, and
+an optional foreground periodic loop. Hosted owner editing, installed background
+scheduling, checkpoints, TUI/local web management, and V2 publication are not
+implemented yet.
 
-When synchronization lands, clients will exchange immutable CRDT update batches.
-Git commits, branches, merges, rebases, timestamps, and last-push order will never
-choose application values or require the owner to resolve library conflicts.
+Clients exchange immutable CRDT update batches. Git commits, branches, merges,
+rebases, timestamps, and last-push order never choose application values or
+require the owner to resolve library conflicts.
 
 ## Development
 

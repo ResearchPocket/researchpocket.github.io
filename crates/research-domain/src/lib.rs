@@ -5,16 +5,20 @@
 
 mod document;
 mod envelope;
+mod genesis;
+mod identity;
 mod projection;
 
 pub use document::{DomainError, DomainResult, ItemSeed, Library, validate_item_url};
 pub use envelope::{DOMAIN_SCHEMA_VERSION, LORO_CODEC, PROTOCOL_VERSION, UpdateEnvelope};
+pub use genesis::{LibraryGenesis, SYNC_FORMAT};
 pub use projection::{
     CanonicalItem, CanonicalProjection, LifecycleRevision, LifecycleState, LifecycleView,
     ScalarRevision, ScalarView,
 };
 
 const ITEM_ID: &str = "0197f2b5-93d7-7ad4-8c67-21e98f0c7341";
+const LIBRARY_ID: &str = "00000000-0000-7000-8000-000000000001";
 const BASE_OPERATION_PREFIX: &str = "device-base/00000000000000000001";
 const ALICE_TITLE_REVISION: &str = "device-alice/00000000000000000001";
 const BOB_TITLE_REVISION: &str = "device-bob/00000000000000000001";
@@ -50,7 +54,7 @@ pub fn run_convergence_scenario() -> DomainResult<String> {
     let base = Library::from_snapshot(&base_snapshot, 111)?;
     let base_envelope = base.export_envelope(
         &base_before,
-        "library-fixture",
+        LIBRARY_ID,
         "00000000-0000-7000-8000-000000000101",
         1,
         "2026-07-10T00:00:00Z",
@@ -128,7 +132,7 @@ pub fn run_convergence_scenario() -> DomainResult<String> {
     alice.transition_lifecycle(ITEM_ID, ALICE_RESTORE_REVISION, LifecycleState::Active)?;
     let alice_envelope = alice.export_envelope(
         &alice_before,
-        "library-fixture",
+        LIBRARY_ID,
         "00000000-0000-7000-8000-000000000202",
         1,
         "2026-07-10T00:00:01Z",
@@ -144,7 +148,7 @@ pub fn run_convergence_scenario() -> DomainResult<String> {
     bob.transition_lifecycle(ITEM_ID, BOB_DELETE_REVISION, LifecycleState::Deleted)?;
     let bob_envelope = bob.export_envelope(
         &bob_before,
-        "library-fixture",
+        LIBRARY_ID,
         "00000000-0000-7000-8000-000000000303",
         1,
         "2026-07-10T00:00:02Z",
@@ -202,7 +206,7 @@ pub fn run_convergence_scenario() -> DomainResult<String> {
     merged.transition_lifecycle(ITEM_ID, FINAL_RESTORE_REVISION, LifecycleState::Active)?;
     let final_envelope = merged.export_envelope(
         &final_before,
-        "library-fixture",
+        LIBRARY_ID,
         "00000000-0000-7000-8000-000000000404",
         1,
         "2026-07-10T00:00:03Z",

@@ -11,6 +11,7 @@ use thiserror::Error;
 use crate::{
     CanonicalItem, CanonicalProjection, LifecycleRevision, LifecycleState, ScalarRevision,
     ScalarView, UpdateEnvelope,
+    identity::validate_uuid_v7,
     projection::{causal_heads, lifecycle_view, scalar_view},
 };
 
@@ -347,16 +348,18 @@ impl Library {
             .doc
             .export(ExportMode::updates(from))
             .map_err(loro_error)?;
-        Ok(UpdateEnvelope::new(
-            library_id, device_id, sequence, from, created_at, &update,
-        ))
+        UpdateEnvelope::new(library_id, device_id, sequence, from, created_at, &update)
     }
 
     pub fn import_envelope(&self, envelope: &UpdateEnvelope) -> DomainResult<()> {
+        self.import_envelope_has_pending(envelope).map(|_| ())
+    }
+
+    pub fn import_envelope_has_pending(&self, envelope: &UpdateEnvelope) -> DomainResult<bool> {
         let payload = envelope.verified_payload()?;
         LoroDoc::decode_import_blob_meta(&payload, true).map_err(loro_error)?;
-        self.doc.import(&payload).map_err(loro_error)?;
-        Ok(())
+        let status = self.doc.import(&payload).map_err(loro_error)?;
+        Ok(status.pending.is_some())
     }
 
     pub fn canonical_projection(&self) -> DomainResult<CanonicalProjection> {
@@ -441,25 +444,7 @@ fn loro_error(error: impl std::fmt::Display) -> DomainError {
 }
 
 fn validate_item_id(item_id: &str) -> DomainResult<()> {
-    let bytes = item_id.as_bytes();
-    let valid = bytes.len() == 36
-        && bytes[8] == b'-'
-        && bytes[13] == b'-'
-        && bytes[14] == b'7'
-        && bytes[18] == b'-'
-        && matches!(bytes[19], b'8' | b'9' | b'a' | b'b')
-        && bytes[23] == b'-'
-        && bytes.iter().enumerate().all(|(index, byte)| {
-            matches!(index, 8 | 13 | 18 | 23)
-                || byte.is_ascii_digit()
-                || matches!(byte, b'a'..=b'f')
-        });
-    if !valid {
-        return Err(DomainError::InvalidState(format!(
-            "item ID {item_id:?} is not a canonical lowercase UUIDv7"
-        )));
-    }
-    Ok(())
+    validate_uuid_v7(item_id, "item ID")
 }
 
 fn validate_operation_prefix(prefix: &str) -> DomainResult<()> {

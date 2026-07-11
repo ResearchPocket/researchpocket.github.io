@@ -244,10 +244,21 @@ impl V2Store {
         )
         .await?;
         let pending_updates = count_scalar(&self.pool, "SELECT COUNT(*) FROM outbox").await?;
+        let deferred_updates =
+            count_scalar(&self.pool, "SELECT COUNT(*) FROM deferred_batches").await?;
         let imported_items =
             count_scalar(&self.pool, "SELECT COUNT(*) FROM import_rows").await?;
         let import_sources =
             count_scalar(&self.pool, "SELECT COUNT(*) FROM import_sources").await?;
+        let sync_remote = self.sync_configuration().await?;
+        let sync_state = match &sync_remote {
+            None => "not_configured",
+            Some(remote) if remote.last_error_kind.is_some() => "error",
+            Some(_) if deferred_updates > 0 => "waiting_for_dependencies",
+            Some(_) if pending_updates > 0 => "pending",
+            Some(remote) if remote.last_success_at.is_some() => "in_sync",
+            Some(_) => "configured",
+        };
 
         Ok(StoreStatus {
             library_id,
@@ -255,10 +266,12 @@ impl V2Store {
             active_items,
             deleted_items,
             pending_updates,
+            deferred_updates,
             imported_items,
             import_sources,
             next_sequence,
-            sync_state: "not_configured".to_owned(),
+            sync_state: sync_state.to_owned(),
+            sync_remote,
         })
     }
 

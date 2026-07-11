@@ -1,6 +1,6 @@
 # ResearchPocket V2 CLI
 
-Status: local command and output contract
+Status: command and output contract
 
 The shipped CLI is the V2 surface:
 
@@ -13,11 +13,14 @@ research restore <ITEM_ID>
 research import v1 <SOURCE_DB>
 research list
 research search <QUERY>
+research sync connect <OWNER/NAME>
+research sync run
 research status
 ```
 
-GitHub synchronization, scheduled synchronization, GitHub Pages owner editing,
-and V2 publication are not implemented in this slice. Git is not used to resolve
+Private GitHub synchronization and optional foreground periodic sync are
+implemented. GitHub Pages owner editing, background-service installation, and
+V2 publication are not implemented in this slice. Git is never used to resolve
 application changes.
 
 ## Global options
@@ -42,8 +45,8 @@ The usual defaults are:
 
 The local database is `<data-dir>/library.sqlite3`. It contains private local
 state and must not be committed, uploaded, placed in a public-output directory,
-or copied as a synchronization mechanism. Future synchronization exchanges
-immutable CRDT update envelopes instead of SQLite files.
+or copied as a synchronization mechanism. Synchronization exchanges immutable
+CRDT update envelopes instead of SQLite files.
 
 ## Initialize
 
@@ -144,6 +147,64 @@ existing materialized items. Create, import, and edit transactions update the
 index atomically; a failed or read-only search never changes the canonical state,
 outbox, or device sequence. Invalid query syntax returns a sanitized input error.
 
+## Private GitHub synchronization
+
+Create an empty private GitHub repository first. Give a fine-grained PAT with an
+expiry of at most 90 days access to only that repository with
+`Contents: read/write`, then expose it to the current process without putting it
+on a command line:
+
+```sh
+export RESEARCHPOCKET_GITHUB_TOKEN='github_pat_...'
+research sync connect OWNER/PRIVATE_REPOSITORY
+```
+
+`GH_TOKEN` is accepted as a fallback. ResearchPocket uses the token only in a
+sensitive HTTP authorization header. It never writes the token to SQLite, sync
+updates, URLs, logs, generated files, or command output. The repository must
+already exist, be private, expose a default branch name, and not be archived or
+disabled. ResearchPocket bootstraps the default branch of an empty repository;
+`--branch <NAME>` selects an existing non-default branch.
+
+On the first device, `sync connect` creates immutable
+`sync/v1/library.json`, pulls any compatible updates, uploads the exact durable
+outbox batches, and pulls once more. Repository commits are transport audit
+records only. The CLI never runs merge, rebase, or force-push and never uploads
+`library.sqlite3`.
+
+To restore on another device, initialize a completely separate empty data
+directory and connect it to the same repository:
+
+```sh
+research --data-dir /path/to/second-device init
+research --data-dir /path/to/second-device sync connect OWNER/PRIVATE_REPOSITORY
+research --data-dir /path/to/second-device list
+```
+
+Only a pristine local library may adopt the remote library identity. Its own
+device identity remains unique. A nonempty library with another identity fails
+closed instead of combining unrelated saves.
+
+Run a normal cycle explicitly or keep a foreground process polling while it is
+needed:
+
+```sh
+research sync run
+research sync run --every 60
+research --format ndjson sync run --every 60
+```
+
+The periodic interval is 15 seconds to 24 hours. Periodic JSON requires NDJSON
+because it emits a stream. Network, server, contention, and rate-limit failures
+remain recorded, keep every exact outbox byte, and retry in the foreground;
+authentication, version, integrity, and configuration failures stop for owner
+action. A one-shot failure also leaves the outbox untouched for the next
+`research sync run`.
+
+The repository layout, immutable identity rules, retries, and convergence
+contract are defined in [SYNC_PROTOCOL.md](./SYNC_PROTOCOL.md). Credential and
+repository boundaries are defined in [THREAT_MODEL.md](./THREAT_MODEL.md).
+
 ## Status
 
 ```sh
@@ -152,8 +213,10 @@ research status
 
 Status is safe before initialization and reports `initialized: false`. For an
 initialized library it shows library and device identities, active and deleted
-item counts, import summaries, pending outbox count, and synchronization state.
-Until the remote adapter ships, synchronization reports `not_configured`.
+item counts, import summaries, pending outbox and causally deferred update
+counts, synchronization state, configured repository/branch, and the last
+successful sync or sanitized error category. It never exposes a credential or
+update payload.
 
 ## Output contract
 
@@ -165,6 +228,11 @@ protocol versions.
 Create, edit, delete, and restore JSON output use the same materialized item
 shape as list entries, plus top-level `schema_version` and `command` fields. They
 do not expose causal revisions, CRDT bytes, or transport payloads.
+
+Sync JSON includes only repository identity, aggregate pull/apply/upload counts,
+whether a pristine device adopted the remote library, and the remaining pending
+count. Periodic NDJSON emits one `sync_run` record per successful cycle and a
+sanitized `sync_error` record for retryable failures.
 
 JSON list output has one document:
 

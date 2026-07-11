@@ -206,6 +206,13 @@ Loro update, rebuilds affected projections, stores the canonical snapshot, and
 records the receipt. A duplicate identity/hash is success without a new local
 outbox item. A duplicate identity with another hash is an integrity error.
 
+If Loro reports a missing causal dependency, the same transaction stores the
+exact batch receipt plus a deferred marker. Full snapshots do not retain such a
+pending update by themselves. Each later remote arrival replays only the marked
+immutable envelopes and clears markers whose dependencies are now present. A
+pull cycle cannot report success or begin uploading local outbox data while any
+deferred marker remains after the complete discovered operation set is applied.
+
 ## Discovery and download
 
 Clients use the Git Trees API recursively to discover protocol blobs and the Git
@@ -227,9 +234,9 @@ paths, or item fields in logs.
 
 Clients sort discovered operation identities by `(device_id, sequence)` for
 repeatable diagnostics, but correctness is independent of that processing
-order. An update may arrive before its causal predecessor; Loro retains causal
-information and convergence is checked after the complete discovered set is
-applied.
+order. An update may arrive before its causal predecessor; the client retains
+its exact deferred envelope and convergence is checked after the complete
+discovered set is applied.
 
 ## Upload, idempotency, and branch races
 
