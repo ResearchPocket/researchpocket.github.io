@@ -13,7 +13,8 @@ use sqlx::{Connection, FromRow, Pool, QueryBuilder, Row, Sqlite, SqliteConnectio
 use uuid::Uuid;
 
 use crate::{
-    ListPage, ListQuery, ListResult, StoreError, StoreResult, StoreStatus, StoredItem,
+    ListPage, ListQuery, ListResult, SearchQuery, SearchResult, StoreError, StoreResult,
+    StoreStatus, StoredItem,
 };
 
 const DATABASE_FILE: &str = "library.sqlite3";
@@ -138,34 +139,80 @@ impl V2Store {
             .fetch_all(&self.pool)
             .await?;
 
-        let mut items = Vec::with_capacity(rows.len());
-        for row in rows {
-            let tags = sqlx::query_scalar::<_, String>(
-                "SELECT tag FROM item_tags WHERE item_id = ? ORDER BY tag ASC",
-            )
-            .bind(&row.item_id)
-            .fetch_all(&self.pool)
-            .await?;
-            let saved_at = DateTime::<Utc>::from_timestamp(row.saved_at, 0)
-                .ok_or_else(|| {
-                    StoreError::InvalidStore("an item has an invalid timestamp".into())
-                })?
-                .to_rfc3339_opts(SecondsFormat::Secs, true);
-            items.push(StoredItem {
-                id: row.item_id,
-                url: row.url,
-                title: row.title,
-                excerpt: row.excerpt,
-                note: (!row.note.is_empty()).then_some(row.note),
-                favorite: row.favorite,
-                language: row.language,
-                saved_at,
-                tags,
-                state: row.lifecycle_state,
-            });
-        }
+        let items = self.materialize_rows(rows).await?;
 
         Ok(ListResult {
+            page: ListPage {
+                total,
+                offset: query.offset,
+                returned: items.len(),
+            },
+            items,
+        })
+    }
+
+    pub async fn search(&self, query: SearchQuery) -> StoreResult<SearchResult> {
+        let text = query.text.trim();
+        if text.is_empty() {
+            return Err(StoreError::InvalidInput(
+                "search query cannot be blank".into(),
+            ));
+        }
+        let offset =
+            i64::try_from(query.offset).map_err(|_| StoreError::NumericRange("offset"))?;
+        let limit = match query.limit {
+            Some(value) => {
+                i64::try_from(value).map_err(|_| StoreError::NumericRange("limit"))?
+            }
+            None => -1,
+        };
+
+        let mut count_builder = QueryBuilder::<Sqlite>::new(
+            "SELECT COUNT(*) FROM item_search JOIN items i \
+             ON i.item_id = item_search.item_id WHERE item_search MATCH ",
+        );
+        count_builder.push_bind(text.to_owned());
+        append_item_filters(
+            &mut count_builder,
+            &query.tags,
+            query.favorite_only,
+            query.include_deleted,
+        );
+        let total: i64 = count_builder
+            .build_query_scalar()
+            .fetch_one(&self.pool)
+            .await
+            .map_err(search_error)?;
+        let total = u64::try_from(total)
+            .map_err(|_| StoreError::NumericRange("search result count"))?;
+
+        let mut builder = QueryBuilder::<Sqlite>::new(
+            "SELECT i.item_id, i.url, i.title, i.excerpt, i.favorite, i.language, \
+             i.saved_at, i.note, i.lifecycle_state \
+             FROM item_search JOIN items i ON i.item_id = item_search.item_id \
+             WHERE item_search MATCH ",
+        );
+        builder.push_bind(text.to_owned());
+        append_item_filters(
+            &mut builder,
+            &query.tags,
+            query.favorite_only,
+            query.include_deleted,
+        );
+        builder
+            .push(" ORDER BY bm25(item_search), i.saved_at DESC, i.item_id ASC LIMIT ")
+            .push_bind(limit)
+            .push(" OFFSET ")
+            .push_bind(offset);
+        let rows = builder
+            .build_query_as::<ItemRow>()
+            .fetch_all(&self.pool)
+            .await
+            .map_err(search_error)?;
+        let items = self.materialize_rows(rows).await?;
+
+        Ok(SearchResult {
+            query: text.to_owned(),
             page: ListPage {
                 total,
                 offset: query.offset,
@@ -258,6 +305,36 @@ impl V2Store {
         let count: i64 = builder.build_query_scalar().fetch_one(&self.pool).await?;
         u64::try_from(count).map_err(|_| StoreError::NumericRange("item count"))
     }
+
+    async fn materialize_rows(&self, rows: Vec<ItemRow>) -> StoreResult<Vec<StoredItem>> {
+        let mut items = Vec::with_capacity(rows.len());
+        for row in rows {
+            let tags = sqlx::query_scalar::<_, String>(
+                "SELECT tag FROM item_tags WHERE item_id = ? ORDER BY tag ASC",
+            )
+            .bind(&row.item_id)
+            .fetch_all(&self.pool)
+            .await?;
+            let saved_at = DateTime::<Utc>::from_timestamp(row.saved_at, 0)
+                .ok_or_else(|| {
+                    StoreError::InvalidStore("an item has an invalid timestamp".into())
+                })?
+                .to_rfc3339_opts(SecondsFormat::Secs, true);
+            items.push(StoredItem {
+                id: row.item_id,
+                url: row.url,
+                title: row.title,
+                excerpt: row.excerpt,
+                note: (!row.note.is_empty()).then_some(row.note),
+                favorite: row.favorite,
+                language: row.language,
+                saved_at,
+                tags,
+                state: row.lifecycle_state,
+            });
+        }
+        Ok(items)
+    }
 }
 
 #[derive(FromRow)]
@@ -274,18 +351,46 @@ struct ItemRow {
 }
 
 fn append_list_filters(builder: &mut QueryBuilder<Sqlite>, query: &ListQuery) {
-    if !query.include_deleted {
+    append_item_filters(
+        builder,
+        &query.tags,
+        query.favorite_only,
+        query.include_deleted,
+    );
+}
+
+fn append_item_filters(
+    builder: &mut QueryBuilder<Sqlite>,
+    tags: &[String],
+    favorite_only: bool,
+    include_deleted: bool,
+) {
+    if !include_deleted {
         builder.push(" AND i.lifecycle_state = 'active'");
     }
-    if query.favorite_only {
+    if favorite_only {
         builder.push(" AND i.favorite = 1");
     }
-    for tag in &query.tags {
+    for tag in tags {
         builder
             .push(" AND EXISTS (SELECT 1 FROM item_tags it WHERE it.item_id = i.item_id AND it.tag = ")
             .push_bind(tag.clone())
             .push(")");
     }
+}
+
+fn search_error(error: sqlx::Error) -> StoreError {
+    if let sqlx::Error::Database(database) = &error {
+        let message = database.message().to_ascii_lowercase();
+        if message.contains("fts5:")
+            || message.contains("malformed match")
+            || message.contains("unterminated string")
+            || message.contains("syntax error")
+        {
+            return StoreError::InvalidInput("invalid full-text search query".into());
+        }
+    }
+    StoreError::Sqlite(error)
 }
 
 async fn connect(database_path: &Path, create: bool) -> StoreResult<Pool<Sqlite>> {

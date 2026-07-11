@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use directories::ProjectDirs;
 use research_store::{
-    CreateItemRequest, EditItemRequest, ListQuery, OptionalTextUpdate, V2Store,
+    CreateItemRequest, EditItemRequest, ListQuery, OptionalTextUpdate, SearchQuery, V2Store,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -95,6 +95,26 @@ pub async fn handle(args: &CliArgs) -> CliResult<()> {
                 .await?;
             let output = command_output("list", result)?;
             write_list(args.format, &output)
+        }
+        Commands::Search(search) => {
+            let store = V2Store::open(&data_dir).await?;
+            let filters = &search.filters;
+            let result = store
+                .search(SearchQuery {
+                    text: search.query.clone(),
+                    tags: filters.tags.clone(),
+                    favorite_only: filters.favorite_only,
+                    include_deleted: filters.include_deleted,
+                    limit: if filters.all {
+                        None
+                    } else {
+                        Some(filters.limit.unwrap_or(50))
+                    },
+                    offset: filters.offset,
+                })
+                .await?;
+            let output = command_output("search", result)?;
+            write_search(args.format, &output)
         }
         Commands::Status => handle_status(&data_dir, args.format).await,
     }
@@ -195,8 +215,16 @@ fn write_single(format: OutputFormat, value: &Value, human: fn(&Value)) -> CliRe
 }
 
 fn write_list(format: OutputFormat, value: &Value) -> CliResult<()> {
+    write_items(format, value, human_list)
+}
+
+fn write_search(format: OutputFormat, value: &Value) -> CliResult<()> {
+    write_items(format, value, human_search)
+}
+
+fn write_items(format: OutputFormat, value: &Value, human: fn(&Value)) -> CliResult<()> {
     match format {
-        OutputFormat::Human => human_list(value),
+        OutputFormat::Human => human(value),
         OutputFormat::Json => write_json(value, true)?,
         OutputFormat::Ndjson => {
             let object = value
@@ -206,13 +234,21 @@ fn write_list(format: OutputFormat, value: &Value) -> CliResult<()> {
                 .get("items")
                 .and_then(Value::as_array)
                 .ok_or_else(|| io::Error::other("V2 list output has no items array"))?;
-            let page = json!({
+            let page_type = if value.get("query").is_some() {
+                "search_page"
+            } else {
+                "list_page"
+            };
+            let mut page = json!({
                 "schema_version": OUTPUT_SCHEMA_VERSION,
-                "type": "list_page",
+                "type": page_type,
                 "total": value.pointer("/page/total").cloned().unwrap_or(Value::from(items.len())),
                 "offset": value.pointer("/page/offset").cloned().unwrap_or(Value::from(0)),
                 "returned": value.pointer("/page/returned").cloned().unwrap_or(Value::from(items.len()))
             });
+            if let Some(query) = value.get("query") {
+                page["query"] = query.clone();
+            }
             write_json(&page, false)?;
             for item in items {
                 write_json(
@@ -372,6 +408,13 @@ fn human_list(value: &Value) {
             println!("  state: deleted");
         }
     }
+}
+
+fn human_search(value: &Value) {
+    if let Some(query) = value.get("query").and_then(Value::as_str) {
+        println!("Search: {query}");
+    }
+    human_list(value);
 }
 
 fn report_rejections(value: &Value) {

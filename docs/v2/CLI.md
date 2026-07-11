@@ -12,6 +12,7 @@ research delete <ITEM_ID>
 research restore <ITEM_ID>
 research import v1 <SOURCE_DB>
 research list
+research search <QUERY>
 research status
 ```
 
@@ -122,6 +123,27 @@ contain every requested tag.
 The human view is compact. JSON and NDJSON expose materialized item fields but
 never raw CRDT containers, causal revisions, update payloads, or credentials.
 
+## Search
+
+```sh
+research search rust
+research search 'rust sqlite' --favorite-only
+research search 'local*' --tags research --limit 20
+research search '"exact phrase"' --include-deleted
+```
+
+Search is entirely local and covers URL, title, excerpt, private note text, and
+tags through the rebuildable SQLite FTS5 projection. Space-separated terms use
+FTS AND semantics; quoted phrases and `*` prefix queries are supported. Exact tag
+filters are applied in addition to the full-text query. Results rank by FTS
+relevance, then saved time descending and item ID ascending. Deleted items remain
+hidden unless `--include-deleted` is supplied.
+
+Opening a library created before the search migration builds its index from the
+existing materialized items. Create, import, and edit transactions update the
+index atomically; a failed or read-only search never changes the canonical state,
+outbox, or device sequence. Invalid query syntax returns a sanitized input error.
+
 ## Status
 
 ```sh
@@ -175,6 +197,10 @@ line:
 {"schema_version":1,"type":"list_page","total":1,"offset":0,"returned":1}
 {"schema_version":1,"type":"item","item":{"id":"019...","url":"https://example.com"}}
 ```
+
+JSON search output adds the normalized `query` beside the same `page` and
+`items` fields. NDJSON uses a `search_page` first record containing that query,
+followed by the same item records.
 
 Do not parse human output in integrations. The JSON and NDJSON schemas are the
 machine interfaces and require an explicit compatibility plan before a breaking

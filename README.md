@@ -15,6 +15,7 @@ research init
 research add https://example.com/article --tag reading
 research import v1 /path/to/v1/research.sqlite
 research list
+research search 'rust sqlite'
 research edit "$ITEM_ID" --title "A better title" --favorite true
 research delete "$ITEM_ID"
 research restore "$ITEM_ID"
@@ -93,9 +94,9 @@ The complete command and output contract is in [docs/v2/CLI.md](docs/v2/CLI.md).
 
 ## Current boundary
 
-This slice is local-only. Search, GitHub synchronization, scheduled
-synchronization, new-device restoration, hosted owner editing, TUI/local web
-management, and V2 publication are not implemented yet.
+This slice is local-only. GitHub synchronization, scheduled synchronization,
+new-device restoration, hosted owner editing, TUI/local web management, and V2
+publication are not implemented yet.
 
 When synchronization lands, clients will exchange immutable CRDT update batches.
 Git commits, branches, merges, rebases, timestamps, and last-push order will never

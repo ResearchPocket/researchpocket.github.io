@@ -1,5 +1,6 @@
 use research_store::{
-    CreateItemRequest, EditItemRequest, ListQuery, OptionalTextUpdate, StoreError, V2Store,
+    CreateItemRequest, EditItemRequest, ListQuery, OptionalTextUpdate, SearchQuery, StoreError,
+    V2Store,
 };
 
 #[tokio::test]
@@ -60,6 +61,28 @@ async fn local_mutations_are_atomic_durable_and_lifecycle_safe() {
     assert_eq!(edited.note.as_deref(), Some("human 😀 note"));
     assert!(edited.favorite);
     assert_eq!(edited.tags, ["Added", "Keep"]);
+    let search = store
+        .search(SearchQuery {
+            text: "human".into(),
+            limit: None,
+            ..SearchQuery::default()
+        })
+        .await
+        .expect("search edited note");
+    assert_eq!(search.items.len(), 1);
+    assert_eq!(search.items[0].id, first.id);
+    assert!(
+        store
+            .search(SearchQuery {
+                text: "Remove".into(),
+                limit: None,
+                ..SearchQuery::default()
+            })
+            .await
+            .expect("search removed tag")
+            .items
+            .is_empty()
+    );
 
     let no_changes = store
         .edit_item(EditItemRequest {
@@ -83,6 +106,32 @@ async fn local_mutations_are_atomic_durable_and_lifecycle_safe() {
         .expect("list active items");
     assert_eq!(visible.items.len(), 1);
     assert_eq!(visible.items[0].id, duplicate.id);
+    assert!(
+        store
+            .search(SearchQuery {
+                text: "human".into(),
+                limit: None,
+                ..SearchQuery::default()
+            })
+            .await
+            .expect("search hides deleted item")
+            .items
+            .is_empty()
+    );
+    assert_eq!(
+        store
+            .search(SearchQuery {
+                text: "human".into(),
+                include_deleted: true,
+                limit: None,
+                ..SearchQuery::default()
+            })
+            .await
+            .expect("search includes deleted item")
+            .items
+            .len(),
+        1
+    );
     let with_deleted = store
         .list(ListQuery {
             include_deleted: true,
@@ -95,10 +144,43 @@ async fn local_mutations_are_atomic_durable_and_lifecycle_safe() {
 
     let restored = store.restore_item(&first.id).await.expect("restore item");
     assert_eq!(restored.state, "active");
+    assert_eq!(
+        store
+            .search(SearchQuery {
+                text: "human".into(),
+                limit: None,
+                ..SearchQuery::default()
+            })
+            .await
+            .expect("search restored item")
+            .items
+            .len(),
+        1
+    );
     let status = store.status().await.expect("status after mutations");
     assert_eq!(status.active_items, 2);
     assert_eq!(status.pending_updates, 5);
     assert_eq!(status.next_sequence, 6);
+    assert!(matches!(
+        store
+            .search(SearchQuery {
+                text: "   ".into(),
+                ..SearchQuery::default()
+            })
+            .await
+            .expect_err("blank search must fail"),
+        StoreError::InvalidInput(_)
+    ));
+    assert!(matches!(
+        store
+            .search(SearchQuery {
+                text: "\"".into(),
+                ..SearchQuery::default()
+            })
+            .await
+            .expect_err("invalid FTS syntax must fail"),
+        StoreError::InvalidInput(_)
+    ));
     drop(store);
 
     let reopened = V2Store::open(&library_directory)

@@ -804,5 +804,21 @@ pub(crate) async fn persist_item_projection(
             .execute(&mut *connection)
             .await?;
     }
+    sqlx::query("DELETE FROM item_search WHERE item_id = ?")
+        .bind(item_id)
+        .execute(&mut *connection)
+        .await?;
+    sqlx::query(
+        "INSERT INTO item_search (item_id, url, title, excerpt, note, tags) \
+         VALUES (?, ?, ?, ?, ?, ?)",
+    )
+    .bind(item_id)
+    .bind(&item.url.value)
+    .bind(item.title.value.as_deref().unwrap_or(""))
+    .bind(item.excerpt.value.as_deref().unwrap_or(""))
+    .bind(&item.note)
+    .bind(item.tags.join(" "))
+    .execute(&mut *connection)
+    .await?;
     Ok(())
 }
