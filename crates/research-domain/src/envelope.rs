@@ -7,10 +7,23 @@ use sha2::{Digest, Sha256};
 
 use crate::{DomainError, DomainResult};
 
+pub const PROTOCOL_VERSION: u8 = 1;
+pub const DOMAIN_SCHEMA_VERSION: u16 = 2;
+pub const LORO_CODEC: &str = "1.13.6";
+
 /// Immutable transport envelope. Git stores this value but never merges it.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct UpdateEnvelope {
     pub protocol_version: u8,
+    #[serde(default = "default_domain_schema_version")]
+    pub domain_schema_version: u16,
+    #[serde(default = "default_loro_codec")]
+    pub loro_codec: String,
+    #[serde(default)]
+    pub required_features: Vec<String>,
+    #[serde(default)]
+    pub extensions: BTreeMap<String, serde_json::Value>,
     pub library_id: String,
     pub device_id: String,
     /// Fixed-width decimal avoids JavaScript's 64-bit integer limit.
@@ -36,7 +49,11 @@ impl UpdateEnvelope {
             .map(|(peer, counter)| (peer.to_string(), *counter))
             .collect();
         Self {
-            protocol_version: 1,
+            protocol_version: PROTOCOL_VERSION,
+            domain_schema_version: DOMAIN_SCHEMA_VERSION,
+            loro_codec: LORO_CODEC.to_owned(),
+            required_features: Vec::new(),
+            extensions: BTreeMap::new(),
             library_id: library_id.to_owned(),
             device_id: device_id.to_owned(),
             sequence: format!("{sequence:020}"),
@@ -53,8 +70,19 @@ impl UpdateEnvelope {
     }
 
     pub(crate) fn verified_payload(&self) -> DomainResult<Vec<u8>> {
-        if self.protocol_version != 1 {
+        if self.protocol_version != PROTOCOL_VERSION {
             return Err(DomainError::UnsupportedProtocol(self.protocol_version));
+        }
+        if self.domain_schema_version != DOMAIN_SCHEMA_VERSION {
+            return Err(DomainError::UnsupportedDomainSchema(
+                self.domain_schema_version,
+            ));
+        }
+        if self.loro_codec != LORO_CODEC {
+            return Err(DomainError::UnsupportedCodec(self.loro_codec.clone()));
+        }
+        if let Some(feature) = self.required_features.first() {
+            return Err(DomainError::UnsupportedFeature(feature.clone()));
         }
         let payload = STANDARD.decode(&self.payload)?;
         let actual = sha256_hex(&payload);
@@ -67,6 +95,14 @@ impl UpdateEnvelope {
         }
         Ok(payload)
     }
+}
+
+const fn default_domain_schema_version() -> u16 {
+    DOMAIN_SCHEMA_VERSION
+}
+
+fn default_loro_codec() -> String {
+    LORO_CODEC.to_owned()
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {

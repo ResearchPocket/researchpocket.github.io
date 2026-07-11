@@ -41,6 +41,12 @@ pub enum DomainError {
     Base64(#[from] base64::DecodeError),
     #[error("unsupported protocol version {0}")]
     UnsupportedProtocol(u8),
+    #[error("unsupported domain schema version {0}")]
+    UnsupportedDomainSchema(u16),
+    #[error("unsupported Loro codec {0}")]
+    UnsupportedCodec(String),
+    #[error("unsupported required protocol feature {0}")]
+    UnsupportedFeature(String),
     #[error("integrity failure at {path}: expected {expected}, got {actual}")]
     Integrity {
         path: String,

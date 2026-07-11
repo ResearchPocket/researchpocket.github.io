@@ -8,7 +8,7 @@ mod envelope;
 mod projection;
 
 pub use document::{DomainError, DomainResult, ItemSeed, Library, validate_item_url};
-pub use envelope::UpdateEnvelope;
+pub use envelope::{DOMAIN_SCHEMA_VERSION, LORO_CODEC, PROTOCOL_VERSION, UpdateEnvelope};
 pub use projection::{
     CanonicalItem, CanonicalProjection, LifecycleRevision, LifecycleState, LifecycleView,
     ScalarRevision, ScalarView,
@@ -55,6 +55,67 @@ pub fn run_convergence_scenario() -> DomainResult<String> {
         1,
         "2026-07-10T00:00:00Z",
     )?;
+
+    let mut legacy_envelope_json = serde_json::to_value(&base_envelope)?;
+    let legacy_object = legacy_envelope_json
+        .as_object_mut()
+        .ok_or_else(|| DomainError::InvalidState("envelope JSON is not an object".into()))?;
+    legacy_object.remove("domain_schema_version");
+    legacy_object.remove("loro_codec");
+    legacy_object.remove("required_features");
+    legacy_object.remove("extensions");
+    let legacy_envelope: UpdateEnvelope = serde_json::from_value(legacy_envelope_json)?;
+    if legacy_envelope.domain_schema_version != DOMAIN_SCHEMA_VERSION
+        || legacy_envelope.loro_codec != LORO_CODEC
+        || !legacy_envelope.required_features.is_empty()
+        || !legacy_envelope.extensions.is_empty()
+    {
+        return Err(DomainError::InvalidState(
+            "pre-negotiation envelope defaults changed".into(),
+        ));
+    }
+
+    let incompatible = Library::with_peer_id_for_fixture(112)?;
+    let mut future_protocol = base_envelope.clone();
+    future_protocol.protocol_version = PROTOCOL_VERSION + 1;
+    if !matches!(
+        incompatible.import_envelope(&future_protocol),
+        Err(DomainError::UnsupportedProtocol(_))
+    ) {
+        return Err(DomainError::InvalidState(
+            "future protocol version was not rejected".into(),
+        ));
+    }
+    let mut future_schema = base_envelope.clone();
+    future_schema.domain_schema_version = DOMAIN_SCHEMA_VERSION + 1;
+    if !matches!(
+        incompatible.import_envelope(&future_schema),
+        Err(DomainError::UnsupportedDomainSchema(_))
+    ) {
+        return Err(DomainError::InvalidState(
+            "future domain schema was not rejected".into(),
+        ));
+    }
+    let mut future_codec = base_envelope.clone();
+    future_codec.loro_codec = "future-codec".into();
+    if !matches!(
+        incompatible.import_envelope(&future_codec),
+        Err(DomainError::UnsupportedCodec(_))
+    ) {
+        return Err(DomainError::InvalidState(
+            "future Loro codec was not rejected".into(),
+        ));
+    }
+    let mut future_feature = base_envelope.clone();
+    future_feature.required_features = vec!["future-feature".into()];
+    if !matches!(
+        incompatible.import_envelope(&future_feature),
+        Err(DomainError::UnsupportedFeature(_))
+    ) {
+        return Err(DomainError::InvalidState(
+            "unknown required feature was not rejected".into(),
+        ));
+    }
 
     let alice = Library::with_peer_id_for_fixture(202)?;
     alice.import_envelope(&base_envelope)?;
