@@ -15,7 +15,6 @@ sqlx = { version = "0.9.0", default-features = false, features = ["sqlite", "run
 tempfile = "3.27.0"
 thiserror = "2.0.18"
 tokio = { version = "1.52.3", features = ["fs", "sync"] }
-url = "2.5.8"
 uuid = { version = "1.23.4", features = ["serde", "v7"] }
 
 [dev-dependencies]

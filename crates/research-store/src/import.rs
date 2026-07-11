@@ -4,7 +4,9 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use chrono::DateTime;
-use research_domain::{CanonicalProjection, ItemSeed, Library, LifecycleState};
+use research_domain::{
+    CanonicalItem, CanonicalProjection, ItemSeed, Library, LifecycleState, validate_item_url,
+};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use sqlx::sqlite::SqliteConnectOptions;
@@ -735,8 +737,7 @@ async fn commit_import(
 }
 
 fn is_supported_url(value: &str) -> bool {
-    url::Url::parse(value)
-        .is_ok_and(|url| matches!(url.scheme(), "http" | "https") && url.host_str().is_some())
+    validate_item_url(value).is_ok()
 }
 
 async fn metadata(connection: &mut SqliteConnection, key: &str) -> StoreResult<String> {
@@ -747,52 +748,61 @@ async fn metadata(connection: &mut SqliteConnection, key: &str) -> StoreResult<S
         .ok_or_else(|| StoreError::InvalidStore(format!("missing metadata key {key}")))
 }
 
-async fn persist_projection(
+pub(crate) async fn persist_projection(
     connection: &mut SqliteConnection,
     projection: &CanonicalProjection,
 ) -> StoreResult<()> {
     for (item_id, item) in &projection.items {
-        let lifecycle_state = match item.lifecycle.state {
-            LifecycleState::Active => "active",
-            LifecycleState::Deleted => "deleted",
-        };
-        let lifecycle_generation = i64::try_from(item.lifecycle.generation)
-            .map_err(|_| StoreError::NumericRange("lifecycle generation"))?;
-        sqlx::query(
-            "INSERT INTO items \
-             (item_id, url, title, excerpt, favorite, language, saved_at, note, \
-              lifecycle_state, lifecycle_generation) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
-             ON CONFLICT(item_id) DO UPDATE SET \
-             url = excluded.url, title = excluded.title, excerpt = excluded.excerpt, \
-             favorite = excluded.favorite, language = excluded.language, \
-             saved_at = excluded.saved_at, note = excluded.note, \
-             lifecycle_state = excluded.lifecycle_state, \
-             lifecycle_generation = excluded.lifecycle_generation",
-        )
+        persist_item_projection(connection, item_id, item).await?;
+    }
+    Ok(())
+}
+
+pub(crate) async fn persist_item_projection(
+    connection: &mut SqliteConnection,
+    item_id: &str,
+    item: &CanonicalItem,
+) -> StoreResult<()> {
+    let lifecycle_state = match item.lifecycle.state {
+        LifecycleState::Active => "active",
+        LifecycleState::Deleted => "deleted",
+    };
+    let lifecycle_generation = i64::try_from(item.lifecycle.generation)
+        .map_err(|_| StoreError::NumericRange("lifecycle generation"))?;
+    sqlx::query(
+        "INSERT INTO items \
+         (item_id, url, title, excerpt, favorite, language, saved_at, note, \
+          lifecycle_state, lifecycle_generation) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
+         ON CONFLICT(item_id) DO UPDATE SET \
+         url = excluded.url, title = excluded.title, excerpt = excluded.excerpt, \
+         favorite = excluded.favorite, language = excluded.language, \
+         saved_at = excluded.saved_at, note = excluded.note, \
+         lifecycle_state = excluded.lifecycle_state, \
+         lifecycle_generation = excluded.lifecycle_generation",
+    )
+    .bind(item_id)
+    .bind(&item.url.value)
+    .bind(&item.title.value)
+    .bind(&item.excerpt.value)
+    .bind(item.favorite.value)
+    .bind(&item.language.value)
+    .bind(item.saved_at.value)
+    .bind(&item.note)
+    .bind(lifecycle_state)
+    .bind(lifecycle_generation)
+    .execute(&mut *connection)
+    .await?;
+    sqlx::query("DELETE FROM item_tags WHERE item_id = ?")
         .bind(item_id)
-        .bind(&item.url.value)
-        .bind(&item.title.value)
-        .bind(&item.excerpt.value)
-        .bind(item.favorite.value)
-        .bind(&item.language.value)
-        .bind(item.saved_at.value)
-        .bind(&item.note)
-        .bind(lifecycle_state)
-        .bind(lifecycle_generation)
         .execute(&mut *connection)
         .await?;
-        sqlx::query("DELETE FROM item_tags WHERE item_id = ?")
+    for tag in &item.tags {
+        sqlx::query("INSERT INTO item_tags (item_id, tag) VALUES (?, ?)")
             .bind(item_id)
+            .bind(tag)
             .execute(&mut *connection)
             .await?;
-        for tag in &item.tags {
-            sqlx::query("INSERT INTO item_tags (item_id, tag) VALUES (?, ?)")
-                .bind(item_id)
-                .bind(tag)
-                .execute(&mut *connection)
-                .await?;
-        }
     }
     Ok(())
 }

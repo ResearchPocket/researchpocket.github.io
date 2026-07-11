@@ -10,6 +10,54 @@ pub struct ListQuery {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct CreateItemRequest {
+    pub url: String,
+    pub title: Option<String>,
+    pub excerpt: Option<String>,
+    pub favorite: bool,
+    pub language: Option<String>,
+    /// Unix seconds. `None` captures the current time.
+    pub saved_at: Option<i64>,
+    pub note: String,
+    pub tags: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OptionalTextUpdate {
+    Set(String),
+    Clear,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct EditItemRequest {
+    pub item_id: String,
+    pub url: Option<String>,
+    pub title: Option<OptionalTextUpdate>,
+    pub excerpt: Option<OptionalTextUpdate>,
+    pub favorite: Option<bool>,
+    pub language: Option<OptionalTextUpdate>,
+    pub saved_at: Option<i64>,
+    pub note: Option<String>,
+    pub add_tags: Vec<String>,
+    pub remove_tags: Vec<String>,
+}
+
+impl EditItemRequest {
+    pub fn has_changes(&self) -> bool {
+        self.url.is_some()
+            || self.title.is_some()
+            || self.excerpt.is_some()
+            || self.favorite.is_some()
+            || self.language.is_some()
+            || self.saved_at.is_some()
+            || self.note.is_some()
+            || !self.add_tags.is_empty()
+            || !self.remove_tags.is_empty()
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct StoredItem {
     pub id: String,
     pub url: String,

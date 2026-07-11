@@ -26,4 +26,10 @@ pub enum StoreError {
     SourceChanged,
     #[error("a numeric value cannot be represented safely: {0}")]
     NumericRange(&'static str),
+    #[error("item {0} was not found")]
+    ItemNotFound(String),
+    #[error("the edit does not contain any changes")]
+    NoChanges,
+    #[error("invalid mutation input: {0}")]
+    InvalidInput(String),
 }
