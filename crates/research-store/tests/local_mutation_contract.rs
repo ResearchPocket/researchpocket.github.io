@@ -61,6 +61,16 @@ async fn local_mutations_are_atomic_durable_and_lifecycle_safe() {
     assert_eq!(edited.note.as_deref(), Some("human 😀 note"));
     assert!(edited.favorite);
     assert_eq!(edited.tags, ["Added", "Keep"]);
+    let stale_note = store
+        .edit_item(EditItemRequest {
+            item_id: first.id.clone(),
+            note: Some("stale replacement".into()),
+            expected_note: Some(String::new()),
+            ..EditItemRequest::default()
+        })
+        .await
+        .expect_err("stale note replacement must fail");
+    assert!(matches!(stale_note, StoreError::StaleEdit));
     let search = store
         .search(SearchQuery {
             text: "human".into(),
