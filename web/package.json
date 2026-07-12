@@ -7,7 +7,7 @@
     "dev": "npm run wasm && vite",
     "wasm": "node ./scripts/build-wasm.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test src/data/db.test.mjs",
+    "test": "node --experimental-strip-types --test src/data/*.test.mjs",
     "build": "npm run wasm && npm run typecheck && vite build",
     "preview": "vite preview"
   },

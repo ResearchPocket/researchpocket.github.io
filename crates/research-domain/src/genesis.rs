@@ -1,3 +1,4 @@
+use chrono::{DateTime, FixedOffset};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -56,9 +57,11 @@ impl LibraryGenesis {
             return Err(DomainError::UnsupportedFeature(feature.clone()));
         }
         validate_uuid_v7(&self.library_id, "library ID")?;
-        if self.created_at.trim().is_empty() {
+        let created_at: DateTime<FixedOffset> = DateTime::parse_from_rfc3339(&self.created_at)
+            .map_err(|_| DomainError::InvalidState("invalid genesis creation time".into()))?;
+        if created_at.offset().local_minus_utc() != 0 {
             return Err(DomainError::InvalidState(
-                "genesis creation time cannot be blank".into(),
+                "genesis creation time is not in UTC".into(),
             ));
         }
         Ok(())

@@ -57,10 +57,9 @@ from existing Git history are outside the V2 guarantee.
 | Publisher workflow | Trusted, pinned workflow in the private repository. It reads private state and writes only an allowlisted projection using a separate credential. |
 | Third-party pages and networks | Untrusted. They receive no owner data, analytics events, referrers containing secrets, or runtime requests from owner mode. |
 
-The implemented offline browser-store layout and static-shell behavior are
-documented in [WEB.md](./WEB.md). That implementation does not yet accept a PAT;
-the credential lifecycle below remains the binding contract for the browser
-synchronization slice.
+The implemented browser-store, static-shell, and private synchronization
+behavior is documented in [WEB.md](./WEB.md). The credential lifecycle below is
+the binding contract for that owner surface.
 
 ## Repository and credential topology
 

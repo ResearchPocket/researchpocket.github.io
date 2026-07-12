@@ -58,6 +58,17 @@ export interface RemoteObservation {
   observedAt: string;
 }
 
+export interface PersistedSyncConfiguration {
+  key: "github";
+  owner: string;
+  repository: string;
+  branch: string;
+  connectedAt: string;
+  lastSuccessAt: string | null;
+  lastErrorKind: string | null;
+  lastErrorAt: string | null;
+}
+
 interface ResearchPocketBrowserDb extends DBSchema {
   meta: {
     key: "library";
@@ -93,6 +104,10 @@ interface ResearchPocketBrowserDb extends DBSchema {
     key: string;
     value: RemoteObservation;
   };
+  syncConfig: {
+    key: "github";
+    value: PersistedSyncConfiguration;
+  };
 }
 
 let databasePromise: Promise<IDBPDatabase<ResearchPocketBrowserDb>> | undefined;
@@ -105,21 +120,26 @@ export function browserDatabase(): Promise<IDBPDatabase<ResearchPocketBrowserDb>
 export function openBrowserDatabase(
   name: string,
 ): Promise<IDBPDatabase<ResearchPocketBrowserDb>> {
-  return openDB<ResearchPocketBrowserDb>(name, 1, {
-    upgrade(database) {
-      database.createObjectStore("meta", { keyPath: "key" });
-      database.createObjectStore("state", { keyPath: "key" });
+  return openDB<ResearchPocketBrowserDb>(name, 2, {
+    upgrade(database, oldVersion) {
+      if (oldVersion < 1) {
+        database.createObjectStore("meta", { keyPath: "key" });
+        database.createObjectStore("state", { keyPath: "key" });
 
-      const items = database.createObjectStore("items", { keyPath: "id" });
-      items.createIndex("by-saved-at", ["savedAtUnix", "id"]);
+        const items = database.createObjectStore("items", { keyPath: "id" });
+        items.createIndex("by-saved-at", ["savedAtUnix", "id"]);
 
-      const batches = database.createObjectStore("batches", { keyPath: "path" });
-      batches.createIndex("by-device-sequence", ["deviceId", "sequence"], {
-        unique: true,
-      });
-      database.createObjectStore("outbox", { keyPath: "path" });
-      database.createObjectStore("deferred", { keyPath: "path" });
-      database.createObjectStore("remoteObservations", { keyPath: "path" });
+        const batches = database.createObjectStore("batches", { keyPath: "path" });
+        batches.createIndex("by-device-sequence", ["deviceId", "sequence"], {
+          unique: true,
+        });
+        database.createObjectStore("outbox", { keyPath: "path" });
+        database.createObjectStore("deferred", { keyPath: "path" });
+        database.createObjectStore("remoteObservations", { keyPath: "path" });
+      }
+      if (oldVersion < 2) {
+        database.createObjectStore("syncConfig", { keyPath: "key" });
+      }
     },
     blocked() {
       if (typeof window !== "undefined") {
