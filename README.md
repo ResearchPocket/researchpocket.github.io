@@ -17,6 +17,7 @@ research add https://example.com/article --tag reading
 research import v1 /path/to/v1/research.sqlite
 research list
 research search 'rust sqlite'
+research tui
 research edit "$ITEM_ID" --title "A better title" --favorite true
 research delete "$ITEM_ID"
 research restore "$ITEM_ID"
@@ -121,6 +122,22 @@ onboarding and browser pull/push are the next hosted-owner slice; this foundatio
 does not claim that browser-only changes are remotely backed up yet. See the
 [hosted application contract](docs/v2/WEB.md).
 
+## Terminal interface
+
+Run `research tui` from an interactive terminal to manage the selected local V2
+library without a network request. It uses the same `V2Store` transactions as the
+CLI, so capture, edit, favorite, delete, and restore each atomically update the
+CRDT snapshot, SQLite projection, and durable outbox.
+
+The main shortcuts are `a` to capture, `e` or Enter to edit, `/` to search, Space
+to toggle favorite, `x` to delete, `r` to restore, `f` to filter favorites, and
+`d` to cycle active/all/deleted views. Press `?` for complete keyboard help.
+Forms use Tab and Shift+Tab between fields, `Ctrl+N` for a note newline, and
+`Ctrl+S` to save one mutation. Use `q` from the library or `Ctrl+C` anywhere to
+exit and restore the terminal.
+The footer shows pending outbox and synchronization state but the TUI never reads
+a GitHub token or starts synchronization.
+
 ## Human and machine output
 
 Every command accepts `--format human|json|ndjson`. Options are global and may be
@@ -141,10 +158,11 @@ The complete command and output contract is in [docs/v2/CLI.md](docs/v2/CLI.md).
 ## Current boundary
 
 The CLI supports private GitHub synchronization, new-device restoration, and an
-optional foreground periodic loop. The static owner UI supports offline local
-editing through the shared WASM core. Browser GitHub synchronization, installed
-background scheduling, checkpoints, TUI/local web management, and V2 publication
-are not implemented yet.
+optional foreground periodic loop. The TUI supports local capture, curation,
+search, and recoverable lifecycle management. The static owner UI supports
+offline local editing through the shared WASM core. Browser GitHub
+synchronization, installed background scheduling, checkpoints, local web
+management, and V2 publication are not implemented yet.
 
 Clients exchange immutable CRDT update batches. Git commits, branches, merges,
 rebases, timestamps, and last-push order never choose application values or

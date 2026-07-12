@@ -71,6 +71,14 @@ impl V2Store {
                 .items
                 .get(&mutation_item_id)
                 .ok_or_else(|| StoreError::ItemNotFound(mutation_item_id.clone()))?;
+            if request.note.is_some()
+                && request
+                    .expected_note
+                    .as_ref()
+                    .is_some_and(|expected| expected != &current.note)
+            {
+                return Err(StoreError::StaleEdit);
+            }
             if request.note.as_ref() == Some(&current.note) && !has_non_note_changes {
                 return Err(StoreError::NoChanges);
             }

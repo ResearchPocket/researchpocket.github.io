@@ -13,6 +13,7 @@ research restore <ITEM_ID>
 research import v1 <SOURCE_DB>
 research list
 research search <QUERY>
+research tui
 research sync connect <OWNER/NAME>
 research sync run
 research status
@@ -146,6 +147,61 @@ Opening a library created before the search migration builds its index from the
 existing materialized items. Create, import, and edit transactions update the
 index atomically; a failed or read-only search never changes the canonical state,
 outbox, or device sequence. Invalid query syntax returns a sanitized input error.
+
+## Terminal interface
+
+```sh
+research tui
+```
+
+The TUI requires an interactive terminal and uses the resolved V2 data directory.
+It does not support JSON/NDJSON output, make network requests, read GitHub
+credentials, or start synchronization. Its footer reports active/deleted counts,
+the pending outbox count, and sanitized synchronization state.
+
+Main view shortcuts:
+
+| Key | Action |
+| --- | --- |
+| `j`/`k`, arrows | Move selection |
+| `g`/`G`, Home/End | First/last save |
+| `Ctrl+U`/`Ctrl+D` | Scroll long item details |
+| `a` | Capture a URL |
+| `e` or Enter | Edit the selected save |
+| `/` | Search URL, title, excerpt, private note, and tags through SQLite FTS |
+| Space | Toggle favorite |
+| `x` | Confirm recoverable deletion |
+| `r` | Restore a deleted save |
+| `f` | Toggle favorite-only results |
+| `d` | Cycle active, all, and deleted lifecycle views |
+| `R` | Refresh local state |
+| `?` | Open keyboard help |
+| `q` in the main view or `Ctrl+C` anywhere | Exit and restore the terminal |
+
+Capture and edit forms use Tab/Shift+Tab to move through URL, title, excerpt,
+private note, exact tags, and favorite state. `Ctrl+N` inserts a note newline,
+`Ctrl+S` commits, and Escape cancels. Pasting multiline text into the note field
+preserves newlines; other fields normalize pasted newlines to spaces.
+The tags field accepts a convenient comma-separated list for ordinary tags or a
+JSON string array for exact commas and leading/trailing whitespace. Existing
+tags open as JSON, so saving an untouched field is lossless.
+Search accepts the same SQLite FTS5 syntax as `research search`, including quoted
+phrases and `*` prefix queries; malformed syntax is reported without changing the
+active result set.
+
+If another local or synchronized writer changes a note after its edit form opens,
+the TUI refuses the stale whole-note replacement and asks the owner to reopen the
+item. This prevents an old form buffer from erasing newer character-level note
+updates.
+
+Stored control characters are rendered as inert replacement glyphs, so imported
+or synchronized content cannot emit terminal escape sequences. The underlying
+authored value remains unchanged.
+
+Every successful authored action calls the existing `V2Store` API. It therefore
+has the same atomic CRDT snapshot, projection, immutable batch, outbox, validation,
+and error behavior as the corresponding CLI action. The TUI does not duplicate
+domain or synchronization rules.
 
 ## Private GitHub synchronization
 

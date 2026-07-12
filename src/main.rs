@@ -5,6 +5,7 @@ use cli::CliArgs;
 
 mod cli;
 mod sync;
+mod tui;
 mod v2;
 
 #[tokio::main]

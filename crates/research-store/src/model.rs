@@ -39,6 +39,9 @@ pub struct EditItemRequest {
     pub language: Option<OptionalTextUpdate>,
     pub saved_at: Option<i64>,
     pub note: Option<String>,
+    /// Reject a note replacement unless the current note still has this value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_note: Option<String>,
     pub add_tags: Vec<String>,
     pub remove_tags: Vec<String>,
 }

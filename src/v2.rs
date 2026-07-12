@@ -11,7 +11,7 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 use crate::cli::{CliArgs, Commands, ImportCommands, OutputFormat, SyncCommands};
-use crate::sync;
+use crate::{sync, tui};
 
 type CliResult<T> = Result<T, Box<dyn Error>>;
 
@@ -52,6 +52,7 @@ pub async fn handle(args: &CliArgs) -> CliResult<()> {
                     language: optional_text_update(&edit.language, edit.clear_language),
                     saved_at: edit.saved_at,
                     note: edit.note.clone(),
+                    expected_note: None,
                     add_tags: edit.add_tag.clone(),
                     remove_tags: edit.remove_tag.clone(),
                 })
@@ -117,6 +118,13 @@ pub async fn handle(args: &CliArgs) -> CliResult<()> {
                 .await?;
             let output = command_output("search", result)?;
             write_search(args.format, &output)
+        }
+        Commands::Tui => {
+            if args.format != OutputFormat::Human {
+                return Err(io::Error::other("the TUI supports only human output").into());
+            }
+            let store = V2Store::open(&data_dir).await?;
+            tui::run(&store).await
         }
         Commands::Sync { command } => handle_sync(&data_dir, args.format, command).await,
         Commands::Status => handle_status(&data_dir, args.format).await,

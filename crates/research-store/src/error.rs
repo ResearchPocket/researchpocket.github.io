@@ -30,6 +30,8 @@ pub enum StoreError {
     ItemNotFound(String),
     #[error("the edit does not contain any changes")]
     NoChanges,
+    #[error("the item changed after editing began; reopen it before saving")]
+    StaleEdit,
     #[error("invalid mutation input: {0}")]
     InvalidInput(String),
     #[error("synchronization is not configured")]

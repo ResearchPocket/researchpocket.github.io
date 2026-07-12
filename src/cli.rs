@@ -64,6 +64,9 @@ pub enum Commands {
     /// Search URLs, authored fields, private notes, and tags
     Search(SearchArgs),
 
+    /// Manage the local library in a keyboard-first terminal interface
+    Tui,
+
     /// Connect and synchronize through a private GitHub repository
     Sync {
         #[command(subcommand)]
