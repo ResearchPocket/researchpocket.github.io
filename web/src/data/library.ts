@@ -14,6 +14,8 @@ import {
   type PersistedLibraryMeta,
   type PersistedOutbox,
   type PersistedSnapshot,
+  type PersistedSyncConfiguration,
+  type RemoteObservation,
 } from "./db";
 
 export type LibraryItem = PersistedItem;
@@ -45,12 +47,27 @@ export interface EditItemInput {
   favorite?: boolean;
   language?: string | null;
   tags?: string[];
+  expectedNote?: string | null;
 }
 
 export interface RemoteEnvelopeInput {
   path: string;
   blobSha: string;
   envelopeJson: string;
+}
+
+export type SyncConfiguration = PersistedSyncConfiguration;
+
+export interface PendingSyncBatch {
+  path: string;
+  envelopeJson: string;
+  attempts: number;
+}
+
+export interface BrowserSyncIdentity {
+  libraryId: string;
+  deviceId: string;
+  createdAt: string;
 }
 
 interface RawProjection {
@@ -203,7 +220,10 @@ class LibraryRepository {
     if (input.url !== undefined) mutation.url = input.url;
     if (input.title !== undefined) mutation.title = textUpdate(input.title);
     if (input.excerpt !== undefined) mutation.excerpt = textUpdate(input.excerpt);
-    if (input.note !== undefined) mutation.note = textUpdate(input.note);
+    if (input.note !== undefined) {
+      mutation.note = textUpdate(input.note);
+      if (input.expectedNote !== undefined) mutation.expected_note = input.expectedNote;
+    }
     if (input.favorite !== undefined) mutation.favorite = input.favorite;
     if (input.language !== undefined) mutation.language = textUpdate(input.language);
     if (input.tags !== undefined) {
@@ -222,6 +242,161 @@ class LibraryRepository {
 
   async restore(itemId: string): Promise<void> {
     await this.commitMutation({ type: "restore", item_id: itemId });
+  }
+
+  async syncIdentity(): Promise<BrowserSyncIdentity> {
+    const database = await browserDatabase();
+    const meta = await database.get("meta", "library");
+    if (!meta) throw new Error("Create the browser library before connecting sync.");
+    return {
+      libraryId: meta.libraryId,
+      deviceId: meta.deviceId,
+      createdAt: meta.createdAt,
+    };
+  }
+
+  async syncConfiguration(): Promise<SyncConfiguration | null> {
+    return (await (await browserDatabase()).get("syncConfig", "github")) ?? null;
+  }
+
+  async configureSync(
+    owner: string,
+    repository: string,
+    branch: string,
+  ): Promise<SyncConfiguration> {
+    let configured: SyncConfiguration | undefined;
+    await this.write(async (database) => {
+      const existing = await database.get("syncConfig", "github");
+      if (
+        existing &&
+        (existing.owner !== owner ||
+          existing.repository !== repository ||
+          existing.branch !== branch)
+      ) {
+        throw new Error(
+          "This browser library is already connected to another synchronization repository.",
+        );
+      }
+      configured =
+        existing ??
+        {
+          key: "github",
+          owner,
+          repository,
+          branch,
+          connectedAt: new Date().toISOString(),
+          lastSuccessAt: null,
+          lastErrorKind: null,
+          lastErrorAt: null,
+        };
+      await database.put("syncConfig", configured);
+    });
+    if (!configured) throw new Error("The synchronization configuration was not saved.");
+    return configured;
+  }
+
+  async adoptRemoteLibraryIfPristine(libraryId: string): Promise<boolean> {
+    let adopted = false;
+    await this.write(async (database) => {
+      const transaction = database.transaction(
+        ["meta", "items", "batches", "outbox", "deferred", "remoteObservations"],
+        "readwrite",
+      );
+      try {
+        const metaStore = transaction.objectStore("meta");
+        const meta = await metaStore.get("library");
+        if (!meta) throw new Error("The browser library is not initialized.");
+        if (meta.libraryId === libraryId) {
+          await transaction.done;
+          return;
+        }
+        const counts = await Promise.all([
+          transaction.objectStore("items").count(),
+          transaction.objectStore("batches").count(),
+          transaction.objectStore("outbox").count(),
+          transaction.objectStore("deferred").count(),
+          transaction.objectStore("remoteObservations").count(),
+        ]);
+        if (
+          meta.nextSequence !== "00000000000000000001" ||
+          counts.some((count) => count !== 0)
+        ) {
+          throw new Error(
+            "This browser already contains a different library. Open a fresh browser profile or clear this site's local library before restoring another one.",
+          );
+        }
+        await metaStore.put({ ...meta, libraryId });
+        await transaction.done;
+        adopted = true;
+      } catch (error) {
+        abortTransaction(transaction);
+        throw error;
+      }
+    });
+    if (adopted) this.channel.postMessage({ type: "changed" });
+    return adopted;
+  }
+
+  async pendingSyncBatches(): Promise<PendingSyncBatch[]> {
+    const database = await browserDatabase();
+    const outbox = await database.getAll("outbox");
+    const pending = await Promise.all(
+      outbox.map(async (entry) => {
+        const batch = await database.get("batches", entry.path);
+        if (!batch) {
+          throw new Error("A queued synchronization update is missing its immutable batch.");
+        }
+        return {
+          path: entry.path,
+          envelopeJson: batch.envelopeJson,
+          attempts: entry.attempts,
+        };
+      }),
+    );
+    return pending.sort((left, right) => left.path.localeCompare(right.path));
+  }
+
+  async remoteObservation(path: string): Promise<RemoteObservation | null> {
+    return (await (await browserDatabase()).get("remoteObservations", path)) ?? null;
+  }
+
+  async recordRemoteObservation(path: string, blobSha: string): Promise<void> {
+    validateBlobSha(blobSha);
+    await this.write(async (database) => {
+      const existing = await database.get("remoteObservations", path);
+      if (existing && existing.blobSha !== blobSha) {
+        throw new Error("An immutable remote path changed its Git object identity.");
+      }
+      await database.put("remoteObservations", {
+        path,
+        blobSha,
+        observedAt: new Date().toISOString(),
+      });
+    });
+  }
+
+  async recordOutboxAttempt(path: string, errorKind: string | null): Promise<void> {
+    await this.write(async (database) => {
+      const entry = await database.get("outbox", path);
+      if (!entry) return;
+      await database.put("outbox", {
+        ...entry,
+        attempts: entry.attempts + 1,
+        lastErrorKind: errorKind,
+      });
+    });
+  }
+
+  async deferredSyncCount(): Promise<number> {
+    return (await browserDatabase()).count("deferred");
+  }
+
+  async recordSyncSuccess(): Promise<void> {
+    await this.recordSyncResult(null);
+  }
+
+  async recordSyncFailure(kind: string): Promise<void> {
+    await this.recordSyncResult(kind);
   }
 
   async applyRemote(inputs: RemoteEnvelopeInput[]): Promise<void> {
@@ -373,6 +548,20 @@ class LibraryRepository {
       }
     });
     await this.afterCommit("Saved offline — queued for synchronization");
+  }
+
+  private async recordSyncResult(errorKind: string | null): Promise<void> {
+    await this.write(async (database) => {
+      const configuration = await database.get("syncConfig", "github");
+      if (!configuration) return;
+      const now = new Date().toISOString();
+      await database.put("syncConfig", {
+        ...configuration,
+        lastSuccessAt: errorKind === null ? now : configuration.lastSuccessAt,
+        lastErrorKind: errorKind,
+        lastErrorAt: errorKind === null ? null : now,
+      });
+    });
   }
 
   private async load(): Promise<void> {

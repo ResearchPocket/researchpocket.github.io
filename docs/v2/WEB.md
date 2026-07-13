@@ -1,7 +1,6 @@
 # ResearchPocket V2 hosted owner application
 
-Status: offline owner foundation; private GitHub browser synchronization is the
-next slice
+Status: offline owner editing and private GitHub browser synchronization
 
 ## What works now
 
@@ -21,12 +20,14 @@ of them:
 - the next fixed-width device sequence.
 
 The WASM boundary also accepts a set of remote immutable envelopes in one Loro
-session and reports any causally deferred indices. That path is ready for the
-browser GitHub adapter but is not exposed as owner authentication in this slice.
+session and reports any causally deferred indices. The browser GitHub adapter
+discovers exact protocol blobs, validates immutable genesis, applies unseen
+envelopes through this boundary, serializes Contents API creates, and pulls once
+more after uploads or branch-head races.
 
 ## Browser persistence
 
-IndexedDB database `researchpocket-v2`, version 1, contains only these stores:
+IndexedDB database `researchpocket-v2`, version 2, contains only these stores:
 
 | Store | Contents |
 | --- | --- |
@@ -37,11 +38,14 @@ IndexedDB database `researchpocket-v2`, version 1, contains only these stores:
 | `outbox` | Pending local protocol paths, attempt count, sanitized error category |
 | `deferred` | Exact remote envelopes still missing a causal predecessor |
 | `remoteObservations` | Protocol path, Git blob identity, observation time |
+| `syncConfig` | Non-secret owner, repository, branch, and sanitized success/error times |
 
 There is no credential, token, authorization-header, repository secret, or
-generic settings store. A fine-grained PAT will remain in JavaScript memory by
-default when browser synchronization lands; optional tab-only retention will
-use `sessionStorage`, never IndexedDB or `localStorage`.
+generic settings store. The fine-grained PAT remains in JavaScript memory by
+default; explicit tab-only retention uses `sessionStorage`, never IndexedDB or
+`localStorage`. Authentication, authorization, protocol-integrity, or
+upgrade-required failures immediately forget both token copies while preserving
+the durable outbox.
 
 Writes serialize across tabs with the Web Locks API. Browsers without Web Locks
 can read an existing library but fail closed before writing, because an in-tab
@@ -62,9 +66,34 @@ for same-origin shell resources and WASM. It explicitly bypasses all GitHub API
 traffic, cross-origin traffic, and non-GET requests, so it cannot cache a token,
 private API response, or upload body.
 
-Clearing browser site data deletes this device-local replica. Until the browser
-GitHub adapter is connected, browser-only pending changes are not remotely
-recoverable. The UI says this explicitly rather than implying a cloud backup.
+Clearing browser site data deletes this device-local replica. Once a successful
+private sync has drained the outbox, another pristine browser or CLI device can
+restore the library from immutable repository genesis and operations. Unsynced
+changes remain only in the current browser, and the UI reports their pending
+count rather than implying they are already backed up.
+
+## Owner synchronization lifecycle
+
+The owner supplies `OWNER/REPOSITORY`, an optional branch, and an expiring
+fine-grained PAT restricted to that private repository with Contents read/write.
+Repository coordinates and sanitized timestamps persist; the PAT follows the
+memory/tab-only boundary above. The browser rejects public, archived, disabled,
+unavailable, read-only, mismatched-library, malformed, or unsupported remotes
+before uploading queued work.
+
+One browser upload loop runs under a Web Lock. A cycle validates immutable
+genesis, discovers the Git tree, downloads and applies every unseen operation,
+uploads unchanged outbox bytes one at a time, and pulls again. Existing identical
+paths acknowledge the outbox; byte-different paths stop as integrity failures.
+`409`, `422`, ambiguous transport errors, rate limits, and server failures leave
+the exact outbox intact for bounded or later retry. Visible owner tabs request a
+cycle after local changes, on startup, focus, network recovery, and every 60
+seconds.
+
+An edit form carries the note value it originally displayed. If synchronization
+or another tab changes that note before submission, the shared WASM mutation
+boundary rejects the stale replacement before creating an envelope; the owner
+reopens the form against the merged text instead of overwriting it.
 
 ## Build and Pages deployment
 
@@ -80,9 +109,9 @@ npm run build
 The build compiles `research-domain` to WASM, generates the local JavaScript
 bridge, runs strict TypeScript checking, and emits a relative-path static site
 to `web/dist/`. The Pages workflow performs the same build and deploys only
-that directory from the public ResearchPocket source repository. The future
-owner PAT will be scoped to a different private data repository and therefore
-cannot modify the application JavaScript it executes.
+that directory from the public ResearchPocket source repository. The owner PAT
+is scoped to a different private data repository and therefore cannot modify
+the application JavaScript it executes.
 
 The complete credential and publication boundary remains in
 [THREAT_MODEL.md](./THREAT_MODEL.md), and immutable replay behavior remains in

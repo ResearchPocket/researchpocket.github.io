@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
 use crate::{
-    CanonicalProjection, DomainError, DomainResult, ItemSeed, Library, LifecycleState,
-    UpdateEnvelope, identity::validate_uuid_v7,
+    CanonicalProjection, DomainError, DomainResult, ItemSeed, Library, LibraryGenesis,
+    LifecycleState, UpdateEnvelope, identity::validate_uuid_v7,
 };
 
 #[derive(Serialize)]
@@ -74,6 +74,8 @@ enum BrowserMutation {
         saved_at: OptionalField<i64>,
         #[serde(default)]
         note: OptionalField<TextUpdate>,
+        #[serde(default)]
+        expected_note: OptionalField<NullableText>,
         #[serde(default)]
         add_tags: Vec<String>,
         #[serde(default)]
@@ -178,6 +180,23 @@ pub fn apply_remote_envelopes(
         envelope_json_array,
     )
     .map_err(js_error)
+}
+
+/// Create the immutable protocol genesis with the native domain constants.
+#[wasm_bindgen(js_name = createSyncGenesis)]
+pub fn create_sync_genesis(library_id: &str, created_at: &str) -> Result<String, JsValue> {
+    let genesis = LibraryGenesis::new(library_id, created_at).map_err(js_error)?;
+    serde_json::to_string(&genesis).map_err(|error| js_error(error.into()))
+}
+
+/// Validate remote protocol genesis and return its canonical library identity.
+#[wasm_bindgen(js_name = validateSyncGenesis)]
+pub fn validate_sync_genesis(genesis_json: &str) -> Result<String, JsValue> {
+    let genesis: LibraryGenesis = serde_json::from_str(genesis_json)
+        .map_err(DomainError::from)
+        .map_err(js_error)?;
+    genesis.validate().map_err(js_error)?;
+    Ok(genesis.library_id)
 }
 
 fn initialize(peer_id: &str) -> DomainResult<String> {
@@ -345,6 +364,7 @@ fn apply_one_mutation(
             language,
             saved_at,
             note,
+            expected_note,
             add_tags,
             remove_tags,
         } => apply_edit(
@@ -360,6 +380,7 @@ fn apply_one_mutation(
             language.0,
             saved_at.0,
             note.0,
+            expected_note.0,
             add_tags,
             remove_tags,
         ),
@@ -396,6 +417,7 @@ fn apply_edit(
     language: Option<TextUpdate>,
     saved_at: Option<i64>,
     note: Option<TextUpdate>,
+    expected_note: Option<NullableText>,
     add_tags: Vec<String>,
     remove_tags: Vec<String>,
 ) -> DomainResult<()> {
@@ -445,6 +467,13 @@ fn apply_edit(
         library.write_saved_at(item_id, &format!("{prefix}/saved-at"), saved_at)?;
     }
     if let Some(note) = note {
+        if let Some(expected_note) = expected_note
+            && expected_note.0.as_deref().unwrap_or_default() != current.note.as_str()
+        {
+            return Err(DomainError::InvalidState(
+                "the note changed after this edit form opened".into(),
+            ));
+        }
         let replacement = note.value().unwrap_or_default();
         if replacement == current.note && !has_non_note_changes {
             return Err(DomainError::InvalidState(

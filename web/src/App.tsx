@@ -10,6 +10,10 @@ import {
   type LibraryState,
   libraryRepository,
 } from "./data/library.ts";
+import {
+  browserSync,
+  type BrowserSyncState,
+} from "./data/sync.ts";
 
 type AddInput = Parameters<typeof libraryRepository.add>[0];
 type EditInput = Parameters<typeof libraryRepository.edit>[1];
@@ -37,9 +41,19 @@ const EMPTY_LIBRARY_STATE: LibraryState = {
   status: "opening",
 };
 
+const EMPTY_SYNC_STATE: BrowserSyncState = {
+  configuration: null,
+  credentialAvailable: false,
+  syncing: false,
+  status: "Private sync is not connected",
+  error: null,
+  lastCycle: null,
+};
+
 export function App() {
   const [libraryState, setLibraryState] =
     useState<LibraryState>(EMPTY_LIBRARY_STATE);
+  const [syncState, setSyncState] = useState<BrowserSyncState>(EMPTY_SYNC_STATE);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<LifecycleFilter>("active");
   const [editingItem, setEditingItem] = useState<LibraryItemView | null>(null);
@@ -55,10 +69,14 @@ export function App() {
         setLibraryState(nextState);
       }
     });
+    const unsubscribeSync = browserSync.subscribe((nextState) => {
+      if (active) setSyncState(nextState);
+    });
 
     return () => {
       active = false;
       unsubscribe();
+      unsubscribeSync();
     };
   }, []);
 
@@ -132,7 +150,10 @@ export function App() {
 
   async function saveEdit(item: LibraryItemView, input: EditInput) {
     const saved = await runAction("Update link", "Changes saved locally.", () =>
-      libraryRepository.edit(item.id, input),
+      libraryRepository.edit(item.id, {
+        ...input,
+        expectedNote: item.note ?? null,
+      }),
     );
     if (saved) {
       closeEditor();
@@ -200,6 +221,8 @@ export function App() {
       </header>
 
       <main>
+        <SyncPanel state={syncState} />
+
         <section aria-labelledby="capture-heading" className="capture-section">
           <div className="section-intro">
             <p className="eyebrow">Capture</p>
@@ -353,6 +376,184 @@ function Welcome({
         </p>
       </section>
     </main>
+  );
+}
+
+function SyncPanel({ state }: { state: BrowserSyncState }) {
+  const [repository, setRepository] = useState("");
+  const [branch, setBranch] = useState("");
+  const [formError, setFormError] = useState<string | null>(null);
+
+  async function connect(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const credential = readSyncCredential(form);
+    setFormError(null);
+    try {
+      await browserSync.connect({ repository, branch, ...credential });
+      form.reset();
+    } catch (error) {
+      setFormError(readError(error));
+    } finally {
+      clearCredentialInput(form);
+    }
+  }
+
+  async function unlock(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const credential = readSyncCredential(form);
+    setFormError(null);
+    try {
+      await browserSync.unlock(credential);
+      form.reset();
+    } catch (error) {
+      setFormError(readError(error));
+    } finally {
+      clearCredentialInput(form);
+    }
+  }
+
+  async function syncNow() {
+    setFormError(null);
+    try {
+      await browserSync.syncNow();
+    } catch (error) {
+      setFormError(readError(error));
+    }
+  }
+
+  const error = formError ?? state.error;
+  const remote = state.configuration;
+
+  return (
+    <section aria-labelledby="sync-heading" className="sync-section">
+      <div className="sync-copy">
+        <p className="eyebrow">Private sync</p>
+        <h1 id="sync-heading">Your library, wherever you open it.</h1>
+        <p>
+          ResearchPocket exchanges immutable application updates through a private
+          GitHub repository. Git commits never decide which save or note wins.
+        </p>
+        <div className="sync-state" role="status">
+          <span aria-hidden="true" className="status-dot" />
+          <span>{state.status}</span>
+        </div>
+        {remote ? (
+          <p className="sync-remote">
+            <strong>{remote.owner}/{remote.repository}</strong>
+            <span>Branch {remote.branch}</span>
+          </p>
+        ) : null}
+      </div>
+
+      {!remote ? (
+        <form className="sync-form" onSubmit={(event) => void connect(event)}>
+          <label className="field">
+            <span>Private data repository</span>
+            <input
+              autoCapitalize="none"
+              autoComplete="off"
+              onChange={(event) => setRepository(event.target.value)}
+              placeholder="owner/private-repository"
+              required
+              spellCheck={false}
+              value={repository}
+            />
+          </label>
+          <label className="field">
+            <span>Branch <small>default branch when blank</small></span>
+            <input
+              autoCapitalize="none"
+              autoComplete="off"
+              onChange={(event) => setBranch(event.target.value)}
+              placeholder="main"
+              spellCheck={false}
+              value={branch}
+            />
+          </label>
+          <TokenFields />
+          {error ? <p className="sync-error" role="alert">{error}</p> : null}
+          <button className="primary-button" disabled={state.syncing} type="submit">
+            {state.syncing ? "Connecting…" : "Connect private sync"}
+          </button>
+        </form>
+      ) : !state.credentialAvailable ? (
+        <form className="sync-form" onSubmit={(event) => void unlock(event)}>
+          <p>
+            Repository details stay on this device, but the credential does not.
+            Enter it again to pull and push queued changes.
+          </p>
+          <TokenFields />
+          {error ? <p className="sync-error" role="alert">{error}</p> : null}
+          <button className="primary-button" disabled={state.syncing} type="submit">
+            {state.syncing ? "Synchronizing…" : "Unlock and sync"}
+          </button>
+        </form>
+      ) : (
+        <div className="sync-controls">
+          <p>
+            Your credential is active only in this browser context and never enters
+            the library, an API URL, or the service-worker cache.
+          </p>
+          {state.lastCycle ? (
+            <dl className="sync-counts">
+              <div><dt>Downloaded</dt><dd>{state.lastCycle.downloaded}</dd></div>
+              <div><dt>Uploaded</dt><dd>{state.lastCycle.uploaded}</dd></div>
+              <div><dt>Pending</dt><dd>{state.lastCycle.pending}</dd></div>
+            </dl>
+          ) : null}
+          {error ? <p className="sync-error" role="alert">{error}</p> : null}
+          <div className="sync-actions">
+            <button
+              className="primary-button"
+              disabled={state.syncing}
+              onClick={() => void syncNow()}
+              type="button"
+            >
+              {state.syncing ? "Synchronizing…" : "Sync now"}
+            </button>
+            <button
+              className="secondary-button"
+              disabled={state.syncing}
+              onClick={() => browserSync.forgetCredential()}
+              type="button"
+            >
+              Forget token
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function TokenFields() {
+  return (
+    <>
+      <label className="field sync-token-field">
+        <span>Fine-grained GitHub token</span>
+        <input
+          autoCapitalize="none"
+          autoComplete="off"
+          name="github-token"
+          required
+          spellCheck={false}
+          type="password"
+        />
+      </label>
+      <label className="check-field sync-session-choice">
+        <input
+          name="remember-for-tab"
+          type="checkbox"
+        />
+        <span>Keep the token only for this tab session</span>
+      </label>
+      <p className="sync-help">
+        Use an expiring fine-grained token limited to this private repository with
+        Contents read and write access. Leave the box off to keep it in memory only.
+      </p>
+    </>
   );
 }
 
@@ -784,6 +985,23 @@ function parseTags(value: string) {
         .filter(Boolean),
     ),
   );
+}
+
+function readSyncCredential(form: HTMLFormElement) {
+  const data = new FormData(form);
+  const token = data.get("github-token");
+  if (typeof token !== "string") {
+    throw new Error("Enter a fine-grained GitHub token.");
+  }
+  return {
+    token,
+    rememberForTab: data.get("remember-for-tab") === "on",
+  };
+}
+
+function clearCredentialInput(form: HTMLFormElement) {
+  const input = form.elements.namedItem("github-token");
+  if (input instanceof HTMLInputElement) input.value = "";
 }
 
 function optionalText(value: string) {

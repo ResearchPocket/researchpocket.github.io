@@ -117,10 +117,13 @@ npm ci
 npm run dev
 ```
 
-The production build is deployed as a credential-free GitHub Pages shell. PAT
-onboarding and browser pull/push are the next hosted-owner slice; this foundation
-does not claim that browser-only changes are remotely backed up yet. See the
-[hosted application contract](docs/v2/WEB.md).
+The production build is deployed as a credential-free GitHub Pages shell. Its
+Private sync panel connects a separate private data repository with an expiring,
+repository-scoped fine-grained PAT. The browser pulls on startup, focus, network
+recovery, and every 60 seconds while visible; local changes also request a sync.
+The token stays in JavaScript memory unless the owner explicitly chooses
+tab-only `sessionStorage`, and it never enters IndexedDB, URLs, logs, or the
+service-worker cache. See the [hosted application contract](docs/v2/WEB.md).
 
 ## Terminal interface
 
@@ -157,12 +160,11 @@ The complete command and output contract is in [docs/v2/CLI.md](docs/v2/CLI.md).
 
 ## Current boundary
 
-The CLI supports private GitHub synchronization, new-device restoration, and an
-optional foreground periodic loop. The TUI supports local capture, curation,
-search, and recoverable lifecycle management. The static owner UI supports
-offline local editing through the shared WASM core. Browser GitHub
-synchronization, installed background scheduling, checkpoints, local web
-management, and V2 publication are not implemented yet.
+The CLI and hosted owner UI support private GitHub synchronization and
+new-device restoration. The TUI supports local capture, curation, search, and
+recoverable lifecycle management. Installed background scheduling, checkpoints,
+the loopback local web server, and selective V2 publication are not implemented
+yet.
 
 Clients exchange immutable CRDT update batches. Git commits, branches, merges,
 rebases, timestamps, and last-push order never choose application values or

@@ -43,6 +43,36 @@ fn browser_snapshot_boundary_preserves_the_mutation_and_replay_contract() {
             "tags": ["z", "a", "a"]
         }),
     );
+    let note_advanced = mutation(
+        created["snapshot"].as_str().expect("created snapshot"),
+        "2",
+        json!({
+            "type": "edit",
+            "item_id": ITEM_ID,
+            "note": {"type": "set", "value": "hello from sync"},
+            "expected_note": "hello"
+        }),
+    );
+    assert!(
+        apply_mutation(
+            note_advanced["snapshot"]
+                .as_str()
+                .expect("advanced-note snapshot"),
+            "18446744073709551614",
+            LIBRARY_ID,
+            "00000000-0000-7000-8000-000000000002",
+            "3",
+            "2026-07-11T00:00:00Z",
+            &json!({
+                "type": "edit",
+                "item_id": ITEM_ID,
+                "note": {"type": "set", "value": "stale replacement"},
+                "expected_note": "hello"
+            })
+            .to_string(),
+        )
+        .is_err()
+    );
     let edited = mutation(
         created["snapshot"].as_str().expect("created snapshot"),
         "2",

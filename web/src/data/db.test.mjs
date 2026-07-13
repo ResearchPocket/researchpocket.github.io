@@ -53,9 +53,19 @@ test("a browser library commit survives reopen and an interrupted replacement ro
     attempts: 0,
     lastErrorKind: null,
   };
+  const syncConfig = {
+    key: "github",
+    owner: "owner",
+    repository: "private-library",
+    branch: "main",
+    connectedAt: "2026-07-11T00:00:02.000Z",
+    lastSuccessAt: null,
+    lastErrorKind: null,
+    lastErrorAt: null,
+  };
 
   const commit = database.transaction(
-    ["meta", "state", "items", "batches", "outbox"],
+    ["meta", "state", "items", "batches", "outbox", "syncConfig"],
     "readwrite",
   );
   await commit.objectStore("meta").add(meta);
@@ -63,6 +73,7 @@ test("a browser library commit survives reopen and an interrupted replacement ro
   await commit.objectStore("items").add(item);
   await commit.objectStore("batches").add(batch);
   await commit.objectStore("outbox").add(outbox);
+  await commit.objectStore("syncConfig").add(syncConfig);
   await commit.done;
 
   database.close();
@@ -72,9 +83,11 @@ test("a browser library commit survives reopen and an interrupted replacement ro
   assert.deepEqual(await database.get("items", item.id), item);
   assert.deepEqual(await database.get("batches", path), batch);
   assert.deepEqual(await database.get("outbox", path), outbox);
+  assert.deepEqual(await database.get("syncConfig", "github"), syncConfig);
+  assert.equal(JSON.stringify(syncConfig).includes("token"), false);
 
   const interrupted = database.transaction(
-    ["meta", "state", "items", "outbox"],
+    ["meta", "state", "items", "outbox", "syncConfig"],
     "readwrite",
   );
   void interrupted.objectStore("meta").put({
@@ -87,6 +100,10 @@ test("a browser library commit survives reopen and an interrupted replacement ro
   }).catch(() => undefined);
   void interrupted.objectStore("items").clear().catch(() => undefined);
   void interrupted.objectStore("outbox").delete(path).catch(() => undefined);
+  void interrupted.objectStore("syncConfig").put({
+    ...syncConfig,
+    lastErrorKind: "transport",
+  }).catch(() => undefined);
   interrupted.abort();
   await assert.rejects(interrupted.done);
 
@@ -96,6 +113,7 @@ test("a browser library commit survives reopen and an interrupted replacement ro
   assert.deepEqual(await database.get("state", "canonical"), snapshot);
   assert.deepEqual(await database.get("items", item.id), item);
   assert.deepEqual(await database.get("outbox", path), outbox);
+  assert.deepEqual(await database.get("syncConfig", "github"), syncConfig);
 
   database.close();
   await deleteDB(databaseName);

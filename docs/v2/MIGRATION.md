@@ -112,8 +112,9 @@ not public publication artifacts.
 
 ## Current alpha boundary
 
-Migration creates a local V2 library only. GitHub synchronization, new-device
-restore from GitHub, and GitHub Pages owner editing are not implemented yet. Do
-not synchronize `library.sqlite3` through Git. The later sync adapter will upload
-immutable CRDT update envelopes and will never use Git merge behavior to resolve
-library changes.
+Migration first creates a local V2 library. Connect that library through the CLI
+or hosted owner's Private sync panel to upload immutable CRDT envelopes to a
+separate private data repository. A pristine CLI or browser device can then
+adopt the repository's library identity and restore all saves. Never synchronize
+`library.sqlite3` through Git; Git merge behavior does not resolve library
+changes.
