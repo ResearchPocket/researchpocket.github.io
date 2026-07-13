@@ -10,8 +10,10 @@ use research_store::{
 use serde::Serialize;
 use serde_json::{Value, json};
 
-use crate::cli::{CliArgs, Commands, ImportCommands, OutputFormat, SyncCommands};
-use crate::{sync, tui};
+use crate::cli::{
+    CaptureCommands, CliArgs, Commands, ImportCommands, OutputFormat, SyncCommands,
+};
+use crate::{capture, sync, tui};
 
 type CliResult<T> = Result<T, Box<dyn Error>>;
 
@@ -126,8 +128,39 @@ pub async fn handle(args: &CliArgs) -> CliResult<()> {
             let store = V2Store::open(&data_dir).await?;
             tui::run(&store).await
         }
+        Commands::Capture { command } => handle_capture(&data_dir, args.format, command).await,
         Commands::Sync { command } => handle_sync(&data_dir, args.format, command).await,
         Commands::Status => handle_status(&data_dir, args.format).await,
+    }
+}
+
+async fn handle_capture(
+    data_dir: &Path,
+    format: OutputFormat,
+    command: &CaptureCommands,
+) -> CliResult<()> {
+    match command {
+        CaptureCommands::Install => {
+            let result = capture::install(data_dir).await?;
+            let output = command_output("capture_install", result)?;
+            write_single(format, &output, human_capture_install)
+        }
+        CaptureCommands::Status => {
+            let output = command_output("capture_status", capture::status()?)?;
+            write_single(format, &output, human_capture_status)
+        }
+        CaptureCommands::Uninstall => {
+            let output = command_output("capture_uninstall", capture::uninstall()?)?;
+            write_single(format, &output, human_capture_uninstall)
+        }
+        CaptureCommands::Handle(handle) => {
+            let item = capture::handle(data_dir, &handle.uri, handle.notify).await?;
+            if handle.notify {
+                return Ok(());
+            }
+            let output = command_output("capture_handle", item)?;
+            write_single(format, &output, human_capture_handle)
+        }
     }
 }
 
@@ -400,6 +433,40 @@ fn human_delete(value: &Value) {
 
 fn human_restore(value: &Value) {
     human_mutation("Restored", value);
+}
+
+fn human_capture_install(value: &Value) {
+    println!("Installed Firefox capture handler");
+    print_string(value, "scheme", "Scheme");
+    print_string(value, "data_dir", "Library");
+    print_string(value, "executable", "Executable");
+}
+
+fn human_capture_status(value: &Value) {
+    let installed = value
+        .get("installed")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    println!(
+        "Firefox capture handler: {}",
+        if installed {
+            "installed"
+        } else {
+            "not installed"
+        }
+    );
+    print_string(value, "scheme", "Scheme");
+    print_string(value, "data_dir", "Library");
+    print_string(value, "executable", "Executable");
+}
+
+fn human_capture_uninstall(value: &Value) {
+    println!("Removed Firefox capture handler");
+    print_string(value, "scheme", "Scheme");
+}
+
+fn human_capture_handle(value: &Value) {
+    human_mutation("Saved", value);
 }
 
 fn human_mutation(action: &str, value: &Value) {

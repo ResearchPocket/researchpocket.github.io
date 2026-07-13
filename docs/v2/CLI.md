@@ -7,6 +7,9 @@ The shipped CLI is the V2 surface:
 ```text
 research init
 research add <URL>
+research capture install
+research capture status
+research capture uninstall
 research edit <ITEM_ID>
 research delete <ITEM_ID>
 research restore <ITEM_ID>
@@ -19,9 +22,9 @@ research sync run
 research status
 ```
 
-Private GitHub synchronization and optional foreground periodic sync are
-implemented. GitHub Pages owner editing, background-service installation, and
-V2 publication are not implemented in this slice. Git is never used to resolve
+Private GitHub synchronization, optional foreground periodic sync, and GitHub
+Pages owner editing are implemented. Background-service installation and V2
+publication are not implemented in this slice. Git is never used to resolve
 application changes.
 
 ## Global options
@@ -75,6 +78,142 @@ Capture is immediate and makes no network request. Only the URL is required.
 Title, excerpt, language, note, favorite state, tags, and an optional original
 `--saved-at <UNIX_SECONDS>` value are stored exactly as supplied. Saving the same
 URL twice creates two distinct items.
+
+## Firefox bookmarklet capture
+
+The installed CLI can receive a Firefox bookmarklet through a per-user custom
+protocol handler. It invokes the same V2 store mutation as `research add`; there
+is no background server, browser extension, Pocket provider, raw SQLite handoff,
+or network dependency.
+
+### Install the native handler
+
+First put the binary at its long-term location and initialize the library that
+browser captures should use. Then install and inspect the handler:
+
+```sh
+research init
+research capture install
+research capture status
+```
+
+Installation is idempotent. It registers `researchpocket://` only for the current
+operating-system user and binds the current executable plus the resolved absolute
+V2 data directory. It does not require administrator privileges. The platforms
+use their normal per-user facilities:
+
+- Linux installs an XDG desktop protocol association and uses `xdg-mime`;
+- macOS installs a per-user application bridge that receives the URL event; and
+- Windows installs a per-user URL-protocol registry association.
+
+A Firefox-launched process does not reliably inherit variables from an open
+terminal. If this library uses an override, provide it while installing:
+
+```sh
+research --data-dir /absolute/path/to/private/library capture install
+```
+
+`RESEARCHPOCKET_DATA_DIR` follows the usual global precedence and is resolved at
+installation time. Neither selection method puts a database path in a capture
+URI. Re-run `capture install` after moving the executable or switching the target
+library. On macOS, the application bridge contains a private copy of the CLI, so
+re-run installation after every CLI upgrade as well.
+
+### Add and use the Firefox bookmarklet
+
+1. Show Firefox's Bookmarks Toolbar.
+2. Right-click the toolbar and choose **Add Bookmark**.
+3. Set the name to `Save to ResearchPocket`.
+4. Copy the entire one-line [bookmarklet.js](../../bookmarklet.js) into the
+   bookmark's **URL** or **Location** field. It must begin immediately with
+   `javascript:`.
+5. Visit an HTTP(S) page and click the bookmarklet.
+6. The first time Firefox asks about an external application, choose
+   ResearchPocket and allow the link to open. Remembering the choice is optional
+   and may be scoped to the current site or browser profile.
+7. Run `research list` to confirm the local capture.
+
+The supplied bookmarklet sends only `version`, `url`, and `title`. It does not
+contain a token, repository name, filesystem path, provider name, note, or tags.
+Firefox may ask again in private browsing or when site permissions are cleared.
+Do not disable Firefox's external-protocol safety checks globally.
+
+### Capture URI contract
+
+The version 1 transport has this shape:
+
+```text
+researchpocket://capture?version=1&url=<percent-encoded-http(s)-url>&title=<percent-encoded-title>
+```
+
+`version=1` and one absolute HTTP(S) `url` are required. `title` is optional.
+Advanced local integrations may repeat `tag`, and may provide one `note` and one
+`favorite=true` field:
+
+```text
+researchpocket://capture?version=1&url=https%3A%2F%2Fexample.com&title=Example&tag=read&tag=rust&note=Review&favorite=true
+```
+
+The advanced/internal entry point is available for protocol dispatch and manual
+diagnosis:
+
+```sh
+research capture handle \
+  'researchpocket://capture?version=1&url=https%3A%2F%2Fexample.com&title=Example'
+```
+
+Only the exact `researchpocket://capture` route is accepted. Unsupported
+versions, non-HTTP(S) targets, fragments, user information, or ports on the outer
+custom-scheme URI, unknown fields, repeated singleton fields, invalid booleans,
+and oversized payloads fail before the library changes. An ordinary target page
+URL may still contain its own port or fragment. Repeated `tag` is the sole
+intentional repeated field. The URI never accepts a data or database path,
+provider, GitHub coordinate or credential, executable argument, or shell
+fragment.
+Percent-decoded values are passed as data rather than evaluated by a shell.
+
+One accepted URI creates exactly one item through the normal atomic V2 path. Its
+CRDT state, SQLite projection, immutable update, durable outbox, and device
+sequence commit together. A desktop-notification failure occurs only after that
+commit and cannot roll the save back.
+
+### Sync, removal, and troubleshooting
+
+Browser capture is deliberately local. It never starts synchronization or reads
+a GitHub token. Upload queued captures separately:
+
+```sh
+research sync run
+# Or, while foreground polling is useful:
+research sync run --every 60
+```
+
+Inspect or remove the current user's association with:
+
+```sh
+research capture status
+research capture uninstall
+```
+
+Uninstalling does not delete the V2 library, its outbox, or the Firefox bookmark.
+For a failed launch or a capture that appears to be missing:
+
+1. run `research capture status` and verify the registered executable and bound
+   data directory;
+2. rerun `research capture install` from the binary's current stable location;
+3. when using an override, run `research --data-dir <DIR> list` against the same
+   directory shown by capture status;
+4. check Firefox **Settings → General → Applications** for the
+   `researchpocket` action, then trigger the bookmarklet again; and
+5. on Linux, verify that `xdg-mime` is installed and available.
+
+The custom protocol is an append-only integration surface. A site for which the
+owner remembers external-protocol permission may attempt unwanted captures. URI
+validation limits that risk to bounded save spam: the transport cannot read or
+edit the library, execute commands, select a database, obtain credentials, or
+start sync. See [THREAT_MODEL.md](./THREAT_MODEL.md#native-bookmarklet-capture).
+The architectural tradeoff is recorded in
+[ADR 0001](./ADR_0001_NATIVE_BROWSER_CAPTURE.md).
 
 ## Edit and lifecycle
 

@@ -84,6 +84,9 @@ The target CLI is:
 research init
 research import <v1|pocket|bookmarks|json|csv> <source>
 research add <url>
+research capture install
+research capture status
+research capture uninstall
 research edit <item-id>
 research delete <item-id>
 research restore <item-id>
@@ -125,6 +128,24 @@ These rules are hard requirements, not implementation suggestions.
 - V1 imports are read-only with respect to the source database, are idempotent,
   and create a new V2 library in the platform data directory. Ignore credentials
   found in a V1 database.
+
+### Browser-to-native capture
+
+- Browser bookmarklets invoke an installed, per-user `researchpocket://capture`
+  handler. The handler is an invocation bridge only and must call the same
+  atomic application/store mutation as `research add`.
+- The capture URI is versioned and append-only. Accept only the exact route,
+  allowlisted authored fields, and an absolute HTTP(S) target. Reject unknown,
+  malformed, duplicated singleton, or oversized input before mutation.
+- Bind the resolved executable and local data directory during installation.
+  Never accept a database path, provider, repository coordinate, credential,
+  executable option, or shell fragment from the URI.
+- Treat every decoded value as data without shell interpolation. Registration
+  and unregistration are repeatable, per-user operations and do not require
+  administrator access.
+- A capture commits locally and queues one normal immutable update. It does not
+  fetch metadata, read a GitHub token, run synchronization, or depend on a
+  notification succeeding.
 
 ### Application-level convergence
 

@@ -14,6 +14,7 @@ and synchronizes immutable updates through a private GitHub repository:
 ```sh
 research init
 research add https://example.com/article --tag reading
+research capture install
 research import v1 /path/to/v1/research.sqlite
 research list
 research search 'rust sqlite'
@@ -56,6 +57,69 @@ research --data-dir /path/to/private/library init
 `RESEARCHPOCKET_DATA_DIR` provides the same override. The local
 `library.sqlite3` contains private state. Do not commit, upload, publish, or copy
 it as a synchronization mechanism.
+
+## Save the current Firefox page through the CLI
+
+ResearchPocket can register the installed V2 CLI as a per-user handler for the
+`researchpocket://` scheme. This is a local bridge from Firefox to the same
+offline mutation used by `research add`; it does not require a browser extension,
+running server, GitHub credential, or network connection.
+
+Put the `research` binary at its long-term location, initialize the library that
+Firefox should use, and install the handler:
+
+```sh
+research init
+research capture install
+research capture status
+```
+
+When using a non-default library, select it while installing. The resolved
+absolute data directory is written into the per-user handler, because a program
+started by Firefox does not inherit the environment of an existing terminal:
+
+```sh
+research --data-dir /absolute/path/to/private/library capture install
+```
+
+`RESEARCHPOCKET_DATA_DIR` is also resolved at installation time. The data
+directory stays in the local operating-system registration and is never placed
+in the bookmarklet or capture URI.
+
+To add the bookmarklet in Firefox:
+
+1. Show the Bookmarks Toolbar, right-click it, and choose **Add Bookmark**.
+2. Name the bookmark `Save to ResearchPocket`.
+3. Copy the complete single line from [bookmarklet.js](bookmarklet.js) into the
+   bookmark's **URL** or **Location** field.
+4. Open a page and click the bookmarklet. On the first use, allow Firefox to open
+   the link with ResearchPocket; Firefox may offer to remember that choice for
+   the site.
+5. Confirm the local result with `research list`.
+
+The standard bookmarklet sends only protocol version 1, the current HTTP(S) URL,
+and the page title. The CLI validates and saves them locally as one normal V2
+item and one durable outbox update. It performs no metadata request and does not
+silently deduplicate a URL.
+
+Capture does not upload anything. Run `research sync run`, or keep the optional
+foreground `research sync run --every 60` loop active, when you want queued
+captures to reach the configured private repository.
+
+Installation is idempotent and refreshes the registered executable and library
+paths. Re-run it after moving the binary or changing the library. On macOS, also
+re-run it after every CLI upgrade so the application bridge contains the current
+binary. Remove only the current user's protocol registration with:
+
+```sh
+research capture uninstall
+```
+
+Uninstalling the handler does not delete the Firefox bookmark or any saved data.
+See the [complete capture and troubleshooting guide](docs/v2/CLI.md#firefox-bookmarklet-capture)
+and [privacy boundary](docs/v2/THREAT_MODEL.md#native-bookmarklet-capture). The
+custom-scheme decision and alternatives are recorded in
+[ADR 0001](docs/v2/ADR_0001_NATIVE_BROWSER_CAPTURE.md).
 
 ## Migrate an existing library
 

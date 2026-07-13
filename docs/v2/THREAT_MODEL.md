@@ -1,17 +1,18 @@
 # ResearchPocket V2 privacy threat model
 
-Status: security boundary for synchronization, hosted owner mode, and
-publication. The immutable paths, envelopes, retries, receipts, and version
-negotiation are specified by the
+Status: security boundary for native browser capture, synchronization, hosted
+owner mode, and publication. The immutable paths, envelopes, retries, receipts,
+and version negotiation are specified by the
 [synchronization protocol](./SYNC_PROTOCOL.md).
 
-Last verified against GitHub and CSP documentation: 2026-07-11
+Last verified against GitHub, platform, and CSP documentation: 2026-07-13
 
 ## Scope and security goals
 
-This document covers the local V2 client, a private GitHub data repository, the
-GitHub API, the public GitHub Pages application shell, browser persistence, and a
-separate public publication repository. It is a prerequisite for the sync
+This document covers the local V2 client, the Firefox bookmarklet and native
+protocol bridge, a private GitHub data repository, the GitHub API, the public
+GitHub Pages application shell, browser persistence, and a separate public
+publication repository. It is a prerequisite for native capture, the sync
 protocol, hosted owner editor, and publisher.
 
 ResearchPocket protects:
@@ -41,6 +42,7 @@ from existing Git history are outside the V2 guarantee.
 | TM-08 | Publication is a separate allowlisted projection. Missing, invalid, or concurrent visibility resolves to private. |
 | TM-09 | A service worker may cache only the public application shell. It never caches GitHub API traffic, credentials, private state, or publication previews. |
 | TM-10 | Deletion creates a tombstone. Historical erasure requires repository replacement or an explicit history rewrite. |
+| TM-11 | Native bookmarklet capture uses a per-user `researchpocket://capture` handler with a versioned, append-only field allowlist. The URI never selects a filesystem path, carries a credential, executes a command, or starts synchronization. |
 
 ## Trust boundaries
 
@@ -55,6 +57,8 @@ from existing Git history are outside the V2 guarantee.
 | Private data repository | Complete immutable updates, checkpoints, and private policy. GitHub collaborators and repository administrators can read its history. |
 | GitHub REST API | Trusted transport/authentication boundary. Every returned protocol object is still hash- and schema-verified locally. |
 | Publisher workflow | Trusted, pinned workflow in the private repository. It reads private state and writes only an allowlisted projection using a separate credential. |
+| Firefox bookmarklet | User-triggered but runs in the current page's untrusted browser context. The standard bookmarklet may send only the current page URL and title in a versioned capture URI. |
+| OS protocol dispatcher | Trusted only to deliver one URI to the installed per-user handler. Browser and operating-system history, diagnostics, or other same-user processes may observe that payload. |
 | Third-party pages and networks | Untrusted. They receive no owner data, analytics events, referrers containing secrets, or runtime requests from owner mode. |
 
 The implemented browser-store, static-shell, and private synchronization
@@ -152,6 +156,40 @@ An edit is durable in IndexedDB before network activity. Pull and push failures,
 token expiry, reload, or a branch-head race leave the outbox intact. GitHub
 responses decide only transport success; Loro updates decide application state.
 
+### Native bookmarklet capture
+
+```mermaid
+flowchart LR
+    O[Owner clicks Firefox bookmarklet] --> B[Version 1 researchpocket URI]
+    B --> P[Per-user OS protocol handler]
+    P --> C[Installed V2 CLI]
+    C --> V{Route and field validation}
+    V -->|valid| L[Local V2 mutation and durable outbox]
+    V -->|invalid| F[Fail without mutation]
+    L -. no automatic network access .-> S[Later explicit sync]
+```
+
+The standard bookmarklet transports only the current HTTP(S) page URL and title.
+The OS registration binds an executable and one resolved local V2 data directory;
+the URI cannot choose either. The internal handler accepts only the exact
+`researchpocket://capture` route, protocol version 1, an absolute HTTP(S) target,
+and bounded authored capture fields. Singleton fields cannot repeat; `tag` is the
+only repeatable field. Unknown or malformed input fails before opening a mutation.
+
+The OS passes one encoded URI to the handler as an argument; the handler decodes
+its values as structured data, never as a shell command. It calls the same atomic
+V2 create operation as `research add` and does not fetch metadata, read
+credentials, contact GitHub, or start sync. A best-effort desktop notification
+happens after commit, so notification failure cannot discard or duplicate the
+durable capture.
+
+Custom protocol schemes do not authenticate their caller. Firefox normally asks
+before handing an external link to an application, but a permission remembered
+for an untrusted site can allow that site to trigger further requests. The V2
+handler is therefore deliberately append-only: an attacker can at worst create
+bounded unwanted saves. It cannot query, edit, delete, publish, select another
+library, execute a command, or gain synchronization authority.
+
 ### Publisher
 
 ```mermaid
@@ -214,6 +252,10 @@ Activating a new shell version removes old caches.
   credential but does not silently destroy the offline library or queued edits.
 - Browser extensions and a compromised profile can read in-use private data and
   memory credentials; V2 cannot defend against that device-level compromise.
+- Capture URI payloads are not logged by ResearchPocket, but the current page URL,
+  title, and any advanced authored fields pass through Firefox, OS protocol
+  dispatch, and process arguments. The bookmarklet therefore includes no note,
+  tags, path, repository identity, or credential by default.
 
 ## Threats and mitigations
 
@@ -227,6 +269,9 @@ Activating a new shell version removes old caches.
 | Git race loses or overwrites an edit | Immutable unique paths, pull-before-push, serialized upload, hash equality for idempotency, retry unchanged outbox | GitHub outage delays sync but does not discard local edits. |
 | Corrupt/replayed remote update changes state | Envelope schema/version checks, library identity, payload SHA-256, immutable device sequence/path, applied receipt | A repository writer can delete history; clients must detect missing/inconsistent data. |
 | Token appears in logs or URLs | Authorization header only; redacted errors; no analytics; no token interpolation; production console off | User-installed debugging tools may capture traffic. |
+| Untrusted page invokes native capture | Browser external-protocol confirmation; exact route/version; bounded append-only field allowlist; no read, edit, delete, sync, or publication action | Remembered site permission can permit unwanted save spam. |
+| Capture URI injects a command or selects private state | Direct argument handling without shell evaluation; reject unknown fields, paths, credentials, provider names, user information, fragments, and non-HTTP(S) targets | Browser, OS diagnostics, or same-user processes may observe the accepted URL and title. |
+| Capture writes to the wrong library | Installer binds one resolved absolute data directory; status displays the binding; URI cannot override it | Moving the executable or changing libraries requires reinstalling the association. |
 | Clickjacking tricks PAT entry | Header CSP with `frame-ancestors 'none'` where supported; document weaker Pages meta-CSP boundary | Standard Pages meta CSP cannot enforce `frame-ancestors`. |
 | Delete is mistaken for secure erase | UI calls it delete/tombstone and documents history retention; provide repository replacement procedure | GitHub and local backups may retain earlier bytes. |
 
@@ -264,8 +309,14 @@ If credential exposure or a malicious build is suspected:
 
 ## Required verification for dependent work
 
-Hosted-editor and sync changes must demonstrate:
+Native-capture, hosted-editor, and sync changes must demonstrate:
 
+- strict capture route, version, scheme, field, duplicate, size, and HTTP(S)
+  target validation before mutation;
+- one accepted capture produces exactly one normal durable outbox update, while
+  rejected input produces none;
+- capture registration is per-user and repeatable, binds one data directory, and
+  treats notification as best-effort after commit;
 - token absence from localStorage, IndexedDB, Cache API, service-worker messages,
   URLs, logs, source maps, and generated artifacts;
 - a token scoped only to the private data repository with Contents read/write;
@@ -281,7 +332,10 @@ Hosted-editor and sync changes must demonstrate:
 - [GitHub: managing fine-grained personal access tokens](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)
 - [GitHub: permissions required for fine-grained tokens](https://docs.github.com/en/rest/authentication/permissions-required-for-fine-grained-personal-access-tokens)
 - [GitHub: repository Contents API](https://docs.github.com/en/rest/repos/contents)
+- [Apple: Launch Services URL handling](https://developer.apple.com/library/archive/documentation/Carbon/Conceptual/LaunchServicesConcepts/LSCConcepts/LSCConcepts.html)
+- [Freedesktop.org: desktop entry `Exec` key](https://specifications.freedesktop.org/desktop-entry/latest/exec-variables.html)
+- [Microsoft: per-user program defaults](https://learn.microsoft.com/en-us/windows/win32/shell/default-programs)
 - [W3C Content Security Policy Level 3](https://www.w3.org/TR/CSP3/)
 
-Any change to TM-01 through TM-10 requires an explicit security review and
+Any change to TM-01 through TM-11 requires an explicit security review and
 updates to dependent protocol, hosted-editor, and publisher documentation.
