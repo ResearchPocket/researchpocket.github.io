@@ -354,7 +354,7 @@ fn write_manifest(manifest: &RegistrationManifest) -> CaptureResult<()> {
     write_atomic(&path, &serde_json::to_vec_pretty(manifest)?, 0o600)
 }
 
-fn write_atomic(path: &Path, bytes: &[u8], unix_mode: u32) -> CaptureResult<()> {
+fn write_atomic(path: &Path, bytes: &[u8], _unix_mode: u32) -> CaptureResult<()> {
     let parent = path.parent().ok_or_else(|| {
         CaptureError::Registration("registration path has no parent directory".into())
     })?;
@@ -371,7 +371,7 @@ fn write_atomic(path: &Path, bytes: &[u8], unix_mode: u32) -> CaptureResult<()> 
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.mode(unix_mode);
+        options.mode(_unix_mode);
     }
     let mut file = options.open(&temporary)?;
     file.write_all(bytes)?;
@@ -1015,7 +1015,12 @@ fn windows_notify_association_change() {
 
     // SAFETY: SHCNE_ASSOCCHANGED with SHCNF_IDLIST requires both item pointers to be null.
     unsafe {
-        SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, ptr::null(), ptr::null());
+        SHChangeNotify(
+            SHCNE_ASSOCCHANGED as i32,
+            SHCNF_IDLIST,
+            ptr::null(),
+            ptr::null(),
+        );
     }
 }
 
@@ -1037,6 +1042,7 @@ fn platform_uninstall(_manifest: Option<&RegistrationManifest>) -> CaptureResult
 }
 
 fn notify(success: bool) {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     let message = if success {
         "Link saved locally"
     } else {
@@ -1087,7 +1093,7 @@ fn notify(success: bool) {
     }
 
     #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-    let _ = message;
+    let _ = success;
 }
 
 #[cfg(target_os = "windows")]
