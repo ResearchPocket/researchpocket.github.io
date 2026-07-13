@@ -67,6 +67,12 @@ pub enum Commands {
     /// Manage the local library in a keyboard-first terminal interface
     Tui,
 
+    /// Save Firefox pages through an installed per-user protocol handler
+    Capture {
+        #[command(subcommand)]
+        command: CaptureCommands,
+    },
+
     /// Connect and synchronize through a private GitHub repository
     Sync {
         #[command(subcommand)]
@@ -223,6 +229,33 @@ pub struct SearchArgs {
 
     #[command(flatten)]
     pub filters: ListArgs,
+}
+
+#[derive(Subcommand)]
+pub enum CaptureCommands {
+    /// Install or update the per-user researchpocket:// handler
+    Install,
+
+    /// Inspect the installed per-user handler
+    Status,
+
+    /// Remove the per-user researchpocket:// handler
+    Uninstall,
+
+    /// Accept one versioned capture URI from the operating system
+    #[command(hide = true)]
+    Handle(CaptureHandleArgs),
+}
+
+#[derive(Args)]
+pub struct CaptureHandleArgs {
+    /// Complete researchpocket://capture URI
+    #[arg(value_name = "CAPTURE_URI")]
+    pub uri: String,
+
+    /// Send a generic best-effort desktop notification
+    #[arg(long, hide = true)]
+    pub notify: bool,
 }
 
 #[derive(Subcommand)]

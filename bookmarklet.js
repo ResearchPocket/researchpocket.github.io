@@ -1,12 +1,1 @@
-javascript: (function () {
-  var currentUrl = encodeURIComponent(window.location.href);
-  var tags = prompt("Enter tags (comma-separated):", "");
-  var dbPath = "/path/to/research.sqlite";
-  var provider = "pocket";
-  if (tags !== null && dbPath !== null) {
-    var encodedTags = encodeURIComponent(tags);
-    var encodedDbPath = encodeURIComponent(dbPath);
-    var researchUrl = `research://save?url=${currentUrl}&provider=${provider}&tags=${encodedTags}&db_path=${encodedDbPath}`;
-    window.location.href = researchUrl;
-  }
-})();
+javascript:(()=>{if(!/^https?:$/.test(window.location.protocol)){window.alert("ResearchPocket saves only HTTP(S) pages.");return}const pageUrl=window.location.href;const pageTitle=document.title;const query=new URLSearchParams({version:"1",url:pageUrl,title:pageTitle});window.location.href=`researchpocket://capture?${query}`})()
