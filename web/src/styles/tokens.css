@@ -1,6 +1,38 @@
+@font-face {
+  font-display: swap;
+  font-family: "Berkeley Mono";
+  font-style: normal;
+  font-weight: 400;
+  src: url("../assets/fonts/BerkeleyMono-Regular.woff2") format("woff2");
+}
+
+@font-face {
+  font-display: swap;
+  font-family: "Berkeley Mono";
+  font-style: italic;
+  font-weight: 400;
+  src: url("../assets/fonts/BerkeleyMono-Italic.woff2") format("woff2");
+}
+
+@font-face {
+  font-display: swap;
+  font-family: "Berkeley Mono";
+  font-style: normal;
+  font-weight: 700;
+  src: url("../assets/fonts/BerkeleyMono-Bold.woff2") format("woff2");
+}
+
+@font-face {
+  font-display: swap;
+  font-family: "Berkeley Mono";
+  font-style: italic;
+  font-weight: 700;
+  src: url("../assets/fonts/BerkeleyMono-BoldItalic.woff2") format("woff2");
+}
+
 :root {
   color-scheme: dark;
-  font-family: ui-monospace, monospace;
+  font-family: "Berkeley Mono", ui-monospace, monospace;
   font-synthesis: none;
 
   --text: #f5f1e9;

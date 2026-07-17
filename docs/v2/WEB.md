@@ -64,9 +64,10 @@ WASM result cannot be persisted.
 
 ## Static and offline boundary
 
-The owner application bundles React, IndexedDB helpers, JavaScript, CSS, and the
-WASM domain artifact. The public root loads only the shared first-party CSS and
-does not initialize IndexedDB, JavaScript, or WASM. Neither entry loads a
+The owner application bundles React, IndexedDB helpers, JavaScript, CSS,
+same-origin Berkeley Mono webfonts, and the WASM domain artifact. The public
+root loads only the shared first-party CSS and its bundled font files; it does
+not initialize IndexedDB, JavaScript, or WASM. Neither entry loads a remote
 third-party runtime script, font, image, analytics, or error reporter.
 Production builds omit source maps.
 
