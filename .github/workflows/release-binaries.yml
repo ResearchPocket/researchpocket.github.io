@@ -136,7 +136,9 @@ jobs:
           tar -C package -czf "$archive" "$package_name"
 
           tar -tzf "$archive" >/dev/null
-          tar -tvzf "$archive" | grep -Eq '^-rwxr-xr-x .*\/research$'
+          listing="$RUNNER_TEMP/$package_name.contents"
+          tar -tvzf "$archive" > "$listing"
+          grep -Eq '^-rwxr-xr-x .*\/research$' "$listing"
 
       - name: Package Windows archive
         if: matrix.package == 'zip'

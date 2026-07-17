@@ -2624,7 +2624,7 @@ dependencies = [
 
 [[package]]
 name = "research"
-version = "2.0.0-preview.1"
+version = "2.0.0-preview.2"
 dependencies = [
  "base64",
  "chrono",
