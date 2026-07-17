@@ -1,10 +1,17 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const stylesRoot = resolve(webRoot, "src/styles");
+const fontsRoot = resolve(webRoot, "src/assets/fonts");
 const requiredFiles = ["tokens.css", "base.css", "app.css"];
+const requiredFonts = [
+  "BerkeleyMono-Regular.woff2",
+  "BerkeleyMono-Italic.woff2",
+  "BerkeleyMono-Bold.woff2",
+  "BerkeleyMono-BoldItalic.woff2",
+];
 const requiredTokens = [
   "--color-canvas",
   "--color-surface",
@@ -26,11 +33,27 @@ for (const requiredFile of requiredFiles) {
   }
 }
 
+for (const requiredFont of requiredFonts) {
+  if (!existsSync(resolve(fontsRoot, requiredFont))) {
+    failures.push(`Missing required webfont: ${requiredFont}`);
+  }
+}
+
 const tokenSource = readFileSync(resolve(stylesRoot, "tokens.css"), "utf8");
 for (const token of requiredTokens) {
   if (!tokenSource.includes(`${token}:`)) {
     failures.push(`Missing required token: ${token}`);
   }
+}
+
+for (const requiredFont of requiredFonts) {
+  if (!tokenSource.includes(requiredFont)) {
+    failures.push(`tokens.css does not declare required webfont: ${requiredFont}`);
+  }
+}
+
+if (!tokenSource.includes('font-family: "Berkeley Mono", ui-monospace, monospace;')) {
+  failures.push("tokens.css must use Berkeley Mono with local monospace fallbacks");
 }
 
 for (const file of files) {

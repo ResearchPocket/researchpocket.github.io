@@ -37,7 +37,7 @@ from existing Git history are outside the V2 guarantee.
 | TM-03 | The owner PAT cannot write the repository that serves the application JavaScript or any public publication repository. |
 | TM-04 | The browser keeps the PAT in JavaScript memory by default. Explicit tab-only retention may use `sessionStorage`; no longer-lived browser storage is allowed. |
 | TM-05 | IndexedDB may contain private CRDT state and a durable outbox, but never a credential. |
-| TM-06 | Owner mode loads no third-party runtime code, fonts, analytics, ads, error reporters, or tag managers. |
+| TM-06 | Owner mode loads no third-party runtime code, remote fonts, analytics, ads, error reporters, or tag managers. Reviewed webfonts may be bundled in the same-origin application artifact. |
 | TM-07 | Synchronization applies only validated immutable protocol objects. Git commits and branch order have no domain meaning. |
 | TM-08 | Publication is a separate allowlisted projection. Missing, invalid, or concurrent visibility resolves to private. |
 | TM-09 | A service worker may cache only the public application shell. It never caches GitHub API traffic, credentials, private state, or publication previews. |
@@ -257,10 +257,10 @@ manifest-src 'self';
 upgrade-insecure-requests
 ```
 
-No inline/evaluated script, remote module, CDN asset, third-party font, or
-runtime package download is permitted. Dependencies are locked, bundled, and
-reviewed in the application repository. Production builds omit public source
-maps and disable console logging.
+No inline/evaluated script, remote module, CDN asset, remotely hosted font, or
+runtime package download is permitted. Dependencies and licensed webfont assets
+are locked, bundled, and reviewed in the application repository. Production
+builds omit public source maps and disable console logging.
 
 When the host cannot set a CSP response header, a CSP `meta` element must be the
 first applicable element in `<head>`. This is weaker: CSP Level 3 specifies that

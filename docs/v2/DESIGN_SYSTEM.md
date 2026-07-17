@@ -51,12 +51,13 @@ The interface uses no animations or transitions. Feedback is immediate state,
 text, focus, or a native dialog. Functionality must not depend on hover, motion,
 or a pointer device.
 
-### System-native by default
+### Self-hosted type, native controls
 
-Use only the system-provided `ui-monospace` generic, semantic HTML, native
-controls where practical, and first-party text instead of icon packages. Do not
-name or bundle an alternate monospace family. No external fonts, images,
-analytics, or runtime assets are allowed in owner mode.
+Use the bundled Berkeley Mono WOFF2 webfonts with `ui-monospace` and `monospace`
+as local fallbacks. Use semantic HTML, native controls where practical, and
+first-party text instead of icon packages. Owner mode may load the reviewed
+font files only from the same-origin Vite artifact; external font hosts, images,
+analytics, and runtime assets remain prohibited.
 
 ## Source architecture
 
@@ -79,8 +80,8 @@ not require component overrides. Border radius, control height, spacing, type,
 measure, and layout widths follow the same rule.
 
 The dependency-free `npm run check:design` gate enforces the file order, required
-tokens, color boundary, tokenized radius, and the prohibition on gradients,
-shadows, filters, transitions, and animations.
+tokens, bundled font sources, color boundary, tokenized radius, and the
+prohibition on gradients, shadows, filters, transitions, and animations.
 
 ## Visual language
 
@@ -94,10 +95,12 @@ come from rules, spacing, weight, and labels rather than adding palette entries.
 
 ### Type
 
-All surfaces use the system-provided UI monospace font. Body copy remains at a
-readable size and line height. Headings are modest, weight-based, and sentence case.
-Uppercase is reserved for short metadata labels such as `local`, `remote`, and
-item source.
+All surfaces use the self-hosted Berkeley Mono family, falling back to the
+system UI monospace when the webfont is unavailable. Regular, italic, bold, and
+bold italic WOFF2 sources are bundled locally; the desktop font files are not.
+Body copy remains at a readable size and line height. Headings are modest,
+weight-based, and sentence case. Uppercase is reserved for short metadata labels
+such as `local`, `remote`, and item source.
 
 ### Space and rules
 
