@@ -5,6 +5,14 @@ your control, supports deliberate human organization, and uses application-level
 CRDT convergence so a private GitHub repository can remain storage and transport
 rather than a conflict resolver.
 
+**V2 preview:** [understand the product](https://researchpocket.github.io/ResearchPocket/)
+· [open the owner app](https://researchpocket.github.io/ResearchPocket/app/)
+· [download the CLI](https://github.com/ResearchPocket/ResearchPocket/releases)
+
+This is a preview release, not V2 GA. The available workflows and remaining
+boundaries are listed below and in the
+[preview release guide](docs/releases/v2.0.0-preview.1.md).
+
 ## Current V2 CLI
 
 The V2 CLI initializes a private local library, captures and curates saves fully
@@ -29,10 +37,29 @@ research status
 
 The old Pocket-era command surface is no longer part of the shipped binary.
 Pocket authentication, fetching, and mutations are retired with Mozilla's Pocket
-service. The old Rust modules remain in the repository only as migration
-references.
+service. Historical implementation remains available through Git history; V1
+data compatibility lives only in the read-only importer.
 
-## Install from this repository
+## Install the V2 preview
+
+The `v2.0.0-preview.1` release provides archives for Apple Silicon and Intel
+macOS, Linux amd64, and Windows amd64, plus `SHA256SUMS`. Download the archive
+for your platform from the [release page](https://github.com/ResearchPocket/ResearchPocket/releases),
+verify it, place `research` (or `research.exe`) somewhere stable on your `PATH`,
+then run:
+
+```sh
+research --version
+research init
+research status
+```
+
+On macOS, native capture binds the current executable location into its local
+application bridge, so install the binary at its long-term path before running
+`research capture install`. The complete archive names and setup sequence are in
+the [release guide](docs/releases/v2.0.0-preview.1.md).
+
+## Build from this repository
 
 ```sh
 cargo build --locked --release
@@ -147,13 +174,21 @@ details.
 
 Create an empty private GitHub repository and a fine-grained PAT limited to that
 repository with `Contents: read/write` and an expiry of at most 90 days. Keep the
-PAT out of shell history by providing it through the process environment:
+PAT out of shell history by reading it silently in Bash or Zsh, exporting it
+only while the sync commands run, and then removing it from the shell:
 
 ```sh
-export RESEARCHPOCKET_GITHUB_TOKEN='github_pat_...'
+printf 'Fine-grained GitHub token: ' >&2
+IFS= read -r -s RESEARCHPOCKET_GITHUB_TOKEN
+printf '\n' >&2
+export RESEARCHPOCKET_GITHUB_TOKEN
 research sync connect OWNER/PRIVATE_REPOSITORY
 research sync run
+unset RESEARCHPOCKET_GITHUB_TOKEN
 ```
+
+Repeat the silent read and export in a new shell before a later sync. Run the
+`unset` command after use even when a sync command reports an error.
 
 The first command creates immutable protocol genesis, drains the durable outbox,
 and verifies the final remote state. For another device, run `research init` in
@@ -181,13 +216,21 @@ npm ci
 npm run dev
 ```
 
-The production build is deployed as a credential-free GitHub Pages shell. Its
+The [public product overview](https://researchpocket.github.io/ResearchPocket/)
+loads no private application state. The separate
+[owner app](https://researchpocket.github.io/ResearchPocket/app/) is deployed as
+a credential-free GitHub Pages shell. Its
 Private sync panel connects a separate private data repository with an expiring,
 repository-scoped fine-grained PAT. The browser pulls on startup, focus, network
 recovery, and every 60 seconds while visible; local changes also request a sync.
 The token stays in JavaScript memory unless the owner explicitly chooses
 tab-only `sessionStorage`, and it never enters IndexedDB, URLs, logs, or the
-service-worker cache. See the [hosted application contract](docs/v2/WEB.md).
+service-worker cache.
+
+For an existing synchronized library, choose **Restore from private sync** before
+creating a save in the browser. The app prepares a pristine browser replica,
+opens the Sync view, adopts the remote library identity, and rebuilds the local
+view from immutable updates. See the [hosted application contract](docs/v2/WEB.md).
 
 ## Terminal interface
 
@@ -240,6 +283,7 @@ The engineering and privacy contract is in [AGENTS.md](AGENTS.md), with the V2
 [product contract](docs/v2/PRODUCT.md),
 [synchronization protocol](docs/v2/SYNC_PROTOCOL.md),
 [hosted application contract](docs/v2/WEB.md),
+[design system](docs/v2/DESIGN_SYSTEM.md),
 [privacy threat model](docs/v2/THREAT_MODEL.md), and
 [delivery roadmap](docs/v2/ROADMAP.md) alongside this CLI slice.
 

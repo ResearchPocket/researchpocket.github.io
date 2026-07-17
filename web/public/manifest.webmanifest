@@ -1,11 +1,20 @@
 {
-  "name": "ResearchPocket",
+  "name": "ResearchPocket Owner",
   "short_name": "ResearchPocket",
-  "description": "A private, offline-first home for the links you want to keep.",
-  "id": "./",
-  "start_url": "./",
-  "scope": "./",
+  "description": "A private, offline-first home for the useful links you choose to keep.",
+  "id": "./app/",
+  "start_url": "./app/",
+  "scope": "./app/",
   "display": "standalone",
-  "background_color": "#f2efe8",
-  "theme_color": "#f2efe8"
+  "background_color": "#1a150c",
+  "theme_color": "#1a150c",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    {
+      "src": "./favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
 }

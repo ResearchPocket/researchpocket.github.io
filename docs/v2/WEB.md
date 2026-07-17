@@ -1,13 +1,21 @@
-# ResearchPocket V2 hosted owner application
+# ResearchPocket V2 public site and hosted owner application
 
-Status: offline owner editing and private GitHub browser synchronization
+Status: public product explainer, offline owner editing, and private GitHub browser synchronization
 
 ## What works now
 
-The static application in `web/` uses the same pinned Rust/Loro domain core as
-the native CLI. It can initialize a browser library and add, search, edit,
+The static Pages build in `web/` has two deliberately separate entries. The
+root is an indexable, script-free product explainer. `/app/` is the private owner
+application and uses the same pinned Rust/Loro domain core as the native CLI. It
+can initialize a browser library and add, search, edit,
 favorite, tag, delete, and restore saves without a network connection. The UI
 contains no sample library or alternate TypeScript merge rules.
+
+First run offers two explicit paths. Starting locally creates an empty browser
+library. Restoring prepares the same empty local shell and opens private sync
+before the owner makes a local mutation, allowing the pristine replica to adopt
+an existing remote library identity. The public landing page remains reachable
+from the owner workspace without clearing browser data.
 
 Every local action passes the current canonical snapshot into the WASM domain
 boundary. One IndexedDB transaction then commits all of the following, or none
@@ -56,15 +64,24 @@ WASM result cannot be persisted.
 
 ## Static and offline boundary
 
-The application bundles React, IndexedDB helpers, JavaScript, CSS, and the WASM
-domain artifact. It loads no third-party runtime script, font, image, analytics,
-or error reporter. Production builds omit source maps.
+The owner application bundles React, IndexedDB helpers, JavaScript, CSS, and the
+WASM domain artifact. The public root loads only the shared first-party CSS and
+does not initialize IndexedDB, JavaScript, or WASM. Neither entry loads a
+third-party runtime script, font, image, analytics, or error reporter.
+Production builds omit source maps.
 
 The document CSP allows only same-origin application resources and future
 connections to `https://api.github.com`. The service worker handles only GETs
-for same-origin shell resources and WASM. It explicitly bypasses all GitHub API
+from pages controlled beneath `/app/` for same-origin shell resources and WASM.
+It explicitly bypasses all GitHub API
 traffic, cross-origin traffic, and non-GET requests, so it cannot cache a token,
 private API response, or upload body.
+
+Vite development servers generate a fresh nonce when they start and attach it
+to development-only injected scripts and styles. This keeps CSS hot reload and
+the error overlay usable under CSP without adding `unsafe-inline`. Production
+builds contain neither that nonce nor a nonce source; they continue to load only
+the external same-origin bundles allowed by the checked-in policy.
 
 Clearing browser site data deletes this device-local replica. Once a successful
 private sync has drained the outbox, another pristine browser or CLI device can
@@ -107,11 +124,12 @@ npm run build
 ```
 
 The build compiles `research-domain` to WASM, generates the local JavaScript
-bridge, runs strict TypeScript checking, and emits a relative-path static site
-to `web/dist/`. The Pages workflow performs the same build and deploys only
-that directory from the public ResearchPocket source repository. The owner PAT
-is scoped to a different private data repository and therefore cannot modify
-the application JavaScript it executes.
+bridge, runs strict TypeScript and policy checking, and emits the root landing
+page plus the relative-path owner app under `web/dist/app/`. The Pages workflow
+performs the same build and deploys only `web/dist/` from the public
+ResearchPocket source repository. The owner PAT is scoped to a different private
+data repository and therefore cannot modify the application JavaScript it
+executes.
 
 The complete credential and publication boundary remains in
 [THREAT_MODEL.md](./THREAT_MODEL.md), and immutable replay behavior remains in

@@ -6,32 +6,61 @@ on:
       - 'v*'
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  release:
-    name: Build ${{ matrix.asset_name }}
+  build:
+    name: Build ${{ matrix.platform }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            artifact_name: research
-            asset_name: research-linux-amd64
+          # Pin the GNU build baseline so the release has an explicit minimum
+          # runtime instead of inheriting ubuntu-latest's moving glibc version.
+          - os: ubuntu-22.04
+            platform: linux-amd64
+            architecture: x86_64
+            binary: target/release/research
+            package: tar.gz
           - os: windows-latest
-            artifact_name: research.exe
-            asset_name: research-windows-amd64.exe
+            platform: windows-amd64
+            architecture: AMD64
+            binary: target/release/research.exe
+            package: zip
           - os: macos-15-intel
-            artifact_name: research
-            asset_name: research-macos-amd64
+            platform: macos-amd64
+            architecture: x86_64
+            binary: target/release/research
+            package: tar.gz
+          - os: macos-15
+            platform: macos-arm64
+            architecture: arm64
+            binary: target/release/research
+            package: tar.gz
     steps:
       - name: Check out repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Verify tag belongs to protected main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "Release tags must point to a commit on protected main." >&2
+            exit 1
+          fi
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
@@ -41,11 +70,191 @@ jobs:
       - name: Build release binary
         run: cargo build --locked --release
 
-      - name: Upload binary to GitHub release
-        uses: svenstaro/upload-release-action@29e53e917877a24fad85510ded594ab3c9ca12de # 2.11.5
+      - name: Smoke-test Unix binary
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary='${{ matrix.binary }}'
+          expected_version="research ${GITHUB_REF_NAME#v}"
+          actual_architecture="$(uname -m)"
+
+          if [[ "$actual_architecture" != '${{ matrix.architecture }}' ]]; then
+            echo "Expected ${{ matrix.architecture }}, found $actual_architecture" >&2
+            exit 1
+          fi
+          if [[ "$("$binary" --version)" != "$expected_version" ]]; then
+            echo "Release tag and binary version do not match" >&2
+            exit 1
+          fi
+
+          "$binary" --help >/dev/null
+          smoke_directory="$(mktemp -d)"
+          trap 'rm -rf "$smoke_directory"' EXIT
+          "$binary" --data-dir "$smoke_directory/library" init --format json >/dev/null
+          "$binary" --data-dir "$smoke_directory/library" status --format json >/dev/null
+
+      - name: Smoke-test Windows binary
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $binary = "${{ matrix.binary }}"
+          $expectedVersion = "research " + $env:GITHUB_REF_NAME.Substring(1)
+
+          if ($env:PROCESSOR_ARCHITECTURE -ne "${{ matrix.architecture }}") {
+            throw "Expected ${{ matrix.architecture }}, found $env:PROCESSOR_ARCHITECTURE"
+          }
+          $actualVersion = (& $binary --version).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actualVersion -ne $expectedVersion) {
+            throw "Release tag and binary version do not match"
+          }
+
+          & $binary --help | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "The release binary help smoke test failed" }
+          $smokeDirectory = Join-Path $env:RUNNER_TEMP "research-release-smoke"
+          Remove-Item -Recurse -Force $smokeDirectory -ErrorAction SilentlyContinue
+          & $binary --data-dir (Join-Path $smokeDirectory "library") init --format json | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "The release binary init smoke test failed" }
+          & $binary --data-dir (Join-Path $smokeDirectory "library") status --format json | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "The release binary status smoke test failed" }
+
+      - name: Package Unix archive
+        if: matrix.package == 'tar.gz'
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_name="research-${GITHUB_REF_NAME}-${{ matrix.platform }}"
+          package_root="package/$package_name"
+          archive="dist/$package_name.tar.gz"
+
+          mkdir -p "$package_root" dist
+          install -m 0755 '${{ matrix.binary }}' "$package_root/research"
+          install -m 0644 LICENSE "$package_root/LICENSE"
+          install -m 0644 "docs/releases/${GITHUB_REF_NAME}.md" \
+            "$package_root/RELEASE_NOTES.md"
+          tar -C package -czf "$archive" "$package_name"
+
+          tar -tzf "$archive" >/dev/null
+          tar -tvzf "$archive" | grep -Eq '^-rwxr-xr-x .*\/research$'
+
+      - name: Package Windows archive
+        if: matrix.package == 'zip'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $packageName = "research-$env:GITHUB_REF_NAME-${{ matrix.platform }}"
+          $packageRoot = Join-Path "package" $packageName
+          $archive = Join-Path "dist" "$packageName.zip"
+
+          New-Item -ItemType Directory -Force -Path @($packageRoot, "dist") | Out-Null
+          Copy-Item "${{ matrix.binary }}" (Join-Path $packageRoot "research.exe")
+          Copy-Item "LICENSE" (Join-Path $packageRoot "LICENSE")
+          $releaseNotes = "docs/releases/$($env:GITHUB_REF_NAME).md"
+          Copy-Item $releaseNotes (Join-Path $packageRoot "RELEASE_NOTES.md")
+          Compress-Archive -Path $packageRoot -DestinationPath $archive
+
+          if (-not (Test-Path $archive)) { throw "The Windows release archive is missing" }
+
+      - name: Upload packaged binary
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: target/release/${{ matrix.artifact_name }}
-          asset_name: ${{ matrix.asset_name }}
-          tag: ${{ github.ref }}
-          overwrite: true
+          name: release-${{ matrix.platform }}
+          path: dist/research-${{ github.ref_name }}-${{ matrix.platform }}.${{ matrix.package }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  publish:
+    name: Stage draft prerelease
+    if: needs.build.result == 'success'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Check out release notes
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Download packaged binaries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Verify assets and write checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          notes="docs/releases/${GITHUB_REF_NAME}.md"
+          expected=(
+            "research-${GITHUB_REF_NAME}-linux-amd64.tar.gz"
+            "research-${GITHUB_REF_NAME}-windows-amd64.zip"
+            "research-${GITHUB_REF_NAME}-macos-amd64.tar.gz"
+            "research-${GITHUB_REF_NAME}-macos-arm64.tar.gz"
+          )
+
+          if [[ ! -f "$notes" ]]; then
+            echo "Missing release notes: $notes" >&2
+            exit 1
+          fi
+          for asset in "${expected[@]}"; do
+            if [[ ! -f "release-assets/$asset" ]]; then
+              echo "Missing release asset: $asset" >&2
+              exit 1
+            fi
+          done
+          if [[ "$(find release-assets -maxdepth 1 -type f | wc -l)" -ne 4 ]]; then
+            echo "Unexpected files were downloaded with the release assets" >&2
+            exit 1
+          fi
+
+          cd release-assets
+          sha256sum "${expected[@]}" > SHA256SUMS
+          sha256sum --check SHA256SUMS
+
+      - name: Create or refresh draft prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          existing_draft="$(gh release view "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json isDraft \
+            --jq '.isDraft' 2>/dev/null || true)"
+
+          if [[ "$existing_draft" == 'false' ]]; then
+            echo "Release $GITHUB_REF_NAME is already published; leaving it unchanged."
+            exit 0
+          fi
+
+          if [[ "$existing_draft" == 'true' ]]; then
+            gh release edit "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --draft \
+              --prerelease \
+              --latest=false \
+              --title "ResearchPocket ${GITHUB_REF_NAME#v}" \
+              --notes-file "docs/releases/${GITHUB_REF_NAME}.md"
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --draft \
+              --prerelease \
+              --latest=false \
+              --title "ResearchPocket ${GITHUB_REF_NAME#v}" \
+              --notes-file "docs/releases/${GITHUB_REF_NAME}.md"
+          fi
+
+          gh release upload "$GITHUB_REF_NAME" \
+            "release-assets/research-${GITHUB_REF_NAME}-linux-amd64.tar.gz" \
+            "release-assets/research-${GITHUB_REF_NAME}-windows-amd64.zip" \
+            "release-assets/research-${GITHUB_REF_NAME}-macos-amd64.tar.gz" \
+            "release-assets/research-${GITHUB_REF_NAME}-macos-arm64.tar.gz" \
+            "release-assets/SHA256SUMS" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber

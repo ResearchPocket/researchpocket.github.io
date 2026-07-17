@@ -346,13 +346,21 @@ domain or synchronization rules.
 
 Create an empty private GitHub repository first. Give a fine-grained PAT with an
 expiry of at most 90 days access to only that repository with
-`Contents: read/write`, then expose it to the current process without putting it
-on a command line:
+`Contents: read/write`, then read it silently in Bash or Zsh, export it only
+while the sync commands run, and remove it from the shell afterward:
 
 ```sh
-export RESEARCHPOCKET_GITHUB_TOKEN='github_pat_...'
+printf 'Fine-grained GitHub token: ' >&2
+IFS= read -r -s RESEARCHPOCKET_GITHUB_TOKEN
+printf '\n' >&2
+export RESEARCHPOCKET_GITHUB_TOKEN
 research sync connect OWNER/PRIVATE_REPOSITORY
+research sync run
+unset RESEARCHPOCKET_GITHUB_TOKEN
 ```
+
+Repeat the silent read and export in a new shell before a later sync. Run the
+`unset` command after use even when a sync command reports an error.
 
 `GH_TOKEN` is accepted as a fallback. ResearchPocket uses the token only in a
 sensitive HTTP authorization header. It never writes the token to SQLite, sync

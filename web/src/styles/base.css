@@ -1,0 +1,145 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--color-canvas);
+  color: var(--color-text);
+  min-width: 20rem;
+  overscroll-behavior-y: none;
+  text-size-adjust: 100%;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-width: 20rem;
+  min-height: 100vh;
+  font-size: var(--font-size-md);
+  line-height: var(--line-height-body);
+}
+
+[hidden] {
+  display: none !important;
+}
+
+button,
+input,
+select,
+textarea {
+  color: inherit;
+  font: inherit;
+}
+
+button,
+input[type="checkbox"] {
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:disabled,
+input:disabled,
+textarea:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+a {
+  color: var(--color-accent-strong);
+  text-underline-offset: 0.2em;
+}
+
+a:hover {
+  text-decoration-thickness: 0.125rem;
+}
+
+h1,
+h2,
+h3,
+p {
+  overflow-wrap: anywhere;
+}
+
+h1,
+h2,
+h3 {
+  line-height: var(--line-height-tight);
+}
+
+::selection {
+  background: var(--color-accent-soft);
+  color: var(--color-text);
+}
+
+:focus-visible {
+  outline: 0.1875rem solid var(--color-focus);
+  outline-offset: 0.1875rem;
+}
+
+input,
+select,
+textarea {
+  background: var(--color-surface-raised);
+  border: var(--rule) solid var(--color-border-strong);
+  border-radius: var(--radius);
+  min-height: var(--control-height);
+  width: 100%;
+}
+
+input {
+  height: var(--control-height);
+  padding: 0 var(--space-3);
+}
+
+select {
+  height: var(--control-height);
+  padding: 0 var(--space-3);
+}
+
+textarea {
+  line-height: 1.5;
+  padding: var(--space-3);
+  resize: vertical;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--color-text-muted);
+  opacity: 1;
+}
+
+button {
+  min-height: var(--control-height);
+}
+
+.sr-only {
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  height: 1px;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
+.skip-link {
+  background: var(--color-inverse-surface);
+  color: var(--color-inverse);
+  left: 0;
+  padding: var(--space-3) var(--space-4);
+  position: fixed;
+  top: 0;
+  transform: translateY(-120%);
+  z-index: 20;
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}

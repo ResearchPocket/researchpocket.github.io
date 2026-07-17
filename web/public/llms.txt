@@ -1,0 +1,15 @@
+# ResearchPocket
+
+ResearchPocket is a human-first, local-first library for useful URLs. The public
+site explains the product, while the hosted owner application stores its private
+replica in the visitor's browser. It contains no bundled public library data and
+requires an owner-provided, repository-scoped credential before private sync.
+
+Available in the V2 preview: offline capture and curation, V1 migration, CLI,
+TUI, native Firefox bookmarklet capture, private GitHub synchronization, remote
+recovery, and hosted owner editing. Selective public collections, the loopback
+web server, checkpoints, and background scheduling remain planned work.
+
+- [Project source and documentation](https://github.com/ResearchPocket/ResearchPocket)
+- [Public product overview](https://researchpocket.github.io/ResearchPocket/)
+- [Hosted owner app](https://researchpocket.github.io/ResearchPocket/app/)

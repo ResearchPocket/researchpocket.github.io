@@ -46,13 +46,13 @@ deferred capability as part of unrelated work.
 
 ## Current Baseline and Target Shape
 
-The shipped binary and workspace are V2-first. The root crate provides the V2
+The shipped binary and workspace are V2-only. The root crate provides the V2
 CLI, `crates/research-domain` owns convergence semantics, and
-`crates/research-store` owns local persistence and V1 import. Pocket-era source
-files and migrations remain only as migration references; their former commands
-are not compatibility requirements and are not compiled into the binary. Do not
-add new Pocket dependencies or design V2 behavior around the discontinued
-service.
+`crates/research-store` owns local persistence and V1 import. Pocket-era source,
+templates, assets, and migrations are available through Git history and recovered
+migration workspaces; they are not maintained beside the product. Their former
+commands are not compatibility requirements. Do not add new Pocket dependencies
+or design V2 behavior around the discontinued service.
 
 V2 consolidates product development in this repository. `my-list` and
 `ResearchGarden` are migration references until V2 reaches publishing parity;
@@ -68,7 +68,7 @@ crates/
   research-app/          use cases shared by every interface
   research-cli/          CLI binary and machine-readable output
   research-tui/          terminal UI
-web/                     Preact/Vite SPA for local and GitHub Pages modes
+web/                     React/Vite SPA for local and GitHub Pages modes
 docs/v2/                 product contract, protocol, threat model, ADRs, roadmap
 tests/fixtures/           sanitized V1 import and protocol fixtures
 ```
