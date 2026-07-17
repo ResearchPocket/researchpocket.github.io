@@ -32,9 +32,9 @@ from existing Git history are outside the V2 guarantee.
 
 | ID | Decision |
 | --- | --- |
-| TM-01 | Private synchronization data and public Pages output use different repositories. |
+| TM-01 | Private synchronization data and the public source/Pages repository are separate. |
 | TM-02 | The browser owner credential is a fine-grained PAT limited to the one private data repository with `Contents: read/write`, expiring after at most 90 days. |
-| TM-03 | The owner PAT cannot write the repository that serves the application JavaScript or any public publication repository. |
+| TM-03 | The owner PAT cannot write the protected source repository that serves the application JavaScript or any public publication repository. |
 | TM-04 | The browser keeps the PAT in JavaScript memory by default. Explicit tab-only retention may use `sessionStorage`; no longer-lived browser storage is allowed. |
 | TM-05 | IndexedDB may contain private CRDT state and a durable outbox, but never a credential. |
 | TM-06 | Owner mode loads no third-party runtime code, remote fonts, analytics, ads, error reporters, or tag managers. Reviewed webfonts may be bundled in the same-origin application artifact. |
@@ -43,14 +43,14 @@ from existing Git history are outside the V2 guarantee.
 | TM-09 | A service worker may cache only the public application shell. It never caches GitHub API traffic, credentials, private state, or publication previews. |
 | TM-10 | Deletion creates a tombstone. Historical erasure requires repository replacement or an explicit history rewrite. |
 | TM-11 | Native bookmarklet capture uses a per-user `researchpocket://capture` handler with a versioned, append-only field allowlist. The URI never selects a filesystem path, carries a credential, executes a command, or starts synchronization. |
-| TM-12 | The owner application has exclusive use of the `https://researchpocket.github.io` origin. No other active GitHub Pages project may share that origin because browser storage and same-origin script authority span project paths. |
+| TM-12 | The owner application has exclusive use of the `https://researchpocket.github.io` origin. The former `/ResearchPocket/` paths may contain only compatibility redirects built from the same protected source; no unrelated active Pages project may share the origin. |
 
 ## Trust boundaries
 
 | Component | Trust and permitted data |
 | --- | --- |
 | Native CLI/TUI/local UI | Trusted on the owner's device. May read private state. CLI synchronization reads a PAT only from the process environment; it does not persist the credential. |
-| Public Pages repository | Public and attacker-readable. Contains only the static application shell and allowlisted public projections. It never contains private updates or credentials. |
+| Public source and Pages repository | Public and attacker-readable. Its protected source builds the static application shell and allowlisted public projections. It never contains private updates or owner credentials. |
 | Pages application shell | Trusted only when built from reviewed, locked, first-party source. It may handle private state after owner authentication. |
 | Browser memory | Temporarily trusted for the owner PAT and decrypted-in-use private state. Browser extensions, developer tools, and injected scripts can observe it. |
 | `sessionStorage` | Optional, explicit tab-session PAT retention. It is convenience, not an XSS boundary, and is cleared on logout and authentication failure. |
@@ -70,9 +70,12 @@ GitHub Pages project paths are not storage boundaries. Every project served
 below `https://researchpocket.github.io/` shares the same web origin, so
 `localStorage`, `sessionStorage`, IndexedDB, the Cache API, and same-origin
 script authority are origin-wide even when URLs have different project paths.
-ResearchPocket's organization Pages origin must therefore host no other active
-Pages projects while it hosts the owner application. Any additional project
-must use a separate origin or custom domain and receive a new security review.
+ResearchPocket's organization Pages origin must therefore host no unrelated
+active Pages projects while it hosts the owner application. The same-build
+compatibility redirects under `/ResearchPocket/` are permitted only for the URL
+migration and execute only the reviewed redirect/cleanup script, never the owner
+application. Any additional project must use a separate origin or custom domain
+and receive a new security review.
 
 ## Repository and credential topology
 
@@ -299,7 +302,7 @@ Activating a new shell version removes old caches.
 | --- | --- | --- |
 | XSS steals the PAT | Self-only CSP, no inline/eval, no third-party runtime, locked dependencies, escaped rendering, no raw authored HTML | A compromised first-party build or browser extension can still read memory. |
 | PAT is over-scoped | Fine-grained token, one selected private repository, Contents read/write only, 90-day maximum, validation before use | Repository administrators and GitHub retain their normal authority. |
-| Malicious Pages update captures credentials | Owner PAT cannot write the application repository; enforce protected `main` and `v*` tags, reviewed changes, required checks, and pinned deployment inputs | A compromised maintainer or hosting account can publish malicious first-party code. |
+| Malicious Pages update captures credentials | Owner PAT cannot write the application repository; keep source, Pages workflow, releases, and protected `main` and `v*` tags in the same reviewed repository with required checks and pinned deployment inputs | A compromised maintainer or hosting account can publish malicious first-party code. |
 | Private data leaks through publication | Separate repositories; explicit collection and field allowlists; notes off by default; unresolved visibility private; negative artifact scans | Previously published Git history remains until rewritten. |
 | Service worker retains a token or API response | Never pass tokens to the worker; bypass Authorization/cross-origin traffic; cache shell allowlist only | Browser implementation defects remain possible. |
 | Git race loses or overwrites an edit | Immutable unique paths, pull-before-push, serialized upload, hash equality for idempotency, retry unchanged outbox | GitHub outage delays sync but does not discard local edits. |

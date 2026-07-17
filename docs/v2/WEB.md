@@ -78,6 +78,13 @@ It explicitly bypasses all GitHub API
 traffic, cross-origin traffic, and non-GET requests, so it cannot cache a token,
 private API response, or upload body.
 
+The canonical deployment is the organization site at
+`https://researchpocket.github.io/`, with owner mode under `/app/`. Noindex
+compatibility documents at the former `/ResearchPocket/` paths preserve query
+and hash fragments, remove only ResearchPocket's retired worker scopes and
+shell cache, and redirect on the same origin. IndexedDB therefore remains the
+same local library; the URL migration does not copy or rewrite private state.
+
 Vite development servers generate a fresh nonce when they start and attach it
 to development-only injected scripts and styles. This keeps CSS hot reload and
 the error overlay usable under CSP without adding `unsafe-inline`. Production
@@ -126,11 +133,13 @@ npm run build
 
 The build compiles `research-domain` to WASM, generates the local JavaScript
 bridge, runs strict TypeScript and policy checking, and emits the root landing
-page plus the relative-path owner app under `web/dist/app/`. The Pages workflow
-performs the same build and deploys only `web/dist/` from the public
-ResearchPocket source repository. The owner PAT is scoped to a different private
-data repository and therefore cannot modify the application JavaScript it
-executes.
+page plus the relative-path owner app under `web/dist/app/`. The protected
+source repository is also the reserved organization Pages repository,
+`ResearchPocket/researchpocket.github.io`; its workflow performs the same build
+and deploys only `web/dist/`. The former repository URL continues through
+GitHub's repository redirect, while the generated compatibility documents own
+the former Pages paths. The owner PAT is scoped to a different private data
+repository and therefore cannot modify the application JavaScript it executes.
 
 The complete credential and publication boundary remains in
 [THREAT_MODEL.md](./THREAT_MODEL.md), and immutable replay behavior remains in

@@ -53,3 +53,9 @@ app, checks the canonical design-system rules, creates the script-free landing
 page and relative-path owner app in `dist/`, and rejects unsafe deployment
 artifacts. The app-scoped service worker caches only same-origin owner-shell
 resources and bypasses `api.github.com`.
+
+Production is served from `https://researchpocket.github.io/`, with the owner
+application at `/app/`. The build also emits noindex compatibility redirects
+for the former `/ResearchPocket/` paths. Those redirects preserve the query and
+hash, unregister the retired service-worker scopes, and leave origin-scoped
+IndexedDB data untouched.

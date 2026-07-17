@@ -206,12 +206,14 @@ process interruption, or browser reload.
 
 ## Hosted Editing, Privacy, and Publishing
 
-Use separate repositories:
+Use separate private data and public application boundaries:
 
 1. A private data repository stores updates, checkpoints, publication policy,
    and a pinned publisher workflow.
-2. A public Pages repository stores only the static application shell and
-   sanitized publication projections.
+2. The protected public `ResearchPocket/researchpocket.github.io` source
+   repository builds and serves only the static application shell.
+3. Public publication repositories store only sanitized, allowlisted
+   projections.
 
 The GitHub-hosted owner UI is a required management surface, not read-only. It
 persists edits to IndexedDB/outbox before network activity and synchronizes them
@@ -222,8 +224,8 @@ Owner authentication uses a fine-grained, expiring PAT scoped only to the privat
 data repository with `Contents: read/write`. Keep the token in JavaScript memory
 by default; explicit session-only storage may use `sessionStorage`. Never put the
 token in `localStorage`, IndexedDB, a URL, logs, analytics, generated output, or a
-service-worker cache. The token must not have write access to the Pages repository
-that serves the application JavaScript.
+service-worker cache. The token must not have write access to the protected
+source/Pages repository that serves the application JavaScript.
 
 Owner mode loads no third-party runtime scripts or analytics. Enforce a self-only
 content security policy and limit network connections to the required GitHub API.

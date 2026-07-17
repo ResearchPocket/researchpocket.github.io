@@ -5,9 +5,9 @@ your control, supports deliberate human organization, and uses application-level
 CRDT convergence so a private GitHub repository can remain storage and transport
 rather than a conflict resolver.
 
-**V2 preview:** [understand the product](https://researchpocket.github.io/ResearchPocket/)
-· [open the owner app](https://researchpocket.github.io/ResearchPocket/app/)
-· [download the CLI](https://github.com/ResearchPocket/ResearchPocket/releases)
+**V2 preview:** [understand the product](https://researchpocket.github.io/)
+· [open the owner app](https://researchpocket.github.io/app/)
+· [download the CLI](https://github.com/ResearchPocket/researchpocket.github.io/releases)
 
 This is a preview release, not V2 GA. The available workflows and remaining
 boundaries are listed below and in the
@@ -44,7 +44,7 @@ data compatibility lives only in the read-only importer.
 
 The `v2.0.0-preview.2` release provides archives for Apple Silicon and Intel
 macOS, Linux amd64, and Windows amd64, plus `SHA256SUMS`. Download the archive
-for your platform from the [release page](https://github.com/ResearchPocket/ResearchPocket/releases),
+for your platform from the [release page](https://github.com/ResearchPocket/researchpocket.github.io/releases),
 verify it, place `research` (or `research.exe`) somewhere stable on your `PATH`,
 then run:
 
@@ -216,16 +216,22 @@ npm ci
 npm run dev
 ```
 
-The [public product overview](https://researchpocket.github.io/ResearchPocket/)
-loads no private application state. The separate
-[owner app](https://researchpocket.github.io/ResearchPocket/app/) is deployed as
-a credential-free GitHub Pages shell. Its
+The [public product overview](https://researchpocket.github.io/) loads no private
+application state. The separate
+[owner app](https://researchpocket.github.io/app/) is deployed as a
+credential-free GitHub Pages shell. Its
 Private sync panel connects a separate private data repository with an expiring,
 repository-scoped fine-grained PAT. The browser pulls on startup, focus, network
 recovery, and every 60 seconds while visible; local changes also request a sync.
 The token stays in JavaScript memory unless the owner explicitly chooses
 tab-only `sessionStorage`, and it never enters IndexedDB, URLs, logs, or the
 service-worker cache.
+
+The canonical Pages origin is `https://researchpocket.github.io/`. The former
+`/ResearchPocket/` project paths remain as same-origin compatibility redirects,
+so existing bookmarks and `#restore` links continue to the root deployment.
+Because the origin does not change, the new `/app/` entry uses the same
+browser-local IndexedDB library as the former project-path owner app.
 
 For an existing synchronized library, choose **Restore from private sync** before
 creating a save in the browser. The app prepares a pristine browser replica,

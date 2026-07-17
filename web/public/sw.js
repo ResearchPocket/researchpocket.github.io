@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "research-pocket-shell-";
-const CACHE_NAME = `${CACHE_PREFIX}v2`;
+const CACHE_NAME = `${CACHE_PREFIX}v3-root`;
 const SITE_ROOT = new URL("../", self.registration.scope);
 const ASSET_MANIFEST = new URL("asset-manifest.json", SITE_ROOT);
 const SHELL_FILES = ["app/", "app/index.html", "manifest.webmanifest", "favicon.svg"];

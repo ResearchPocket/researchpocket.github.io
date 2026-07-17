@@ -7,7 +7,7 @@ keywords = ["bookmarks", "reading-list", "local-first", "knowledge", "cli"]
 categories = ["command-line-utilities", "database"]
 authors = ["KorigamiK <korigamik.is-a.dev>"]
 license = "Apache-2.0"
-repository = "https://github.com/ResearchPocket/ResearchPocket"
+repository = "https://github.com/ResearchPocket/researchpocket.github.io"
 description = "A human-first, local-first personal library for saved URLs."
 
 [workspace]
