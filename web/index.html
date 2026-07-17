@@ -7,18 +7,237 @@
       content="default-src 'none'; base-uri 'none'; connect-src 'self' https://api.github.com; font-src 'self'; form-action 'none'; frame-src 'none'; img-src 'self'; manifest-src 'self'; object-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; worker-src 'self'; upgrade-insecure-requests"
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="light dark" />
-    <meta name="theme-color" content="#f2efe8" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#1a150c" />
     <meta
       name="description"
-      content="A private, offline-first home for the links you want to keep."
+      content="ResearchPocket is a private, local-first library for the useful links you choose to keep. Capture, curate, search, and sync without a hosted backend."
     />
-    <link rel="manifest" href="./manifest.webmanifest" />
-    <title>ResearchPocket</title>
+    <meta name="robots" content="index, follow" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="ResearchPocket" />
+    <meta property="og:title" content="ResearchPocket — useful links, kept yours" />
+    <meta
+      property="og:description"
+      content="A human-first, local-first library for the useful links you choose to keep."
+    />
+    <meta
+      property="og:url"
+      content="https://researchpocket.github.io/ResearchPocket/"
+    />
+    <meta
+      property="og:image"
+      content="https://researchpocket.github.io/ResearchPocket/og.png"
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="ResearchPocket — useful links, kept yours" />
+    <meta
+      name="twitter:description"
+      content="A human-first, local-first library for the useful links you choose to keep."
+    />
+    <meta
+      name="twitter:image"
+      content="https://researchpocket.github.io/ResearchPocket/og.png"
+    />
+    <link
+      rel="canonical"
+      href="https://researchpocket.github.io/ResearchPocket/"
+    />
+    <link rel="sitemap" href="./sitemap.xml" type="application/xml" />
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/src/styles/tokens.css" />
+    <link rel="stylesheet" href="/src/styles/base.css" />
+    <link rel="stylesheet" href="/src/styles/app.css" />
+    <title>ResearchPocket — a private, local-first link library</title>
   </head>
-  <body>
-    <noscript>ResearchPocket needs JavaScript to open your local library.</noscript>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+  <body class="site-body">
+    <a class="skip-link" href="#content">Skip to content</a>
+
+    <header class="site-header">
+      <a aria-label="ResearchPocket home" class="site-brand" href="./">
+        <span aria-hidden="true" class="brand-mark">rp</span>
+        <span>ResearchPocket</span>
+      </a>
+      <nav aria-label="Primary navigation" class="site-nav">
+        <a href="#how-it-works">How it works</a>
+        <a href="#available-now">Available now</a>
+        <a href="https://github.com/ResearchPocket/ResearchPocket">Source</a>
+        <a class="site-nav-action" href="./app/">Open app</a>
+      </nav>
+    </header>
+
+    <main class="site-main" id="content" tabindex="-1">
+      <section class="site-hero">
+        <div class="site-hero-copy">
+          <p class="eyebrow">V2 preview / open source / yours</p>
+          <h1>Useful links deserve a place you control.</h1>
+          <p class="site-lede">
+            ResearchPocket is a human-first library for saving URLs with the
+            context that made them matter. It works locally, stays private by
+            default, and needs no ResearchPocket account or always-on backend.
+          </p>
+          <div class="site-actions">
+            <a class="primary-link" href="./app/">Open the owner app</a>
+            <a
+              class="secondary-link"
+              href="https://github.com/ResearchPocket/ResearchPocket/releases"
+            >Get the CLI</a>
+          </div>
+        </div>
+
+        <dl class="site-facts">
+          <div>
+            <dt>Default</dt>
+            <dd>Local and private</dd>
+          </div>
+          <div>
+            <dt>Remote</dt>
+            <dd>Your private GitHub repository</dd>
+          </div>
+          <div>
+            <dt>Interfaces</dt>
+            <dd>CLI, TUI, Firefox capture, web</dd>
+          </div>
+          <div>
+            <dt>Business model</dt>
+            <dd>No account, ads, analytics, or AI profile</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="site-section site-positioning" aria-labelledby="positioning-heading">
+        <div>
+          <p class="eyebrow">Built for remembering</p>
+          <h2 id="positioning-heading">Your library is not an AI memory feed.</h2>
+        </div>
+        <div class="site-reading-copy">
+          <p>
+            ResearchPocket does not autonomously decide what you know. You choose
+            the links, titles, notes, tags, favorites, and deletions. Those human
+            decisions remain canonical across every interface.
+          </p>
+          <p>
+            The product stores URLs and your authored context—not a copy of every
+            page, not an advertising profile, and not a hosted knowledge graph.
+          </p>
+        </div>
+      </section>
+
+      <section class="site-section" id="how-it-works" aria-labelledby="workflow-heading">
+        <p class="eyebrow">One library, several ways in</p>
+        <h2 id="workflow-heading">Capture quickly. Curate deliberately. Sync safely.</h2>
+        <ol class="site-steps">
+          <li>
+            <span aria-hidden="true">01</span>
+            <h3>Capture where you are</h3>
+            <p>
+              Save from the CLI, the terminal interface, the hosted owner app, or
+              a Firefox bookmarklet that invokes your installed local CLI.
+            </p>
+          </li>
+          <li>
+            <span aria-hidden="true">02</span>
+            <h3>Add your own context</h3>
+            <p>
+              Search and refine titles, notes, tags, favorites, and lifecycle
+              state. Every local action is durable before the interface reports success.
+            </p>
+          </li>
+          <li>
+            <span aria-hidden="true">03</span>
+            <h3>Carry it between devices</h3>
+            <p>
+              Optional private sync exchanges immutable updates through GitHub.
+              Application state converges without asking Git to merge your library.
+            </p>
+          </li>
+        </ol>
+      </section>
+
+      <section class="site-section site-flow" aria-labelledby="flow-heading">
+        <div class="site-flow-copy">
+          <p class="eyebrow">No application server</p>
+          <h2 id="flow-heading">The remote stores updates. Your devices build the library.</h2>
+          <p>
+            SQLite and IndexedDB stay local. A private repository holds immutable,
+            uniquely addressed CRDT updates so offline devices can meet again
+            without Git commits choosing a winner.
+          </p>
+        </div>
+        <div aria-label="ResearchPocket data flow" class="site-flow-map">
+          <div>
+            <strong>Local device</strong>
+            <span>Private library + search index</span>
+          </div>
+          <span aria-hidden="true">→</span>
+          <div>
+            <strong>Immutable updates</strong>
+            <span>Encrypted in transit by GitHub HTTPS</span>
+          </div>
+          <span aria-hidden="true">→</span>
+          <div>
+            <strong>Private repository</strong>
+            <span>Durability, transport, and recovery</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="site-section" id="available-now" aria-labelledby="scope-heading">
+        <p class="eyebrow">V2 preview scope</p>
+        <h2 id="scope-heading">A usable owner library today, with honest edges.</h2>
+        <div class="site-scope-grid">
+          <div>
+            <h3>Available now</h3>
+            <ul>
+              <li>V1 database migration into a new V2 library</li>
+              <li>Offline capture, edit, search, tags, favorites, delete, and restore</li>
+              <li>Keyboard-first terminal interface and machine-readable CLI output</li>
+              <li>Private GitHub sync and recovery across CLI and browser devices</li>
+              <li>Static hosted owner editing with a repository-scoped token</li>
+            </ul>
+          </div>
+          <div>
+            <h3>Still on the roadmap</h3>
+            <ul>
+              <li>Selective public collections and feeds</li>
+              <li>The secured loopback <code>research ui</code> server</li>
+              <li>Remote checkpoints and platform background scheduling</li>
+              <li>V2 Alpha, Beta, and GA release gates</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="site-section site-start" aria-labelledby="start-heading">
+        <div>
+          <p class="eyebrow">Start with the right path</p>
+          <h2 id="start-heading">New library or existing remote—both stay yours.</h2>
+        </div>
+        <div class="site-start-options">
+          <div>
+            <h3>Start fresh in this browser</h3>
+            <p>Create an offline library now. Private sync remains optional.</p>
+            <a class="primary-link" href="./app/">Start a local library</a>
+          </div>
+          <div>
+            <h3>Restore your existing library</h3>
+            <p>
+              Prepare a pristine browser replica, then connect the private data
+              repository already used by your CLI or another browser.
+            </p>
+            <a class="secondary-link" href="./app/#restore">Restore from private sync</a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>ResearchPocket / local-first / private by default / no tracking</p>
+      <nav aria-label="Project links">
+        <a href="https://github.com/ResearchPocket/ResearchPocket/blob/main/README.md">Documentation</a>
+        <a href="https://github.com/ResearchPocket/ResearchPocket/releases">Releases</a>
+        <a href="https://github.com/ResearchPocket/ResearchPocket/blob/main/docs/v2/THREAT_MODEL.md">Privacy model</a>
+      </nav>
+    </footer>
   </body>
 </html>

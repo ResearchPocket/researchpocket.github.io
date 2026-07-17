@@ -1,6 +1,7 @@
 import {
   type FormEvent,
   type ReactNode,
+  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
@@ -30,7 +31,13 @@ interface LibraryItemView {
   savedAt: string;
 }
 
-type LifecycleFilter = "active" | "deleted";
+type LifecycleFilter = "active" | "deleted" | "all";
+type SearchScope = "all" | "title" | "url" | "context" | "tags";
+type SortMode = "recent" | "oldest" | "title";
+type TagMatchMode = "any" | "all";
+type WorkspaceView = "library" | "sync";
+
+const LIST_BATCH_SIZE = 100;
 
 const EMPTY_LIBRARY_STATE: LibraryState = {
   error: null,
@@ -56,10 +63,23 @@ export function App() {
   const [syncState, setSyncState] = useState<BrowserSyncState>(EMPTY_SYNC_STATE);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<LifecycleFilter>("active");
+  const [searchScope, setSearchScope] = useState<SearchScope>("all");
+  const [favoriteOnly, setFavoriteOnly] = useState(false);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [tagSearch, setTagSearch] = useState("");
+  const [tagMatchMode, setTagMatchMode] = useState<TagMatchMode>("all");
+  const [sortMode, setSortMode] = useState<SortMode>("recent");
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [visibleLimit, setVisibleLimit] = useState(LIST_BATCH_SIZE);
+  const [view, setView] = useState<WorkspaceView>(() =>
+    window.location.hash === "#restore" ? "sync" : "library",
+  );
+  const [capturing, setCapturing] = useState(false);
   const [editingItem, setEditingItem] = useState<LibraryItemView | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
+  const captureOpenerRef = useRef<HTMLButtonElement | null>(null);
   const editOpenerRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
@@ -83,10 +103,57 @@ export function App() {
   const items = libraryState.items as unknown as LibraryItemView[];
   const activeCount = items.filter((item) => !item.deleted).length;
   const deletedCount = items.length - activeCount;
-  const visibleItems = useMemo(
-    () => filterAndSortItems(items, query, filter),
-    [filter, items, query],
+  const knownTags = useMemo(
+    () =>
+      Array.from(new Set(items.flatMap((item) => item.tags))).sort((left, right) =>
+        left.localeCompare(right),
+      ),
+    [items],
   );
+  const deferredQuery = useDeferredValue(query);
+  const visibleItems = useMemo(
+    () =>
+      filterAndSortItems(
+        items,
+        deferredQuery,
+        filter,
+        searchScope,
+        favoriteOnly,
+        selectedTags,
+        tagMatchMode,
+        sortMode,
+      ),
+    [
+      deferredQuery,
+      favoriteOnly,
+      filter,
+      items,
+      searchScope,
+      selectedTags,
+      sortMode,
+      tagMatchMode,
+    ],
+  );
+  const searchPending = query !== deferredQuery;
+  const renderedItems = visibleItems.slice(0, visibleLimit);
+  const tagFilterMatches = useMemo(() => {
+    const normalizedSearch = tagSearch.trim().toLocaleLowerCase();
+    if (!normalizedSearch) return [];
+    return knownTags
+      .filter((tag) => !selectedTags.includes(tag))
+      .filter((tag) => tag.toLocaleLowerCase().includes(normalizedSearch))
+      .slice(0, 8);
+  }, [knownTags, selectedTags, tagSearch]);
+  const appliedFilterCount =
+    Number(filter !== "active") +
+    Number(searchScope !== "all") +
+    Number(favoriteOnly) +
+    Number(selectedTags.length > 0) +
+    Number(sortMode !== "recent");
+
+  useEffect(() => {
+    setVisibleLimit(LIST_BATCH_SIZE);
+  }, [deferredQuery, favoriteOnly, filter, searchScope, selectedTags, sortMode, tagMatchMode]);
 
   async function runAction(
     action: string,
@@ -108,18 +175,26 @@ export function App() {
     }
   }
 
-  async function initializeLibrary() {
-    await runAction(
+  async function initializeLibrary(targetView: WorkspaceView) {
+    const initialized = await runAction(
       "Initialize library",
       "Your private local library is ready.",
       () => libraryRepository.initialize(),
     );
+    if (initialized) {
+      setView(targetView);
+    }
   }
 
   async function addItem(input: AddInput) {
-    return runAction("Save link", "Saved to your local library.", () =>
+    const saved = await runAction("Save link", "Saved to your local library.", () =>
       libraryRepository.add(input),
     );
+    if (saved) {
+      setView("library");
+      closeCapture();
+    }
+    return saved;
   }
 
   async function toggleFavorite(item: LibraryItemView) {
@@ -162,12 +237,30 @@ export function App() {
   }
 
   function openEditor(item: LibraryItemView, opener: HTMLButtonElement) {
+    setLocalError(null);
     editOpenerRef.current = opener;
     setEditingItem(item);
   }
 
+  function openCapture(opener: HTMLButtonElement) {
+    setLocalError(null);
+    captureOpenerRef.current = opener;
+    setCapturing(true);
+  }
+
+  function closeCapture() {
+    setCapturing(false);
+    setLocalError(null);
+    window.requestAnimationFrame(() => {
+      const opener = captureOpenerRef.current;
+      if (opener?.isConnected) opener.focus();
+      captureOpenerRef.current = null;
+    });
+  }
+
   function closeEditor() {
     setEditingItem(null);
+    setLocalError(null);
     window.requestAnimationFrame(() => {
       const opener = editOpenerRef.current;
       if (opener?.isConnected) opener.focus();
@@ -178,64 +271,88 @@ export function App() {
   const repositoryError = readStateError(libraryState.error);
   const displayedError = localError ?? repositoryError;
 
+  if (libraryState.loading) {
+    return <BootScreen />;
+  }
+
   if (!libraryState.initialized) {
     return (
       <Welcome
-        booting={libraryState.loading}
         busy={busyAction !== null}
         error={displayedError}
-        onInitialize={initializeLibrary}
+        onInitialize={() => initializeLibrary("library")}
+        onRestore={() => initializeLibrary("sync")}
+        restoreFirst={window.location.hash === "#restore"}
       />
     );
   }
 
   return (
     <div className="app-shell">
-      <a className="skip-link" href="#library">
-        Skip to library
+      <a className="skip-link" href="#workspace">
+        Skip to workspace
       </a>
 
       <header className="masthead">
-        <div className="brand-lockup">
+        <a
+          aria-label="ResearchPocket product overview"
+          className="brand-lockup"
+          href="../"
+        >
           <span aria-hidden="true" className="brand-mark">
-            RP
+            rp
           </span>
           <div>
-            <p className="eyebrow">Your private library</p>
             <p className="brand-name">ResearchPocket</p>
+            <p className="brand-context">owner workspace</p>
           </div>
-        </div>
+        </a>
 
         <div className="local-status" role="status">
           <span aria-hidden="true" className="status-dot" />
-          <span>{formatRepositoryStatus(libraryState.status)}</span>
-          <span className="status-divider" aria-hidden="true">
-            ·
-          </span>
-          <span>
-            {libraryState.pendingCount === 0
-              ? "All local changes saved"
-              : pluralize(libraryState.pendingCount, "change") + " waiting to sync"}
+          <span className="status-label">local</span>
+          <span className="status-copy">
+            {formatHeaderStatus(libraryState.status, libraryState.pendingCount)}
           </span>
         </div>
       </header>
 
-      <main>
-        <SyncPanel state={syncState} />
+      <main id="workspace" tabIndex={-1}>
+        <h1 className="sr-only">ResearchPocket owner library</h1>
 
-        <section aria-labelledby="capture-heading" className="capture-section">
-          <div className="section-intro">
-            <p className="eyebrow">Capture</p>
-            <h1 id="capture-heading">Keep something worth returning to.</h1>
-            <p>
-              Save the link with the context that matters to you. It stays on this
-              device, even when you are offline.
-            </p>
-          </div>
-          <CaptureForm busy={busyAction !== null} onAdd={addItem} />
-        </section>
+        <nav aria-label="Workspace views" className="workspace-nav">
+          <button
+            aria-pressed={view === "library"}
+            onClick={() => setView("library")}
+            type="button"
+          >
+            Library <span>{activeCount}</span>
+          </button>
+          <button
+            className="workspace-action"
+            onClick={(event) => openCapture(event.currentTarget)}
+            type="button"
+          >
+            + New save
+          </button>
+          <button
+            aria-pressed={view === "sync"}
+            onClick={() => setView("sync")}
+            type="button"
+          >
+            Sync <span>{libraryState.pendingCount}</span>
+          </button>
+        </nav>
 
-        <section aria-labelledby="library-heading" className="library-section" id="library">
+        <SyncPanel hidden={view !== "sync"} state={syncState} />
+
+        <section
+          aria-busy={searchPending}
+          aria-labelledby="library-heading"
+          className="library-section"
+          hidden={view !== "library"}
+          id="library"
+        >
           <div className="library-heading-row">
             <div>
               <p className="eyebrow">Library</p>
@@ -247,43 +364,193 @@ export function App() {
           </div>
 
           <div className="library-tools">
-            <label className="search-field">
-              <span>Search your library</span>
+            <div className="search-control" role="search">
+              <label className="sr-only" htmlFor="library-search">
+                Search your library
+              </label>
+              <svg aria-hidden="true" className="search-glyph" viewBox="0 0 24 24">
+                <circle cx="10.5" cy="10.5" r="6.5" />
+                <path d="m15.5 15.5 4 4" />
+              </svg>
               <input
                 autoComplete="off"
+                id="library-search"
+                name="query"
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="Title, URL, note, or tag"
                 type="search"
                 value={query}
               />
-            </label>
-
-            <fieldset className="filter-group">
-              <legend>Show items</legend>
-              <button
-                aria-pressed={filter === "active"}
-                className="filter-button"
-                onClick={() => setFilter("active")}
-                type="button"
-              >
-                Active <span>{activeCount}</span>
-              </button>
-              <button
-                aria-pressed={filter === "deleted"}
-                className="filter-button"
-                onClick={() => setFilter("deleted")}
-                type="button"
-              >
-                Deleted <span>{deletedCount}</span>
-              </button>
-            </fieldset>
+              {query ? (
+                <button
+                  aria-label="Clear search"
+                  className="search-clear"
+                  onClick={() => setQuery("")}
+                  title="Clear search"
+                  type="button"
+                >
+                  <span aria-hidden="true">×</span>
+                </button>
+              ) : null}
+            </div>
+            <button
+              aria-controls="library-filters"
+              aria-expanded={filtersOpen}
+              className="filter-toggle"
+              onClick={() => setFiltersOpen((open) => !open)}
+              type="button"
+            >
+              Filters{appliedFilterCount > 0 ? ` ${appliedFilterCount}` : ""}
+            </button>
           </div>
+
+          <div className="library-filters" hidden={!filtersOpen} id="library-filters">
+            <label>
+              <span>Match</span>
+              <select
+                id="search-scope"
+                name="search-scope"
+                onChange={(event) => setSearchScope(event.target.value as SearchScope)}
+                value={searchScope}
+              >
+                <option value="all">All fields</option>
+                <option value="title">Title</option>
+                <option value="url">URL</option>
+                <option value="context">Context</option>
+                <option value="tags">Tags</option>
+              </select>
+            </label>
+            <label>
+              <span>Items</span>
+              <select
+                id="lifecycle-filter"
+                name="lifecycle-filter"
+                onChange={(event) => setFilter(event.target.value as LifecycleFilter)}
+                value={filter}
+              >
+                <option value="active">Active {activeCount}</option>
+                <option value="deleted">Deleted {deletedCount}</option>
+                <option value="all">All {items.length}</option>
+              </select>
+            </label>
+            <label>
+              <span>Order</span>
+              <select
+                id="sort-mode"
+                name="sort-mode"
+                onChange={(event) => setSortMode(event.target.value as SortMode)}
+                value={sortMode}
+              >
+                <option value="recent">Newest</option>
+                <option value="oldest">Oldest</option>
+                <option value="title">Title</option>
+              </select>
+            </label>
+            <label className="filter-favorite">
+              <input
+                checked={favoriteOnly}
+                id="favorite-filter"
+                name="favorite-filter"
+                onChange={(event) => setFavoriteOnly(event.target.checked)}
+                type="checkbox"
+              />
+              <span>Favorites only</span>
+            </label>
+            {appliedFilterCount > 0 ? (
+              <button
+                className="filter-reset"
+                onClick={() => {
+                  setFilter("active");
+                  setSearchScope("all");
+                  setFavoriteOnly(false);
+                  setSelectedTags([]);
+                  setTagSearch("");
+                  setTagMatchMode("all");
+                  setSortMode("recent");
+                }}
+                type="button"
+              >
+                Reset
+              </button>
+            ) : null}
+            {knownTags.length > 0 ? (
+              <fieldset className="tag-filter-group">
+                <legend>Tags</legend>
+                <label className="tag-filter-search">
+                  <span>Find tags</span>
+                  <input
+                    autoComplete="off"
+                    id="tag-filter-search"
+                    name="tag-filter-search"
+                    onChange={(event) => setTagSearch(event.target.value)}
+                    placeholder="Search exact tags"
+                    type="search"
+                    value={tagSearch}
+                  />
+                </label>
+                <div aria-label="Tag filter selection" className="tag-filter-options">
+                  {selectedTags.map((tag) => (
+                    <button
+                      aria-label={`Remove tag filter ${tag}`}
+                      aria-pressed="true"
+                      key={tag}
+                      onClick={() =>
+                        setSelectedTags((current) =>
+                          current.filter((value) => value !== tag),
+                        )
+                      }
+                      type="button"
+                    >
+                      {tag} ×
+                    </button>
+                  ))}
+                  {tagFilterMatches.map((tag) => (
+                    <button
+                      aria-label={`Add tag filter ${tag}`}
+                      aria-pressed="false"
+                      key={tag}
+                      onClick={() => {
+                        setSelectedTags((current) => [...current, tag]);
+                        setTagSearch("");
+                      }}
+                      type="button"
+                    >
+                      + {tag}
+                    </button>
+                  ))}
+                  {tagSearch.trim() && tagFilterMatches.length === 0 ? (
+                    <span className="tag-filter-empty">No matching tags</span>
+                  ) : null}
+                </div>
+                {selectedTags.length > 1 ? (
+                  <label>
+                    <span>Match</span>
+                    <select
+                      id="tag-match-mode"
+                      name="tag-match-mode"
+                      onChange={(event) =>
+                        setTagMatchMode(event.target.value as TagMatchMode)
+                      }
+                      value={tagMatchMode}
+                    >
+                      <option value="all">All selected tags</option>
+                      <option value="any">Any selected tag</option>
+                    </select>
+                  </label>
+                ) : null}
+              </fieldset>
+            ) : null}
+          </div>
+
+          <p className="result-count">
+            {searchPending ? "Updating…" : pluralize(visibleItems.length, "result")}
+          </p>
 
           {visibleItems.length === 0 ? (
             <EmptyLibrary filter={filter} hasQuery={query.trim().length > 0} />
           ) : (
             <ol className="item-list">
-              {visibleItems.map((item) => (
+              {renderedItems.map((item) => (
                 <LibraryItem
                   busy={busyAction !== null}
                   item={item}
@@ -296,62 +563,107 @@ export function App() {
               ))}
             </ol>
           )}
+          {renderedItems.length < visibleItems.length ? (
+            <button
+              className="list-more"
+              onClick={() => setVisibleLimit((current) => current + LIST_BATCH_SIZE)}
+              type="button"
+            >
+              Show {Math.min(LIST_BATCH_SIZE, visibleItems.length - renderedItems.length)} more
+            </button>
+          ) : null}
+          <div aria-atomic="true" aria-live="polite" className="sr-only">
+            {searchPending
+              ? "Updating library results."
+              : `Showing ${renderedItems.length.toLocaleString()} of ${pluralize(visibleItems.length, "result")}`}
+          </div>
         </section>
       </main>
 
       <footer>
-        <p>Private by default. Built for your attention, not an algorithm.</p>
+        <p>local-first / private by default / no tracking</p>
+        <a href="../">About and releases</a>
       </footer>
 
       <div aria-atomic="true" aria-live="polite" className="sr-only">
         {announcement}
       </div>
 
-      {displayedError ? (
+      {displayedError && !editingItem && !capturing ? (
         <div className="error-banner" role="alert">
           <strong>Something needs your attention.</strong>
           <span>{displayedError}</span>
-          <button onClick={() => setLocalError(null)} type="button">
-            Dismiss
-          </button>
+          {localError ? (
+            <button onClick={() => setLocalError(null)} type="button">
+              Dismiss
+            </button>
+          ) : null}
         </div>
       ) : null}
 
       {editingItem ? (
-        <EditDialog
-          busy={busyAction !== null}
-          item={editingItem}
+          <EditDialog
+            busy={busyAction !== null}
+            error={localError}
+            item={editingItem}
+            knownTags={knownTags}
           onClose={closeEditor}
           onSave={saveEdit}
+        />
+      ) : null}
+
+      {capturing ? (
+        <CaptureDialog
+          busy={busyAction !== null}
+          error={localError}
+          knownTags={knownTags}
+          onAdd={addItem}
+          onClose={closeCapture}
         />
       ) : null}
     </div>
   );
 }
 
+function BootScreen() {
+  return (
+    <main aria-busy="true" aria-live="polite" className="boot-shell">
+      <span aria-hidden="true" className="welcome-monogram">rp</span>
+      <p className="eyebrow">ResearchPocket / owner app</p>
+      <h1>Opening this browser's library…</h1>
+    </main>
+  );
+}
+
 function Welcome({
-  booting,
   busy,
   error,
   onInitialize,
+  onRestore,
+  restoreFirst,
 }: {
-  booting: boolean;
   busy: boolean;
   error: string | null;
   onInitialize: () => Promise<void>;
+  onRestore: () => Promise<void>;
+  restoreFirst: boolean;
 }) {
   return (
     <main className="welcome-shell">
       <section aria-labelledby="welcome-heading" className="welcome-card">
         <div aria-hidden="true" className="welcome-monogram">
-          RP
+          rp
         </div>
-        <p className="eyebrow">A quiet place for useful links</p>
-        <h1 id="welcome-heading">Your research belongs to you.</h1>
+        <p className="eyebrow">ResearchPocket / owner app</p>
+        <h1 id="welcome-heading">
+          {restoreFirst
+            ? "Bring your existing library into this browser."
+            : "Choose how this browser should begin."}
+        </h1>
         <p className="welcome-copy">
-          ResearchPocket keeps a durable library in this browser. Capture, search,
-          annotate, and recover your saves without an account or a network
-          connection.
+          This device keeps its own private, offline replica. Start with an empty
+          library or restore the library already synchronized by your CLI or
+          another browser.
         </p>
 
         <div className="privacy-note">
@@ -363,23 +675,58 @@ function Welcome({
 
         {error ? <p role="alert">{error}</p> : null}
 
-        <button
-          className="primary-button welcome-action"
-          disabled={booting || busy}
-          onClick={() => void onInitialize()}
-          type="button"
-        >
-          {booting ? "Opening your library…" : "Create local library"}
-        </button>
+        <div className="onboarding-options">
+          <section className={restoreFirst ? "onboarding-option onboarding-option-priority" : "onboarding-option"}>
+            <p className="eyebrow">Existing owner</p>
+            <h2>Restore from private sync</h2>
+            <p>
+              Prepare a pristine local replica, then enter the private repository
+              and fine-grained GitHub token used by your other devices.
+            </p>
+            <button
+              className={restoreFirst ? "primary-button" : "secondary-button"}
+              disabled={busy}
+              onClick={() => void onRestore()}
+              type="button"
+            >
+              {busy ? "Preparing browser…" : "Continue to private sync"}
+            </button>
+          </section>
+
+          <section className={!restoreFirst ? "onboarding-option onboarding-option-priority" : "onboarding-option"}>
+            <p className="eyebrow">New library</p>
+            <h2>Start locally</h2>
+            <p>
+              Create an empty offline library in this browser. You can connect a
+              new private synchronization repository later.
+            </p>
+            <button
+              className={!restoreFirst ? "primary-button" : "secondary-button"}
+              disabled={busy}
+              onClick={() => void onInitialize()}
+              type="button"
+            >
+              {busy ? "Creating library…" : "Create a local library"}
+            </button>
+          </section>
+        </div>
+
         <p className="welcome-footnote">
-          Your browser storage must remain enabled to keep this local copy.
+          Restore before making a new save. Browser storage must remain enabled
+          to keep either local copy. <a href="../">Return to the product overview.</a>
         </p>
       </section>
     </main>
   );
 }
 
-function SyncPanel({ state }: { state: BrowserSyncState }) {
+function SyncPanel({
+  hidden,
+  state,
+}: {
+  hidden: boolean;
+  state: BrowserSyncState;
+}) {
   const [repository, setRepository] = useState("");
   const [branch, setBranch] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
@@ -427,13 +774,17 @@ function SyncPanel({ state }: { state: BrowserSyncState }) {
   const remote = state.configuration;
 
   return (
-    <section aria-labelledby="sync-heading" className="sync-section">
+    <section
+      aria-labelledby="sync-heading"
+      className="sync-section"
+      hidden={hidden}
+    >
       <div className="sync-copy">
-        <p className="eyebrow">Private sync</p>
-        <h1 id="sync-heading">Your library, wherever you open it.</h1>
+        <p className="eyebrow">Remote</p>
+        <h2 id="sync-heading">Private sync</h2>
         <p>
-          ResearchPocket exchanges immutable application updates through a private
-          GitHub repository. Git commits never decide which save or note wins.
+          Exchange immutable updates through one private GitHub repository. Git
+          does not resolve library state.
         </p>
         <div className="sync-state" role="status">
           <span aria-hidden="true" className="status-dot" />
@@ -454,6 +805,8 @@ function SyncPanel({ state }: { state: BrowserSyncState }) {
             <input
               autoCapitalize="none"
               autoComplete="off"
+              id="sync-repository"
+              name="repository"
               onChange={(event) => setRepository(event.target.value)}
               placeholder="owner/private-repository"
               required
@@ -466,6 +819,8 @@ function SyncPanel({ state }: { state: BrowserSyncState }) {
             <input
               autoCapitalize="none"
               autoComplete="off"
+              id="sync-branch"
+              name="branch"
               onChange={(event) => setBranch(event.target.value)}
               placeholder="main"
               spellCheck={false}
@@ -536,6 +891,7 @@ function TokenFields() {
         <input
           autoCapitalize="none"
           autoComplete="off"
+          id="github-token"
           name="github-token"
           required
           spellCheck={false}
@@ -544,6 +900,7 @@ function TokenFields() {
       </label>
       <label className="check-field sync-session-choice">
         <input
+          id="remember-for-tab"
           name="remember-for-tab"
           type="checkbox"
         />
@@ -559,14 +916,19 @@ function TokenFields() {
 
 function CaptureForm({
   busy,
+  error,
+  knownTags,
   onAdd,
 }: {
   busy: boolean;
+  error: string | null;
+  knownTags: string[];
   onAdd: (input: AddInput) => Promise<boolean>;
 }) {
   const [url, setUrl] = useState("");
   const [title, setTitle] = useState("");
-  const [tags, setTags] = useState("");
+  const [tags, setTags] = useState<string[]>([]);
+  const [tagDraft, setTagDraft] = useState("");
   const [note, setNote] = useState("");
   const [favorite, setFavorite] = useState(false);
 
@@ -575,7 +937,7 @@ function CaptureForm({
     const saved = await onAdd({
       favorite,
       note: optionalText(note),
-      tags: parseTags(tags),
+      tags: withTagDraft(tags, tagDraft),
       title: optionalText(title),
       url: url.trim(),
     } as AddInput);
@@ -583,7 +945,8 @@ function CaptureForm({
     if (saved) {
       setUrl("");
       setTitle("");
-      setTags("");
+      setTags([]);
+      setTagDraft("");
       setNote("");
       setFavorite(false);
     }
@@ -596,7 +959,9 @@ function CaptureForm({
         <input
           autoCapitalize="none"
           autoComplete="url"
+          id="capture-url"
           inputMode="url"
+          name="url"
           onChange={(event) => setUrl(event.target.value)}
           placeholder="https://example.com/a-useful-page"
           required
@@ -609,6 +974,8 @@ function CaptureForm({
         <span>Title <small>optional</small></span>
         <input
           autoComplete="off"
+          id="capture-title"
+          name="title"
           onChange={(event) => setTitle(event.target.value)}
           placeholder="What will help you recognize it?"
           type="text"
@@ -616,20 +983,20 @@ function CaptureForm({
         />
       </label>
 
-      <label className="field">
-        <span>Tags <small>separate with commas</small></span>
-        <input
-          autoComplete="off"
-          onChange={(event) => setTags(event.target.value)}
-          placeholder="design, reference"
-          type="text"
-          value={tags}
-        />
-      </label>
+      <TagField
+        id="capture-tags"
+        knownTags={knownTags}
+        onDraftChange={setTagDraft}
+        onChange={setTags}
+        draft={tagDraft}
+        value={tags}
+      />
 
       <label className="field field-note">
         <span>Private note <small>optional</small></span>
         <textarea
+          id="capture-note"
+          name="note"
           onChange={(event) => setNote(event.target.value)}
           placeholder="Why are you keeping this?"
           rows={3}
@@ -641,6 +1008,8 @@ function CaptureForm({
         <label className="check-field">
           <input
             checked={favorite}
+            id="capture-favorite"
+            name="favorite"
             onChange={(event) => setFavorite(event.target.checked)}
             type="checkbox"
           />
@@ -650,7 +1019,158 @@ function CaptureForm({
           {busy ? "Saving…" : "Save to library"}
         </button>
       </div>
+      {error ? <p className="dialog-error" role="alert">{error}</p> : null}
     </form>
+  );
+}
+
+function CaptureDialog({
+  busy,
+  error,
+  knownTags,
+  onAdd,
+  onClose,
+}: {
+  busy: boolean;
+  error: string | null;
+  knownTags: string[];
+  onAdd: (input: AddInput) => Promise<boolean>;
+  onClose: () => void;
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    dialog.showModal();
+    dialog.querySelector<HTMLInputElement>("#capture-url")?.focus();
+    return () => {
+      if (dialog.open) dialog.close();
+    };
+  }, []);
+
+  return (
+    <dialog
+      aria-labelledby="capture-dialog-heading"
+      className="capture-dialog"
+      onCancel={(event) => {
+        event.preventDefault();
+        onClose();
+      }}
+      ref={dialogRef}
+    >
+      <div className="dialog-surface">
+        <div className="dialog-heading">
+          <div>
+            <h2 id="capture-dialog-heading">New save</h2>
+            <p>Committed locally before synchronization.</p>
+          </div>
+          <button
+            aria-label="Close capture form"
+            className="icon-button close-button"
+            disabled={busy}
+            onClick={onClose}
+            title="Close"
+            type="button"
+          >
+            <span aria-hidden="true">×</span>
+          </button>
+        </div>
+        <CaptureForm
+          busy={busy}
+          error={error}
+          knownTags={knownTags}
+          onAdd={onAdd}
+        />
+      </div>
+    </dialog>
+  );
+}
+
+function TagField({
+  draft,
+  id,
+  knownTags,
+  onDraftChange,
+  onChange,
+  value,
+}: {
+  draft: string;
+  id: string;
+  knownTags: string[];
+  onDraftChange: (value: string) => void;
+  onChange: (value: string[]) => void;
+  value: string[];
+}) {
+  const suggestions = findTagSuggestions(knownTags, value, draft);
+  const suggestionsId = `${id}-suggestions`;
+
+  function addTag(tag: string) {
+    const trimmed = tag.trim();
+    if (trimmed && !value.includes(trimmed)) onChange([...value, trimmed]);
+    onDraftChange("");
+  }
+
+  return (
+    <div className="field tag-field">
+      <label className="field-caption" htmlFor={id}>
+        Tags <small>Enter or comma to add</small>
+      </label>
+      <input
+        aria-autocomplete="list"
+        aria-controls={suggestions.length > 0 ? suggestionsId : undefined}
+        aria-expanded={suggestions.length > 0}
+        autoComplete="off"
+        id={id}
+        name="tag-input"
+        onBlur={() => {
+          if (draft.trim()) addTag(draft);
+        }}
+        onChange={(event) => onDraftChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === ",") {
+            event.preventDefault();
+            addTag(draft);
+          } else if (event.key === "Backspace" && draft === "" && value.length > 0) {
+            onChange(value.slice(0, -1));
+          }
+        }}
+        placeholder={value.length > 0 ? "Add another tag" : "Add tags"}
+        type="text"
+        value={draft}
+      />
+      {value.length > 0 ? (
+        <div aria-label="Selected tags" className="selected-tags">
+          {value.map((tag) => (
+            <span key={tag}>
+              {tag}
+              <button
+                aria-label={`Remove tag ${tag}`}
+                onClick={() => onChange(value.filter((value) => value !== tag))}
+                type="button"
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {suggestions.length > 0 ? (
+        <div aria-label="Tag suggestions" className="tag-suggestions" id={suggestionsId}>
+          {suggestions.map((tag) => (
+            <button
+              key={tag}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => addTag(tag)}
+              type="button"
+            >
+              + {tag}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -670,92 +1190,93 @@ function LibraryItem({
   onToggleFavorite: (item: LibraryItemView) => Promise<void>;
 }) {
   const label = item.title?.trim() || item.url;
+  const preview = item.note?.trim() || item.excerpt?.trim();
+  const visibleTags = item.tags.slice(0, 3);
+  const hiddenTagCount = item.tags.length - visibleTags.length;
 
   return (
     <li>
       <article className={`item-card${item.deleted ? " item-card-deleted" : ""}`}>
-        <div className="item-card-heading">
-          <div>
-            <p className="item-source">{readHostname(item.url)}</p>
-            <h3>
-              <a href={item.url} rel="noreferrer" target="_blank">
-                {label}
-                <span className="sr-only"> (opens in a new tab)</span>
-              </a>
-            </h3>
-          </div>
-          {!item.deleted ? (
-            <button
-              aria-label={
-                item.favorite
-                  ? `Remove ${label} from favorites`
-                  : `Add ${label} to favorites`
-              }
-              aria-pressed={item.favorite}
-              className="favorite-button"
-              disabled={busy}
-              onClick={() => void onToggleFavorite(item)}
-              type="button"
-            >
-              <span aria-hidden="true">{item.favorite ? "★" : "☆"}</span>
-              <span className="favorite-label">
-                {item.favorite ? "Favorite" : "Add favorite"}
+        <div className="item-row-copy">
+          <h3>
+            <a href={item.url} rel="noreferrer" target="_blank">
+              {label}
+              <span className="sr-only"> (opens in a new tab)</span>
+            </a>
+          </h3>
+          <p className="item-meta">
+            <span>{readHostname(item.url)}</span>
+            <span aria-hidden="true">·</span>
+            <span>{item.deleted ? "Deleted" : "Saved"} {formatDate(item.savedAt)}</span>
+            {visibleTags.length > 0 ? (
+              <span
+                aria-label={`Tags: ${item.tags.join(", ")}`}
+                className="item-inline-tags"
+              >
+                {visibleTags.map((tag) => `#${tag}`).join(" ")}
+                {hiddenTagCount > 0 ? ` +${hiddenTagCount}` : ""}
               </span>
-            </button>
+            ) : null}
+          </p>
+          {preview ? (
+            <p className="item-preview">
+              <span className="sr-only">Context: </span>
+              {preview}
+            </p>
           ) : null}
         </div>
 
-        {item.excerpt ? <p className="item-excerpt">{item.excerpt}</p> : null}
-        {item.note ? (
-          <div className="item-note">
-            <p className="item-note-label">Your note</p>
-            <p>{item.note}</p>
-          </div>
-        ) : null}
-
-        {item.tags.length > 0 ? (
-          <ul aria-label="Tags" className="tag-list">
-            {item.tags.map((tag) => (
-              <li key={tag}>{tag}</li>
-            ))}
-          </ul>
-        ) : null}
-
-        <div className="item-card-footer">
-          <p>
-            {item.deleted ? "Deleted" : "Saved"} {formatDate(item.savedAt)}
-          </p>
-          <div className="item-actions">
-            {item.deleted ? (
+        <div aria-label={`Actions for ${label}`} className="item-row-actions" role="group">
+          {item.deleted ? (
+            <button
+              aria-label={`Restore ${label}`}
+              className="icon-button restore-button"
+              disabled={busy}
+              onClick={() => void onRestore(item)}
+              title="Restore"
+              type="button"
+            >
+              <span aria-hidden="true">↶</span>
+            </button>
+          ) : (
+            <>
               <button
-                className="text-button restore-button"
+                aria-label={
+                  item.favorite
+                    ? `Remove ${label} from favorites`
+                    : `Add ${label} to favorites`
+                }
+                aria-pressed={item.favorite}
+                className="icon-button favorite-button"
                 disabled={busy}
-                onClick={() => void onRestore(item)}
+                onClick={() => void onToggleFavorite(item)}
+                title={item.favorite ? "Remove favorite" : "Add favorite"}
                 type="button"
               >
-                Restore
+                <span aria-hidden="true">{item.favorite ? "★" : "☆"}</span>
               </button>
-            ) : (
-              <>
-                <button
-                  className="text-button"
-                  disabled={busy}
-                  onClick={(event) => onEdit(item, event.currentTarget)}
-                  type="button"
-                >
-                  Edit
-                </button>
-                <button
-                  className="text-button danger-button"
-                  disabled={busy}
-                  onClick={() => void onDelete(item)}
-                  type="button"
-                >
-                  Delete
-                </button>
-              </>
-            )}
-          </div>
+              <button
+                aria-label={`Edit ${label}`}
+                className="icon-button"
+                disabled={busy}
+                onClick={(event) => onEdit(item, event.currentTarget)}
+                title="Edit"
+                type="button"
+              >
+                <span aria-hidden="true">✎</span>
+              </button>
+              <button
+                aria-label={`Delete ${label}`}
+                className="icon-button danger-button"
+                disabled={busy}
+                onClick={() => void onDelete(item)}
+                title="Delete"
+                type="button"
+              >
+                <span aria-hidden="true">×</span>
+              </button>
+            </>
+          )}
         </div>
       </article>
     </li>
@@ -764,12 +1285,16 @@ function LibraryItem({
 
 function EditDialog({
   busy,
+  error,
   item,
+  knownTags,
   onClose,
   onSave,
 }: {
   busy: boolean;
+  error: string | null;
   item: LibraryItemView;
+  knownTags: string[];
   onClose: () => void;
   onSave: (item: LibraryItemView, input: EditInput) => Promise<boolean>;
 }) {
@@ -778,7 +1303,8 @@ function EditDialog({
   const [url, setUrl] = useState(item.url);
   const [title, setTitle] = useState(item.title ?? "");
   const [excerpt, setExcerpt] = useState(item.excerpt ?? "");
-  const [tags, setTags] = useState(item.tags.join(", "));
+  const [tags, setTags] = useState(item.tags);
+  const [tagDraft, setTagDraft] = useState("");
   const [note, setNote] = useState(item.note ?? "");
   const [favorite, setFavorite] = useState(item.favorite);
 
@@ -804,7 +1330,7 @@ function EditDialog({
       excerpt: optionalText(excerpt),
       favorite,
       note: optionalText(note),
-      tags: parseTags(tags),
+      tags: withTagDraft(tags, tagDraft),
       title: optionalText(title),
       url: url.trim(),
     } as EditInput);
@@ -820,20 +1346,21 @@ function EditDialog({
       }}
       ref={dialogRef}
     >
-      <form onSubmit={(event) => void submit(event)}>
+      <form className="edit-form" onSubmit={(event) => void submit(event)}>
         <div className="dialog-heading">
           <div>
-            <p className="eyebrow">Edit save</p>
-            <h2 id="edit-heading">Keep the context useful.</h2>
+            <h2 id="edit-heading">Edit save</h2>
+            <p>{readHostname(item.url)}</p>
           </div>
           <button
             aria-label="Close edit form"
-            className="close-button"
+            className="icon-button close-button"
             disabled={busy}
             onClick={onClose}
+            title="Close"
             type="button"
           >
-            Close
+            <span aria-hidden="true">×</span>
           </button>
         </div>
 
@@ -842,6 +1369,8 @@ function EditDialog({
             <span>URL</span>
             <input
               autoCapitalize="none"
+              id="edit-url"
+              name="url"
               onChange={(event) => setUrl(event.target.value)}
               required
               type="url"
@@ -851,6 +1380,8 @@ function EditDialog({
           <label className="field">
             <span>Title</span>
             <input
+              id="edit-title"
+              name="title"
               onChange={(event) => setTitle(event.target.value)}
               ref={titleRef}
               type="text"
@@ -860,22 +1391,26 @@ function EditDialog({
           <label className="field">
             <span>Excerpt</span>
             <textarea
+              id="edit-excerpt"
+              name="excerpt"
               onChange={(event) => setExcerpt(event.target.value)}
               rows={3}
               value={excerpt}
             />
           </label>
-          <label className="field">
-            <span>Tags <small>separate with commas</small></span>
-            <input
-              onChange={(event) => setTags(event.target.value)}
-              type="text"
-              value={tags}
-            />
-          </label>
+          <TagField
+            id="edit-tags"
+            knownTags={knownTags}
+            onDraftChange={setTagDraft}
+            onChange={setTags}
+            draft={tagDraft}
+            value={tags}
+          />
           <label className="field">
             <span>Private note</span>
             <textarea
+              id="edit-note"
+              name="note"
               onChange={(event) => setNote(event.target.value)}
               rows={5}
               value={note}
@@ -884,11 +1419,14 @@ function EditDialog({
           <label className="check-field">
             <input
               checked={favorite}
+              id="edit-favorite"
+              name="favorite"
               onChange={(event) => setFavorite(event.target.checked)}
               type="checkbox"
             />
             <span>Favorite</span>
           </label>
+          {error ? <p className="dialog-error" role="alert">{error}</p> : null}
         </div>
 
         <div className="dialog-actions">
@@ -919,8 +1457,8 @@ function EmptyLibrary({
   let heading = "Your library is ready.";
   let body: ReactNode = (
     <>
-      Save your first link above. A title or note can help your future self
-      remember why it mattered.
+      Choose New save to keep your first link. A title or note can help your
+      future self remember why it mattered.
     </>
   );
 
@@ -947,44 +1485,70 @@ function filterAndSortItems(
   items: LibraryItemView[],
   query: string,
   filter: LifecycleFilter,
+  searchScope: SearchScope,
+  favoriteOnly: boolean,
+  selectedTags: string[],
+  tagMatchMode: TagMatchMode,
+  sortMode: SortMode,
 ) {
   const normalizedQuery = query.trim().toLocaleLowerCase();
 
   return items
-    .filter((item) => item.deleted === (filter === "deleted"))
+    .filter(
+      (item) =>
+        filter === "all" || item.deleted === (filter === "deleted"),
+    )
+    .filter((item) => !favoriteOnly || item.favorite)
+    .filter((item) => {
+      if (selectedTags.length === 0) return true;
+      return tagMatchMode === "all"
+        ? selectedTags.every((tag) => item.tags.includes(tag))
+        : selectedTags.some((tag) => item.tags.includes(tag));
+    })
     .filter((item) => {
       if (!normalizedQuery) {
         return true;
       }
 
-      return [
-        item.url,
-        item.title,
-        item.excerpt,
-        item.note,
-        ...item.tags,
-      ]
+      const valuesByScope: Record<SearchScope, Array<string | null | undefined>> = {
+        all: [item.url, item.title, item.excerpt, item.note, ...item.tags],
+        context: [item.excerpt, item.note],
+        tags: item.tags,
+        title: [item.title],
+        url: [item.url],
+      };
+
+      return valuesByScope[searchScope]
         .filter((value): value is string => typeof value === "string")
         .some((value) => value.toLocaleLowerCase().includes(normalizedQuery));
     })
+    .map((item) => ({
+      item,
+      label: (item.title?.trim() || item.url).toLocaleLowerCase(),
+      savedTime: Date.parse(item.savedAt) || 0,
+    }))
     .sort((left, right) => {
-      if (left.favorite !== right.favorite) {
-        return left.favorite ? -1 : 1;
-      }
+      if (sortMode === "title") return left.label.localeCompare(right.label);
+      if (sortMode === "oldest") return left.savedTime - right.savedTime;
 
-      return Date.parse(right.savedAt) - Date.parse(left.savedAt);
-    });
+      return right.savedTime - left.savedTime;
+    })
+    .map(({ item }) => item);
 }
 
-function parseTags(value: string) {
-  return Array.from(
-    new Set(
-      value
-        .split(",")
-        .map((tag) => tag.trim())
-        .filter(Boolean),
-    ),
-  );
+function findTagSuggestions(knownTags: string[], selectedTags: string[], draft: string) {
+  const fragment = draft.trim().toLocaleLowerCase();
+  if (!fragment) return [];
+  const selected = new Set(selectedTags.map((tag) => tag.toLocaleLowerCase()));
+  return knownTags
+    .filter((tag) => !selected.has(tag.toLocaleLowerCase()))
+    .filter((tag) => fragment === "" || tag.toLocaleLowerCase().includes(fragment))
+    .slice(0, 5);
+}
+
+function withTagDraft(tags: string[], draft: string) {
+  const trimmedDraft = draft.trim();
+  return Array.from(new Set(trimmedDraft ? [...tags, trimmedDraft] : tags));
 }
 
 function readSyncCredential(form: HTMLFormElement) {
@@ -1045,18 +1609,12 @@ function readStateError(error: unknown) {
   return readError(error);
 }
 
-function formatRepositoryStatus(status: unknown) {
-  if (typeof status !== "string") {
-    return "Available offline";
+function formatHeaderStatus(status: unknown, pendingCount: number) {
+  if (pendingCount > 0) return `${pendingCount.toLocaleString()} pending`;
+  if (status === "error") return "needs attention";
+  if (status === "saving") return "saving";
+  if (status === "loading" || status === "opening" || status === "initializing") {
+    return "opening";
   }
-
-  const labels: Record<string, string> = {
-    error: "Local library needs attention",
-    initializing: "Opening local library",
-    loading: "Opening local library",
-    opening: "Opening local library",
-    ready: "Available offline",
-    saving: "Saving locally",
-  };
-  return labels[status] ?? status;
+  return "ready";
 }

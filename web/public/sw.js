@@ -1,7 +1,8 @@
 const CACHE_PREFIX = "research-pocket-shell-";
-const CACHE_NAME = `${CACHE_PREFIX}v1`;
-const ASSET_MANIFEST = "./asset-manifest.json";
-const SHELL_FILES = ["./", "./index.html", "./manifest.webmanifest"];
+const CACHE_NAME = `${CACHE_PREFIX}v2`;
+const SITE_ROOT = new URL("../", self.registration.scope);
+const ASSET_MANIFEST = new URL("asset-manifest.json", SITE_ROOT);
+const SHELL_FILES = ["app/", "app/index.html", "manifest.webmanifest", "favicon.svg"];
 const SHELL_DESTINATIONS = new Set([
   "document",
   "manifest",
@@ -18,10 +19,7 @@ self.addEventListener("install", (event) => {
 
 async function cacheApplicationShell() {
   const cache = await caches.open(CACHE_NAME);
-  const manifestRequest = new Request(
-    new URL(ASSET_MANIFEST, self.registration.scope),
-    { cache: "reload" },
-  );
+  const manifestRequest = new Request(ASSET_MANIFEST, { cache: "reload" });
   const manifestResponse = await fetch(manifestRequest);
   if (!manifestResponse.ok) {
     throw new Error("Could not read the application shell manifest.");
@@ -37,7 +35,7 @@ async function cacheApplicationShell() {
 
   await cache.put(manifestRequest, manifestResponse);
   const shellUrls = [...SHELL_FILES, ...generatedFiles].map(
-    (file) => new URL(file, self.registration.scope).href,
+    (file) => new URL(file, SITE_ROOT).href,
   );
   await cache.addAll(shellUrls);
 }
@@ -87,7 +85,8 @@ self.addEventListener("fetch", (event) => {
         })
         .catch(async () => {
           const cached =
-            (await caches.match(request)) ?? (await caches.match("./index.html"));
+            (await caches.match(request)) ??
+            (await caches.match(new URL("app/index.html", SITE_ROOT)));
           return cached ?? Response.error();
         }),
     );

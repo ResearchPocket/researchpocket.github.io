@@ -2,21 +2,9 @@ name: Hosted owner app
 
 on:
   pull_request:
-    paths:
-      - '.github/workflows/pages.yml'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'crates/research-domain/**'
-      - 'web/**'
   push:
     branches:
       - main
-    paths:
-      - '.github/workflows/pages.yml'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'crates/research-domain/**'
-      - 'web/**'
   workflow_dispatch:
 
 concurrency:
@@ -61,13 +49,9 @@ jobs:
         working-directory: web
         run: npm ci
 
-      - name: Test browser persistence contract
+      - name: Verify and build static owner app
         working-directory: web
-        run: npm test
-
-      - name: Build static owner app
-        working-directory: web
-        run: npm run build
+        run: npm run verify
 
       - name: Configure GitHub Pages
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'

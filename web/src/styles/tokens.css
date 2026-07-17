@@ -1,0 +1,64 @@
+:root {
+  color-scheme: dark;
+  font-family: ui-monospace, monospace;
+  font-synthesis: none;
+
+  --text: #f5f1e9;
+  --background: #1a150c;
+  --primary: #d5c8a4;
+  --secondary: #33656f;
+  --accent: #5156ae;
+
+  --color-canvas: var(--background);
+  --color-surface: color-mix(in srgb, var(--background) 94%, var(--text));
+  --color-surface-raised: color-mix(in srgb, var(--background) 90%, var(--text));
+  --color-surface-muted: color-mix(in srgb, var(--background) 84%, var(--text));
+  --color-text: var(--text);
+  --color-text-muted: color-mix(in srgb, var(--text) 68%, var(--background));
+  --color-border: color-mix(in srgb, var(--primary) 28%, var(--background));
+  --color-border-strong: color-mix(in srgb, var(--primary) 52%, var(--background));
+  --color-accent: var(--secondary);
+  --color-accent-strong: var(--primary);
+  --color-accent-soft: color-mix(in srgb, var(--secondary) 42%, var(--background));
+  --color-danger: color-mix(in srgb, var(--primary) 62%, var(--accent));
+  --color-danger-soft: color-mix(in srgb, var(--accent) 28%, var(--background));
+  --color-focus: color-mix(in srgb, var(--accent) 62%, var(--text));
+  --color-inverse: var(--background);
+  --color-inverse-surface: var(--primary);
+
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.8125rem;
+  --font-size-md: 0.9375rem;
+  --font-size-lg: 1.05rem;
+  --font-size-xl: clamp(1.2rem, 2vw, 1.5rem);
+  --line-height-tight: 1.2;
+  --line-height-body: 1.5;
+
+  --space-1: 0.2rem;
+  --space-2: 0.4rem;
+  --space-3: 0.6rem;
+  --space-4: 0.8rem;
+  --space-5: 1.1rem;
+  --space-6: 1.5rem;
+  --space-7: 2rem;
+  --space-8: 2.5rem;
+
+  --control-height: 2.5rem;
+  --measure: 72ch;
+  --page-width: 100rem;
+  --rule: 1px;
+  --radius: 0.125rem;
+}
+
+@media (pointer: coarse) {
+  :root {
+    --control-height: 2.75rem;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --color-border: var(--color-border-strong);
+    --rule: 2px;
+  }
+}

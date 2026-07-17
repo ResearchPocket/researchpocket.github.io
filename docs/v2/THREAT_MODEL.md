@@ -43,12 +43,13 @@ from existing Git history are outside the V2 guarantee.
 | TM-09 | A service worker may cache only the public application shell. It never caches GitHub API traffic, credentials, private state, or publication previews. |
 | TM-10 | Deletion creates a tombstone. Historical erasure requires repository replacement or an explicit history rewrite. |
 | TM-11 | Native bookmarklet capture uses a per-user `researchpocket://capture` handler with a versioned, append-only field allowlist. The URI never selects a filesystem path, carries a credential, executes a command, or starts synchronization. |
+| TM-12 | The owner application has exclusive use of the `https://researchpocket.github.io` origin. No other active GitHub Pages project may share that origin because browser storage and same-origin script authority span project paths. |
 
 ## Trust boundaries
 
 | Component | Trust and permitted data |
 | --- | --- |
-| Native CLI/TUI/local UI | Trusted on the owner's device. May read private state. Native credentials use the OS credential store or an ignored `0600` file, never SQLite. |
+| Native CLI/TUI/local UI | Trusted on the owner's device. May read private state. CLI synchronization reads a PAT only from the process environment; it does not persist the credential. |
 | Public Pages repository | Public and attacker-readable. Contains only the static application shell and allowlisted public projections. It never contains private updates or credentials. |
 | Pages application shell | Trusted only when built from reviewed, locked, first-party source. It may handle private state after owner authentication. |
 | Browser memory | Temporarily trusted for the owner PAT and decrypted-in-use private state. Browser extensions, developer tools, and injected scripts can observe it. |
@@ -64,6 +65,14 @@ from existing Git history are outside the V2 guarantee.
 The implemented browser-store, static-shell, and private synchronization
 behavior is documented in [WEB.md](./WEB.md). The credential lifecycle below is
 the binding contract for that owner surface.
+
+GitHub Pages project paths are not storage boundaries. Every project served
+below `https://researchpocket.github.io/` shares the same web origin, so
+`localStorage`, `sessionStorage`, IndexedDB, the Cache API, and same-origin
+script authority are origin-wide even when URLs have different project paths.
+ResearchPocket's organization Pages origin must therefore host no other active
+Pages projects while it hosts the owner application. Any additional project
+must use a separate origin or custom domain and receive a new security review.
 
 ## Repository and credential topology
 
@@ -93,6 +102,33 @@ path-scoped, so this credential can technically overwrite shell files in the
 public repository. The pinned publisher must allowlist output paths, serialize
 writes, and keep this credential only in the private workflow; compromise of that
 credential remains a first-party code-injection risk.
+
+### Application deployment controls
+
+Repository separation limits the owner PAT's authority, but it does not make a
+deployed application shell trustworthy by itself. Before the hosted owner app
+accepts credentials, operators must configure and verify all of these controls:
+
+- protect `main` against direct and force pushes, require reviewed pull requests,
+  and require the build, CSP, dependency, credential, and artifact checks;
+- protect `v*` release tags against updates and deletion, limit repository write
+  access to release maintainers, and require the release workflow to reject any
+  tag whose commit is not already on protected `main`; and
+- permit Pages and release deployment only from the reviewed, pinned workflow
+  and its verified build artifact.
+
+These are required operational controls configured in GitHub, not guarantees
+created automatically by a repository boundary or by this document. If they are
+absent or cannot be verified, the hosted shell must not be used for PAT entry.
+
+## Native credential lifecycle
+
+Native synchronization reads `RESEARCHPOCKET_GITHUB_TOKEN`, with `GH_TOKEN` as
+a fallback, from the current process environment only. V2 does not integrate an
+OS credential store and does not write a token to an ignored file, SQLite, or
+any other persistent storage. Owners should populate the variable with a silent
+shell prompt immediately before synchronization and unset it afterward. The TUI
+and native capture handler neither read this credential nor start a sync.
 
 ## Browser credential lifecycle
 
@@ -263,7 +299,7 @@ Activating a new shell version removes old caches.
 | --- | --- | --- |
 | XSS steals the PAT | Self-only CSP, no inline/eval, no third-party runtime, locked dependencies, escaped rendering, no raw authored HTML | A compromised first-party build or browser extension can still read memory. |
 | PAT is over-scoped | Fine-grained token, one selected private repository, Contents read/write only, 90-day maximum, validation before use | Repository administrators and GitHub retain their normal authority. |
-| Malicious Pages update captures credentials | Owner PAT cannot write the application repository; protected review/deployment process; pinned build inputs | A compromised maintainer or hosting account can publish malicious first-party code. |
+| Malicious Pages update captures credentials | Owner PAT cannot write the application repository; enforce protected `main` and `v*` tags, reviewed changes, required checks, and pinned deployment inputs | A compromised maintainer or hosting account can publish malicious first-party code. |
 | Private data leaks through publication | Separate repositories; explicit collection and field allowlists; notes off by default; unresolved visibility private; negative artifact scans | Previously published Git history remains until rewritten. |
 | Service worker retains a token or API response | Never pass tokens to the worker; bypass Authorization/cross-origin traffic; cache shell allowlist only | Browser implementation defects remain possible. |
 | Git race loses or overwrites an edit | Immutable unique paths, pull-before-push, serialized upload, hash equality for idempotency, retry unchanged outbox | GitHub outage delays sync but does not discard local edits. |
@@ -320,6 +356,10 @@ Native-capture, hosted-editor, and sync changes must demonstrate:
 - token absence from localStorage, IndexedDB, Cache API, service-worker messages,
   URLs, logs, source maps, and generated artifacts;
 - a token scoped only to the private data repository with Contents read/write;
+- repository rules and deployment configuration confirming protected `main`,
+  immutable `v*` tags, reviewed changes, and required release checks;
+- organization Pages configuration confirming that no other active project
+  shares `https://researchpocket.github.io`;
 - offline/reload survival of queued edits with an expired or revoked token;
 - CSP and network inspection showing only same-origin assets and
   `https://api.github.com` owner traffic;
@@ -337,5 +377,5 @@ Native-capture, hosted-editor, and sync changes must demonstrate:
 - [Microsoft: per-user program defaults](https://learn.microsoft.com/en-us/windows/win32/shell/default-programs)
 - [W3C Content Security Policy Level 3](https://www.w3.org/TR/CSP3/)
 
-Any change to TM-01 through TM-11 requires an explicit security review and
+Any change to TM-01 through TM-12 requires an explicit security review and
 updates to dependent protocol, hosted-editor, and publisher documentation.

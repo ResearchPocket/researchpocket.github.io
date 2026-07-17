@@ -103,6 +103,8 @@ To get started with developing ResearchPocket, follow these steps:
 - Rust 1.97.0 (the repository toolchain file installs it through rustup)
 - Cargo (comes with Rust)
 - SQLite
+- Node.js 22.12 or newer and npm for the hosted web application
+- `wasm-bindgen-cli` 0.2.126 for the hosted web application
 
 ### Setting Up the Development Environment
 
@@ -134,6 +136,14 @@ cargo fmt --all -- --check
 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 cargo test --locked --workspace --all-targets --all-features
 cargo audit --deny warnings
+```
+
+For web changes, use the same locked verification entry point as GitHub Pages:
+
+```sh
+cd web
+npm ci
+npm run verify
 ```
 
 Add tests only for durable behavior boundaries such as privacy, migration, or

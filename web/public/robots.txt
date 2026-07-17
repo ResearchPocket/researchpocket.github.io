@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://researchpocket.github.io/ResearchPocket/sitemap.xml
