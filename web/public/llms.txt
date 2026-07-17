@@ -10,6 +10,6 @@ TUI, native Firefox bookmarklet capture, private GitHub synchronization, remote
 recovery, and hosted owner editing. Selective public collections, the loopback
 web server, checkpoints, and background scheduling remain planned work.
 
-- [Project source and documentation](https://github.com/ResearchPocket/ResearchPocket)
-- [Public product overview](https://researchpocket.github.io/ResearchPocket/)
-- [Hosted owner app](https://researchpocket.github.io/ResearchPocket/app/)
+- [Project source and documentation](https://github.com/ResearchPocket/researchpocket.github.io)
+- [Public product overview](https://researchpocket.github.io/)
+- [Hosted owner app](https://researchpocket.github.io/app/)

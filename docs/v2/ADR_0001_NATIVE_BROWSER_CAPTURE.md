@@ -2,7 +2,7 @@
 
 - Status: accepted
 - Date: 2026-07-13
-- Issue: [#6](https://github.com/ResearchPocket/ResearchPocket/issues/6)
+- Issue: [#6](https://github.com/ResearchPocket/researchpocket.github.io/issues/6)
 
 ## Context
 

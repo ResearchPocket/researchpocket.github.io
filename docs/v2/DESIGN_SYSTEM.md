@@ -213,7 +213,8 @@ GitHub Pages invokes the same command; it does not contain a second build recipe
 The artifact check rejects source maps, source-map references, development CSP
 nonces, `unsafe-inline`, external runtime assets, credential markers, and
 private test sentinels across text and binary artifacts. It also requires an
-indexable landing document, a noindex owner document, and an app-scoped manifest.
+indexable root landing document, a noindex owner document, an app-scoped
+manifest, and noindex same-origin redirects for the retired project paths.
 Deployment uploads only `web/dist` and uses no owner credential.
 
 ## Change rule

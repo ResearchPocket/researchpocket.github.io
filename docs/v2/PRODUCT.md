@@ -112,8 +112,9 @@ feeds; they do not need a ResearchPocket or GitHub account.
   full private owner mode.
 - A private GitHub data repository containing versioned immutable updates and
   rebuild material, protected by GitHub repository access control.
-- A separate public Pages repository containing only the application shell and
-  sanitized publication projections.
+- A protected public source/Pages repository containing only the application
+  shell, plus separate public publication repositories containing sanitized
+  projections.
 
 The owner PAT must be fine-grained, limited to the private data repository, and
 granted only the permissions required to read and append synchronization data.

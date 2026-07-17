@@ -41,8 +41,8 @@ existing functionality.
 Unsure where to begin contributing to ResearchPocket? You can start by looking
 through these `good-first-issue` and `help-wanted` issues:
 
-- [Good First Issues](https://github.com/ResearchPocket/ResearchPocket/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
-- [Help Wanted Issues](https://github.com/ResearchPocket/ResearchPocket/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22)
+- [Good First Issues](https://github.com/ResearchPocket/researchpocket.github.io/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
+- [Help Wanted Issues](https://github.com/ResearchPocket/researchpocket.github.io/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22)
 
 ### Pull Requests
 
@@ -112,14 +112,14 @@ To get started with developing ResearchPocket, follow these steps:
 2. Clone your forked repository:
 
    ```sh
-   git clone https://github.com/your-username/ResearchPocket.git
+   git clone https://github.com/your-username/researchpocket.github.io.git ResearchPocket
    cd ResearchPocket
    ```
 
 3. Add the original repository as an upstream remote:
 
    ```sh
-   git remote add upstream https://github.com/ResearchPocket/ResearchPocket.git
+   git remote add upstream https://github.com/ResearchPocket/researchpocket.github.io.git
    ```
 
 4. Install dependencies:

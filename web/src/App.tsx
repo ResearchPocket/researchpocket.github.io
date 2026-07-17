@@ -197,17 +197,6 @@ export function App() {
     return saved;
   }
 
-  async function toggleFavorite(item: LibraryItemView) {
-    await runAction(
-      item.favorite ? "Remove favorite" : "Add favorite",
-      item.favorite ? "Removed from favorites." : "Added to favorites.",
-      () =>
-        libraryRepository.edit(item.id, {
-          favorite: !item.favorite,
-        } as EditInput),
-    );
-  }
-
   async function deleteItem(item: LibraryItemView) {
     await runAction("Delete link", "Moved to deleted items.", () =>
       libraryRepository.remove(item.id),
@@ -240,6 +229,20 @@ export function App() {
     setLocalError(null);
     editOpenerRef.current = opener;
     setEditingItem(item);
+  }
+
+  function toggleTagFilter(tag: string) {
+    const selected = selectedTags.includes(tag);
+    setSelectedTags((current) =>
+      current.includes(tag)
+        ? current.filter((value) => value !== tag)
+        : [...current, tag],
+    );
+    setTagSearch("");
+    setFiltersOpen(true);
+    setAnnouncement(
+      selected ? `Removed ${tag} tag filter.` : `Filtering by ${tag}.`,
+    );
   }
 
   function openCapture(opener: HTMLButtonElement) {
@@ -293,32 +296,30 @@ export function App() {
         Skip to workspace
       </a>
 
-      <header className="masthead">
-        <a
-          aria-label="ResearchPocket product overview"
-          className="brand-lockup"
-          href="../"
-        >
-          <span aria-hidden="true" className="brand-mark">
-            rp
-          </span>
-          <div>
-            <p className="brand-name">ResearchPocket</p>
-            <p className="brand-context">owner workspace</p>
+      <div className="workspace-chrome">
+        <header className="masthead">
+          <a
+            aria-label="ResearchPocket product overview"
+            className="brand-lockup"
+            href="../"
+          >
+            <span aria-hidden="true" className="brand-mark">
+              rp
+            </span>
+            <div>
+              <p className="brand-name">ResearchPocket</p>
+              <p className="brand-context">owner workspace</p>
+            </div>
+          </a>
+
+          <div className="local-status" role="status">
+            <span aria-hidden="true" className="status-dot" />
+            <span className="status-label">local</span>
+            <span className="status-copy">
+              {formatHeaderStatus(libraryState.status, libraryState.pendingCount)}
+            </span>
           </div>
-        </a>
-
-        <div className="local-status" role="status">
-          <span aria-hidden="true" className="status-dot" />
-          <span className="status-label">local</span>
-          <span className="status-copy">
-            {formatHeaderStatus(libraryState.status, libraryState.pendingCount)}
-          </span>
-        </div>
-      </header>
-
-      <main id="workspace" tabIndex={-1}>
-        <h1 className="sr-only">ResearchPocket owner library</h1>
+        </header>
 
         <nav aria-label="Workspace views" className="workspace-nav">
           <button
@@ -343,6 +344,10 @@ export function App() {
             Sync <span>{libraryState.pendingCount}</span>
           </button>
         </nav>
+      </div>
+
+      <main id="workspace" tabIndex={-1}>
+        <h1 className="sr-only">ResearchPocket owner library</h1>
 
         <SyncPanel hidden={view !== "sync"} state={syncState} />
 
@@ -400,14 +405,14 @@ export function App() {
               onClick={() => setFiltersOpen((open) => !open)}
               type="button"
             >
-              Filters{appliedFilterCount > 0 ? ` ${appliedFilterCount}` : ""}
+              Filter{appliedFilterCount > 0 ? ` · ${appliedFilterCount}` : ""}
             </button>
           </div>
 
           <div className="library-filters" hidden={!filtersOpen} id="library-filters">
             <label>
-              <span>Match</span>
               <select
+                aria-label="Search fields"
                 id="search-scope"
                 name="search-scope"
                 onChange={(event) => setSearchScope(event.target.value as SearchScope)}
@@ -421,8 +426,8 @@ export function App() {
               </select>
             </label>
             <label>
-              <span>Items</span>
               <select
+                aria-label="Item state"
                 id="lifecycle-filter"
                 name="lifecycle-filter"
                 onChange={(event) => setFilter(event.target.value as LifecycleFilter)}
@@ -434,8 +439,8 @@ export function App() {
               </select>
             </label>
             <label>
-              <span>Order</span>
               <select
+                aria-label="Sort order"
                 id="sort-mode"
                 name="sort-mode"
                 onChange={(event) => setSortMode(event.target.value as SortMode)}
@@ -474,16 +479,15 @@ export function App() {
               </button>
             ) : null}
             {knownTags.length > 0 ? (
-              <fieldset className="tag-filter-group">
-                <legend>Tags</legend>
+              <fieldset aria-label="Tag filters" className="tag-filter-group">
                 <label className="tag-filter-search">
-                  <span>Find tags</span>
                   <input
+                    aria-label="Find tags"
                     autoComplete="off"
                     id="tag-filter-search"
                     name="tag-filter-search"
                     onChange={(event) => setTagSearch(event.target.value)}
-                    placeholder="Search exact tags"
+                    placeholder="Add tag filter"
                     type="search"
                     value={tagSearch}
                   />
@@ -491,7 +495,7 @@ export function App() {
                 <div aria-label="Tag filter selection" className="tag-filter-options">
                   {selectedTags.map((tag) => (
                     <button
-                      aria-label={`Remove tag filter ${tag}`}
+                      aria-label={`${tag} ×, remove tag filter`}
                       aria-pressed="true"
                       key={tag}
                       onClick={() =>
@@ -506,7 +510,7 @@ export function App() {
                   ))}
                   {tagFilterMatches.map((tag) => (
                     <button
-                      aria-label={`Add tag filter ${tag}`}
+                      aria-label={`+ ${tag}, add tag filter`}
                       aria-pressed="false"
                       key={tag}
                       onClick={() => {
@@ -524,8 +528,8 @@ export function App() {
                 </div>
                 {selectedTags.length > 1 ? (
                   <label>
-                    <span>Match</span>
                     <select
+                      aria-label="Tag matching"
                       id="tag-match-mode"
                       name="tag-match-mode"
                       onChange={(event) =>
@@ -558,7 +562,8 @@ export function App() {
                   onDelete={deleteItem}
                   onEdit={openEditor}
                   onRestore={restoreItem}
-                  onToggleFavorite={toggleFavorite}
+                  onToggleTagFilter={toggleTagFilter}
+                  selectedTags={selectedTags}
                 />
               ))}
             </ol>
@@ -1180,29 +1185,53 @@ function LibraryItem({
   onDelete,
   onEdit,
   onRestore,
-  onToggleFavorite,
+  onToggleTagFilter,
+  selectedTags,
 }: {
   busy: boolean;
   item: LibraryItemView;
   onDelete: (item: LibraryItemView) => Promise<void>;
   onEdit: (item: LibraryItemView, opener: HTMLButtonElement) => void;
   onRestore: (item: LibraryItemView) => Promise<void>;
-  onToggleFavorite: (item: LibraryItemView) => Promise<void>;
+  onToggleTagFilter: (tag: string) => void;
+  selectedTags: string[];
 }) {
   const label = item.title?.trim() || item.url;
   const preview = item.note?.trim() || item.excerpt?.trim();
   const visibleTags = item.tags.slice(0, 3);
-  const hiddenTagCount = item.tags.length - visibleTags.length;
+  const hiddenTags = item.tags.slice(visibleTags.length);
 
   return (
     <li>
-      <article className={`item-card${item.deleted ? " item-card-deleted" : ""}`}>
+      <article
+        className={`item-card${
+          item.deleted ? " item-card-deleted" : " item-card-editable"
+        }${item.favorite ? " item-card-favorite" : ""}`}
+      >
+        {!item.deleted ? (
+          <button
+            aria-haspopup="dialog"
+            aria-label={`Edit ${label}${item.favorite ? ", favorite" : ""}`}
+            className="item-card-edit-trigger"
+            disabled={busy}
+            onClick={(event) => onEdit(item, event.currentTarget)}
+            title="Edit save"
+            type="button"
+          />
+        ) : null}
         <div className="item-row-copy">
           <h3>
-            <a href={item.url} rel="noreferrer" target="_blank">
-              {label}
-              <span className="sr-only"> (opens in a new tab)</span>
-            </a>
+            {item.deleted ? (
+              <a href={item.url} rel="noreferrer" target="_blank">
+                {label}
+                <span className="sr-only"> (opens in a new tab)</span>
+              </a>
+            ) : (
+              <span>
+                {label}
+                {item.favorite ? <span className="sr-only">, favorite</span> : null}
+              </span>
+            )}
           </h3>
           <p className="item-meta">
             <span>{readHostname(item.url)}</span>
@@ -1210,11 +1239,32 @@ function LibraryItem({
             <span>{item.deleted ? "Deleted" : "Saved"} {formatDate(item.savedAt)}</span>
             {visibleTags.length > 0 ? (
               <span
-                aria-label={`Tags: ${item.tags.join(", ")}`}
+                aria-label={`Tags for ${label}`}
                 className="item-inline-tags"
+                role="group"
               >
-                {visibleTags.map((tag) => `#${tag}`).join(" ")}
-                {hiddenTagCount > 0 ? ` +${hiddenTagCount}` : ""}
+                {visibleTags.map((tag) => {
+                  const selected = selectedTags.includes(tag);
+                  return (
+                    <button
+                      aria-label={`#${tag}, ${
+                        selected ? "remove" : "add"
+                      } tag filter`}
+                      aria-pressed={selected}
+                      className="item-inline-tag"
+                      key={tag}
+                      onClick={() => onToggleTagFilter(tag)}
+                      type="button"
+                    >
+                      #{tag}
+                    </button>
+                  );
+                })}
+                {hiddenTags.length > 0 ? (
+                  <span aria-label={`More tags: ${hiddenTags.join(", ")}`}>
+                    +{hiddenTags.length}
+                  </span>
+                ) : null}
               </span>
             ) : null}
           </p>
@@ -1240,31 +1290,16 @@ function LibraryItem({
             </button>
           ) : (
             <>
-              <button
-                aria-label={
-                  item.favorite
-                    ? `Remove ${label} from favorites`
-                    : `Add ${label} to favorites`
-                }
-                aria-pressed={item.favorite}
-                className="icon-button favorite-button"
-                disabled={busy}
-                onClick={() => void onToggleFavorite(item)}
-                title={item.favorite ? "Remove favorite" : "Add favorite"}
-                type="button"
-              >
-                <span aria-hidden="true">{item.favorite ? "★" : "☆"}</span>
-              </button>
-              <button
-                aria-label={`Edit ${label}`}
+              <a
+                aria-label={`Open ${label} in a new tab`}
                 className="icon-button"
-                disabled={busy}
-                onClick={(event) => onEdit(item, event.currentTarget)}
-                title="Edit"
-                type="button"
+                href={item.url}
+                rel="noreferrer"
+                target="_blank"
+                title="Open in new tab"
               >
-                <span aria-hidden="true">✎</span>
-              </button>
+                <span aria-hidden="true">↗</span>
+              </a>
               <button
                 aria-label={`Delete ${label}`}
                 className="icon-button danger-button"

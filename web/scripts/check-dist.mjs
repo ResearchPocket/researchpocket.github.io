@@ -24,6 +24,11 @@ for (const requiredFile of [
   "og.png",
   "robots.txt",
   "sitemap.xml",
+  ".nojekyll",
+  "ResearchPocket/index.html",
+  "ResearchPocket/app/index.html",
+  "ResearchPocket/manifest.webmanifest",
+  "ResearchPocket/redirect.js",
 ]) {
   if (!existsSync(resolve(distRoot, requiredFile))) {
     failures.push(`Missing production artifact: ${requiredFile}`);
@@ -116,6 +121,23 @@ if (existsSync(landingPath)) {
   if (!landing.includes('property="og:image"')) {
     failures.push("The public landing page is missing its social preview metadata");
   }
+  if (!landing.includes('content="https://researchpocket.github.io/"')) {
+    failures.push("The public landing page does not identify the organization site URL");
+  }
+  if (!landing.includes('href="https://researchpocket.github.io/"')) {
+    failures.push("The public landing page canonical URL is not the organization site");
+  }
+}
+
+for (const [file, expected] of [
+  ["robots.txt", "Sitemap: https://researchpocket.github.io/sitemap.xml"],
+  ["sitemap.xml", "<loc>https://researchpocket.github.io/</loc>"],
+  ["llms.txt", "https://researchpocket.github.io/app/"],
+]) {
+  const path = resolve(distRoot, file);
+  if (existsSync(path) && !readFileSync(path, "utf8").includes(expected)) {
+    failures.push(`${file} does not point to the organization site`);
+  }
 }
 
 const appPath = resolve(distRoot, "app/index.html");
@@ -129,8 +151,70 @@ if (existsSync(appPath)) {
 const manifestPath = resolve(distRoot, "manifest.webmanifest");
 if (existsSync(manifestPath)) {
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-  if (manifest.scope !== "./app/" || manifest.start_url !== "./app/") {
+  if (manifest.scope !== "/app/" || manifest.start_url !== "/app/") {
     failures.push("The web manifest must remain scoped to the owner application");
+  }
+  if (manifest.id !== "/ResearchPocket/app/") {
+    failures.push("The web manifest must preserve the installed application identity");
+  }
+  if (manifest.icons?.[0]?.src !== "/favicon.svg") {
+    failures.push("The web manifest icon must resolve from the organization root");
+  }
+
+  const compatibilityManifestPath = resolve(
+    distRoot,
+    "ResearchPocket/manifest.webmanifest",
+  );
+  if (
+    existsSync(compatibilityManifestPath) &&
+    readFileSync(compatibilityManifestPath, "utf8") !==
+      readFileSync(manifestPath, "utf8")
+  ) {
+    failures.push("The compatibility manifest must match the root manifest");
+  }
+}
+
+for (const [file, canonical] of [
+  ["ResearchPocket/index.html", "https://researchpocket.github.io/"],
+  ["ResearchPocket/app/index.html", "https://researchpocket.github.io/app/"],
+]) {
+  const path = resolve(distRoot, file);
+  if (!existsSync(path)) continue;
+  const redirect = readFileSync(path, "utf8");
+  if (!redirect.includes('name="robots" content="noindex, nofollow"')) {
+    failures.push(`${file} must remain excluded from search indexes`);
+  }
+  if (!redirect.includes(`rel="canonical" href="${canonical}"`)) {
+    failures.push(`${file} does not identify its canonical destination`);
+  }
+  if (!redirect.includes("redirect.js")) {
+    failures.push(`${file} does not load the shared compatibility redirect`);
+  }
+  if (!redirect.includes("script-src 'self'")) {
+    failures.push(`${file} does not restrict its redirect script to this origin`);
+  }
+  if (/<script\b[^>]*\bsrc=["']https?:/i.test(redirect)) {
+    failures.push(`${file} loads an external redirect script`);
+  }
+}
+
+const compatibilityScriptPath = resolve(
+  distRoot,
+  "ResearchPocket/redirect.js",
+);
+if (existsSync(compatibilityScriptPath)) {
+  const compatibilityScript = readFileSync(compatibilityScriptPath, "utf8");
+  for (const requiredMarker of [
+    "window.location.search",
+    "window.location.hash",
+    "research-pocket-shell-v1",
+    "research-pocket-shell-v2",
+  ]) {
+    if (!compatibilityScript.includes(requiredMarker)) {
+      failures.push(
+        `The compatibility redirect is missing migration behavior: ${requiredMarker}`,
+      );
+    }
   }
 }
 
