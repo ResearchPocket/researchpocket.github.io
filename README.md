@@ -223,6 +223,9 @@ credential-free GitHub Pages shell. Its
 Private sync panel connects a separate private data repository with an expiring,
 repository-scoped fine-grained PAT. The browser pulls on startup, focus, network
 recovery, and every 60 seconds while visible; local changes also request a sync.
+The Sync view lists every durable outgoing browser change until GitHub
+acknowledges its immutable update; older queued entries remain visible with a
+generic label when detailed local summaries are unavailable.
 The token stays in JavaScript memory unless the owner explicitly chooses
 tab-only `sessionStorage`, and it never enters IndexedDB, URLs, logs, or the
 service-worker cache.

@@ -27,6 +27,12 @@ of them:
 - one durable outbox row; and
 - the next fixed-width device sequence.
 
+New outbox rows also carry a versioned, local-only presentation summary of the
+accepted mutation. The Sync view uses it to list every pending add, edit,
+favorite or tag change, delete, and restore without decoding the opaque Loro
+payload or duplicating note and excerpt values. Older queued rows without a
+summary remain visible as earlier local changes until acknowledged.
+
 The WASM boundary also accepts a set of remote immutable envelopes in one Loro
 session and reports any causally deferred indices. The browser GitHub adapter
 discovers exact protocol blobs, validates immutable genesis, applies unseen
@@ -43,7 +49,7 @@ IndexedDB database `researchpocket-v2`, version 2, contains only these stores:
 | `state` | Canonical Base64 snapshot and local update time |
 | `items` | Rebuildable materialized private items for rendering/search |
 | `batches` | Exact accepted immutable envelopes and origin |
-| `outbox` | Pending local protocol paths, attempt count, sanitized error category |
+| `outbox` | Pending local protocol paths, attempt count, sanitized error category, optional local-only change summary |
 | `deferred` | Exact remote envelopes still missing a causal predecessor |
 | `remoteObservations` | Protocol path, Git blob identity, observation time |
 | `syncConfig` | Non-secret owner, repository, branch, and sanitized success/error times |

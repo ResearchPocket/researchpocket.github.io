@@ -40,11 +40,31 @@ export interface PersistedBatch {
   appliedAt: string;
 }
 
+export type PersistedChangeKind = "create" | "edit" | "delete" | "restore";
+
+export type PersistedChangeField =
+  | "url"
+  | "title"
+  | "excerpt"
+  | "note"
+  | "language";
+
+export interface PersistedChangeSummary {
+  version: 1;
+  kind: PersistedChangeKind;
+  itemId: string;
+  fields: PersistedChangeField[];
+  favorite: boolean | null;
+  addedTags: string[];
+  removedTags: string[];
+}
+
 export interface PersistedOutbox {
   path: string;
   enqueuedAt: string;
   attempts: number;
   lastErrorKind: string | null;
+  summary?: PersistedChangeSummary;
 }
 
 export interface PersistedDeferred {
