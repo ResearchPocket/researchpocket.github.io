@@ -1261,8 +1261,6 @@ function LibraryItem({
 }) {
   const label = item.title?.trim() || item.url;
   const preview = item.note?.trim() || item.excerpt?.trim();
-  const visibleTags = item.tags.slice(0, 3);
-  const hiddenTags = item.tags.slice(visibleTags.length);
 
   return (
     <li>
@@ -1300,13 +1298,13 @@ function LibraryItem({
             <span>{readHostname(item.url)}</span>
             <span aria-hidden="true">·</span>
             <span>{item.deleted ? "Deleted" : "Saved"} {formatDate(item.savedAt)}</span>
-            {visibleTags.length > 0 ? (
+            {item.tags.length > 0 ? (
               <span
                 aria-label={`Tags for ${label}`}
                 className="item-inline-tags"
                 role="group"
               >
-                {visibleTags.map((tag) => {
+                {item.tags.map((tag) => {
                   const selected = selectedTags.includes(tag);
                   return (
                     <button
@@ -1323,11 +1321,6 @@ function LibraryItem({
                     </button>
                   );
                 })}
-                {hiddenTags.length > 0 ? (
-                  <span aria-label={`More tags: ${hiddenTags.join(", ")}`}>
-                    +{hiddenTags.length}
-                  </span>
-                ) : null}
               </span>
             ) : null}
           </p>

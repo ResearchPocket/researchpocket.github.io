@@ -1142,10 +1142,14 @@ footer,
   align-items: center;
   color: var(--color-accent-strong);
   display: inline-flex;
+  flex: 1 1 auto;
   gap: var(--space-1);
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overscroll-behavior-inline: contain;
+  overflow-x: auto;
+  overflow-y: hidden;
+  pointer-events: auto;
+  scrollbar-width: thin;
 }
 
 .item-inline-tag {
@@ -1153,6 +1157,7 @@ footer,
   background: transparent;
   border: 0;
   color: var(--color-accent-strong);
+  flex: 0 0 auto;
   font-size: inherit;
   min-height: 1.75rem;
   padding: 0 var(--space-1);
@@ -1653,6 +1658,15 @@ footer {
 
   .item-card {
     gap: var(--space-2);
+  }
+
+  .item-meta {
+    flex-wrap: wrap;
+  }
+
+  .item-inline-tags {
+    flex-basis: 100%;
+    width: 100%;
   }
 
   .error-banner {
