@@ -3,6 +3,7 @@ const API_VERSION = "2026-03-10";
 
 export const GENESIS_PATH = "sync/v1/library.json";
 export const OPS_PREFIX = "sync/v1/ops/";
+export const PACKS_PREFIX = `${OPS_PREFIX}packs/`;
 
 export interface GitHubRemote {
   owner: string;

@@ -48,6 +48,8 @@ pub enum DomainError {
     UnsupportedCodec(String),
     #[error("unsupported required protocol feature {0}")]
     UnsupportedFeature(String),
+    #[error("unsupported operation pack version {0}")]
+    UnsupportedOperationPackVersion(u8),
     #[error("integrity failure at {path}: expected {expected}, got {actual}")]
     Integrity {
         path: String,

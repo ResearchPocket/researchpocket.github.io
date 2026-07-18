@@ -6,7 +6,10 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use chrono::{DateTime, FixedOffset};
 use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, HeaderValue, USER_AGENT};
 use reqwest::{Client, Response, StatusCode, Url};
-use research_domain::{DomainError, LibraryGenesis};
+use research_domain::{
+    DomainError, LibraryGenesis, MAX_OPERATION_PACK_BYTES, MAX_OPERATION_PACK_MEMBERS,
+    OperationPackArtifact, create_operation_pack,
+};
 use research_store::{
     PendingBatch, RemoteBatchDisposition, StoreError, SyncConfiguration, V2Store,
 };
@@ -18,7 +21,9 @@ const API_ROOT: &str = "https://api.github.com/";
 const API_VERSION: &str = "2026-03-10";
 const GENESIS_PATH: &str = "sync/v1/library.json";
 const OPS_PREFIX: &str = "sync/v1/ops/";
+const PACKS_PREFIX: &str = "sync/v1/ops/packs/";
 const MAX_UPLOAD_ATTEMPTS: usize = 4;
+const PACK_JSON_OVERHEAD_ALLOWANCE: usize = 1_024;
 
 #[derive(Debug, Error)]
 pub enum SyncError {
@@ -200,6 +205,82 @@ enum PutResult {
     Ambiguous(&'static str),
 }
 
+enum PendingUpload {
+    Direct(PendingBatch),
+    Pack {
+        artifact: OperationPackArtifact,
+        members: Vec<PendingBatch>,
+    },
+}
+
+impl PendingUpload {
+    fn path(&self) -> &str {
+        match self {
+            Self::Direct(batch) => &batch.path,
+            Self::Pack { artifact, .. } => &artifact.path,
+        }
+    }
+
+    fn bytes(&self) -> &[u8] {
+        match self {
+            Self::Direct(batch) => batch.envelope_json.as_bytes(),
+            Self::Pack { artifact, .. } => artifact.json.as_bytes(),
+        }
+    }
+
+    fn member_paths(&self) -> Vec<String> {
+        match self {
+            Self::Direct(batch) => vec![batch.path.clone()],
+            Self::Pack { members, .. } => {
+                members.iter().map(|batch| batch.path.clone()).collect()
+            }
+        }
+    }
+
+    fn logical_count(&self) -> Result<u64, SyncError> {
+        let count = match self {
+            Self::Direct(_) => 1,
+            Self::Pack { members, .. } => members.len(),
+        };
+        u64::try_from(count)
+            .map_err(|_| StoreError::NumericRange("pending upload member count").into())
+    }
+
+    async fn confirm(
+        &self,
+        store: &V2Store,
+        blob_sha: &str,
+        bytes: &[u8],
+    ) -> Result<PullStats, SyncError> {
+        let mut stats = PullStats::default();
+        match self {
+            Self::Direct(batch) => {
+                let result = store
+                    .receive_remote_batch(&batch.path, blob_sha, bytes)
+                    .await?;
+                stats.downloaded = 1;
+                match result.disposition {
+                    RemoteBatchDisposition::Applied => stats.applied = 1,
+                    RemoteBatchDisposition::AlreadyApplied => stats.already_applied = 1,
+                }
+                if result.acknowledged_outbox {
+                    stats.acknowledged = 1;
+                }
+            }
+            Self::Pack { artifact, .. } => {
+                let result = store
+                    .receive_remote_pack(&artifact.path, blob_sha, bytes)
+                    .await?;
+                stats.downloaded = result.member_count;
+                stats.applied = result.applied;
+                stats.already_applied = result.already_applied;
+                stats.acknowledged = result.acknowledged_outbox;
+            }
+        }
+        Ok(stats)
+    }
+}
+
 #[derive(Default)]
 struct PullStats {
     seen: u64,
@@ -366,12 +447,12 @@ async fn run_configured(
         .inspect_repository(&remote.owner, &remote.repository)
         .await?;
     let mut pull = pull_remote(store, client, remote).await?;
-    let pending = store.pending_batches().await?;
+    let pending = prepare_uploads(store.pending_batches().await?)?;
     let mut uploaded = 0_u64;
-    for batch in pending {
-        let (created, race_pull) = ensure_uploaded(store, client, remote, &batch).await?;
+    for upload in pending {
+        let (created, race_pull) = ensure_uploaded(store, client, remote, &upload).await?;
         if created {
-            uploaded += 1;
+            uploaded += upload.logical_count()?;
         }
         pull.add(race_pull);
     }
@@ -402,24 +483,29 @@ async fn pull_remote(
         .iter()
         .filter(|(path, _)| path.starts_with(OPS_PREFIX))
         .collect::<Vec<_>>();
-    let mut stats = PullStats {
-        seen: u64::try_from(operations.len())
-            .map_err(|_| StoreError::NumericRange("remote batch count"))?,
-        ..PullStats::default()
-    };
+    let mut stats = PullStats::default();
     for (path, sha) in operations {
+        stats.seen += 1;
         if store.remote_blob_is_current(path, sha).await? {
             continue;
         }
         let bytes = client.download_blob(remote, sha).await?;
-        let result = store.receive_remote_batch(path, sha, &bytes).await?;
-        stats.downloaded += 1;
-        match result.disposition {
-            RemoteBatchDisposition::Applied => stats.applied += 1,
-            RemoteBatchDisposition::AlreadyApplied => stats.already_applied += 1,
-        }
-        if result.acknowledged_outbox {
-            stats.acknowledged += 1;
+        if path.starts_with(PACKS_PREFIX) {
+            let result = store.receive_remote_pack(path, sha, &bytes).await?;
+            stats.downloaded += 1;
+            stats.applied += result.applied;
+            stats.already_applied += result.already_applied;
+            stats.acknowledged += result.acknowledged_outbox;
+        } else {
+            let result = store.receive_remote_batch(path, sha, &bytes).await?;
+            stats.downloaded += 1;
+            match result.disposition {
+                RemoteBatchDisposition::Applied => stats.applied += 1,
+                RemoteBatchDisposition::AlreadyApplied => stats.already_applied += 1,
+            }
+            if result.acknowledged_outbox {
+                stats.acknowledged += 1;
+            }
         }
     }
     if store.status().await?.deferred_updates > 0 {
@@ -464,56 +550,92 @@ async fn ensure_uploaded(
     store: &V2Store,
     client: &GitHubClient,
     remote: &Remote,
-    batch: &PendingBatch,
+    upload: &PendingUpload,
 ) -> Result<(bool, PullStats), SyncError> {
     let mut race_pull = PullStats::default();
+    let member_paths = upload.member_paths();
     for attempt in 0..MAX_UPLOAD_ATTEMPTS {
         let tree = client.discover(remote).await?;
-        if let Some(sha) = tree.blobs.get(&batch.path) {
-            if !store.remote_blob_is_current(&batch.path, sha).await? {
+        if let Some(sha) = tree.blobs.get(upload.path()) {
+            if !store.remote_blob_is_current(upload.path(), sha).await? {
                 let bytes = client.download_blob(remote, sha).await?;
-                store.receive_remote_batch(&batch.path, sha, &bytes).await?;
+                race_pull.add(upload.confirm(store, sha, &bytes).await?);
             }
             return Ok((false, race_pull));
         }
 
         let put = client
-            .put_new(
-                remote,
-                &batch.path,
-                batch.envelope_json.as_bytes(),
-                Some(&remote.branch),
-            )
+            .put_new(remote, upload.path(), upload.bytes(), Some(&remote.branch))
             .await;
         match put {
             Ok(PutResult::Created(sha)) => {
-                store.record_outbox_attempt(&batch.path, None).await?;
-                store
-                    .receive_remote_batch(&batch.path, &sha, batch.envelope_json.as_bytes())
-                    .await?;
+                store.record_outbox_attempts(&member_paths, None).await?;
+                race_pull.add(upload.confirm(store, &sha, upload.bytes()).await?);
                 return Ok((true, race_pull));
             }
             Ok(PutResult::Race) => {
                 store
-                    .record_outbox_attempt(&batch.path, Some("contention"))
+                    .record_outbox_attempts(&member_paths, Some("contention"))
                     .await?;
                 race_pull.add(pull_remote(store, client, remote).await?);
-                retry_delay(&batch.path, attempt).await;
+                retry_delay(upload.path(), attempt).await;
             }
             Ok(PutResult::Ambiguous(kind)) => {
-                store.record_outbox_attempt(&batch.path, Some(kind)).await?;
+                store
+                    .record_outbox_attempts(&member_paths, Some(kind))
+                    .await?;
                 race_pull.add(pull_remote(store, client, remote).await?);
-                retry_delay(&batch.path, attempt).await;
+                retry_delay(upload.path(), attempt).await;
             }
             Err(error) => {
                 let _ = store
-                    .record_outbox_attempt(&batch.path, Some(error.kind()))
+                    .record_outbox_attempts(&member_paths, Some(error.kind()))
                     .await;
                 return Err(error);
             }
         }
     }
     Err(SyncError::Contention)
+}
+
+fn prepare_uploads(pending: Vec<PendingBatch>) -> Result<Vec<PendingUpload>, SyncError> {
+    let mut uploads = Vec::new();
+    let mut current = Vec::<PendingBatch>::new();
+    let mut current_estimated_bytes = PACK_JSON_OVERHEAD_ALLOWANCE;
+    let maximum_estimated_bytes =
+        MAX_OPERATION_PACK_BYTES.saturating_sub(PACK_JSON_OVERHEAD_ALLOWANCE);
+
+    for batch in pending {
+        let encoded_bytes = batch.envelope_json.len().div_ceil(3) * 4 + 3;
+        let changes_device = current
+            .first()
+            .is_some_and(|first| first.device_id != batch.device_id);
+        let exceeds_members = current.len() == MAX_OPERATION_PACK_MEMBERS;
+        let exceeds_bytes = !current.is_empty()
+            && current_estimated_bytes.saturating_add(encoded_bytes) > maximum_estimated_bytes;
+        if changes_device || exceeds_members || exceeds_bytes {
+            uploads.push(build_pending_upload(std::mem::take(&mut current))?);
+            current_estimated_bytes = PACK_JSON_OVERHEAD_ALLOWANCE;
+        }
+        current_estimated_bytes = current_estimated_bytes.saturating_add(encoded_bytes);
+        current.push(batch);
+    }
+    if !current.is_empty() {
+        uploads.push(build_pending_upload(current)?);
+    }
+    Ok(uploads)
+}
+
+fn build_pending_upload(mut members: Vec<PendingBatch>) -> Result<PendingUpload, SyncError> {
+    if members.len() == 1 {
+        return Ok(PendingUpload::Direct(members.remove(0)));
+    }
+    let envelopes = members
+        .iter()
+        .map(|batch| batch.envelope_json.clone())
+        .collect::<Vec<_>>();
+    let artifact = create_operation_pack(&envelopes)?;
+    Ok(PendingUpload::Pack { artifact, members })
 }
 
 impl GitHubClient {
@@ -923,7 +1045,8 @@ fn domain_error_kind(error: &DomainError) -> &'static str {
         DomainError::UnsupportedProtocol(_)
         | DomainError::UnsupportedDomainSchema(_)
         | DomainError::UnsupportedCodec(_)
-        | DomainError::UnsupportedFeature(_) => "upgrade_required",
+        | DomainError::UnsupportedFeature(_)
+        | DomainError::UnsupportedOperationPackVersion(_) => "upgrade_required",
         _ => "integrity",
     }
 }

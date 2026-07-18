@@ -14,8 +14,8 @@ pub use model::{
     CreateItemRequest, EditItemRequest, EnrichmentApplyResult, EnrichmentCandidates,
     EnrichmentClaim, EnrichmentJob, EnrichmentProvider, EnrichmentQueueCounts,
     EnrichmentStatus, ImportRejection, ImportResult, ListPage, ListQuery, ListResult,
-    OptionalTextUpdate, PendingBatch, RemoteBatchDisposition, RemoteBatchResult, SearchQuery,
-    SearchResult, SourceBundleReceipt, SourceFileReceipt, StoreStatus, StoredItem,
-    SyncConfiguration, SyncIdentity,
+    OptionalTextUpdate, PendingBatch, RemoteBatchDisposition, RemoteBatchResult,
+    RemotePackResult, SearchQuery, SearchResult, SourceBundleReceipt, SourceFileReceipt,
+    StoreStatus, StoredItem, SyncConfiguration, SyncIdentity,
 };
 pub use store::V2Store;

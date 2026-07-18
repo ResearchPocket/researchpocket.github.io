@@ -1,12 +1,12 @@
 use chrono::{DateTime, FixedOffset};
-use research_domain::{Library, LibraryGenesis, UpdateEnvelope};
+use research_domain::{Library, LibraryGenesis, UpdateEnvelope, unpack_operation_pack};
 use sqlx::{Row, SqliteConnection};
 
 use crate::import::persist_projection;
 use crate::store::{fresh_peer_id, now_rfc3339, sha256_hex};
 use crate::{
-    PendingBatch, RemoteBatchDisposition, RemoteBatchResult, StoreError, StoreResult,
-    SyncConfiguration, SyncIdentity, V2Store,
+    PendingBatch, RemoteBatchDisposition, RemoteBatchResult, RemotePackResult, StoreError,
+    StoreResult, SyncConfiguration, SyncIdentity, V2Store,
 };
 
 impl V2Store {
@@ -198,8 +198,75 @@ impl V2Store {
         sqlx::query("BEGIN IMMEDIATE")
             .execute(&mut *connection)
             .await?;
-        let result =
-            apply_remote_batch(&mut connection, path, blob_sha, envelope_json, &envelope).await;
+        let result = async {
+            let result =
+                apply_remote_batch(&mut connection, path, envelope_json, &envelope).await?;
+            observe_remote(&mut connection, path, blob_sha).await?;
+            Ok(result)
+        }
+        .await;
+        match result {
+            Ok(result) => {
+                sqlx::query("COMMIT").execute(&mut *connection).await?;
+                Ok(result)
+            }
+            Err(error) => {
+                let _ = sqlx::query("ROLLBACK").execute(&mut *connection).await;
+                Err(error)
+            }
+        }
+    }
+
+    pub async fn receive_remote_pack(
+        &self,
+        path: &str,
+        blob_sha: &str,
+        bytes: &[u8],
+    ) -> StoreResult<RemotePackResult> {
+        validate_blob_sha(blob_sha)?;
+        let pack_json = std::str::from_utf8(bytes)
+            .map_err(|_| StoreError::SyncIntegrity(format!("{path} is not UTF-8 JSON")))?;
+        let artifact = unpack_operation_pack(path, pack_json)?;
+        let expected_library_id = self.meta("library_id").await?;
+        let mut members = Vec::with_capacity(artifact.member_envelopes.len());
+        for envelope_json in artifact.member_envelopes {
+            let envelope: UpdateEnvelope = serde_json::from_str(&envelope_json)?;
+            let member_path = envelope.path();
+            envelope.validate_identity(&expected_library_id, &member_path)?;
+            validate_timestamp(&envelope.created_at, "operation creation time")?;
+            members.push((member_path, envelope_json, envelope));
+        }
+
+        let mut connection = self.pool.acquire().await?;
+        sqlx::query("BEGIN IMMEDIATE")
+            .execute(&mut *connection)
+            .await?;
+        let result = async {
+            let mut applied = 0_u64;
+            let mut already_applied = 0_u64;
+            let mut acknowledged_outbox = 0_u64;
+            for (member_path, envelope_json, envelope) in &members {
+                let member =
+                    apply_remote_batch(&mut connection, member_path, envelope_json, envelope)
+                        .await?;
+                match member.disposition {
+                    RemoteBatchDisposition::Applied => applied += 1,
+                    RemoteBatchDisposition::AlreadyApplied => already_applied += 1,
+                }
+                if member.acknowledged_outbox {
+                    acknowledged_outbox += 1;
+                }
+            }
+            observe_remote(&mut connection, path, blob_sha).await?;
+            Ok(RemotePackResult {
+                member_count: u64::try_from(members.len())
+                    .map_err(|_| StoreError::NumericRange("operation pack member count"))?,
+                applied,
+                already_applied,
+                acknowledged_outbox,
+            })
+        }
+        .await;
         match result {
             Ok(result) => {
                 sqlx::query("COMMIT").execute(&mut *connection).await?;
@@ -230,6 +297,46 @@ impl V2Store {
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    pub async fn record_outbox_attempts(
+        &self,
+        paths: &[String],
+        error_kind: Option<&str>,
+    ) -> StoreResult<()> {
+        if let Some(kind) = error_kind {
+            validate_error_kind(kind)?;
+        }
+        let mut connection = self.pool.acquire().await?;
+        sqlx::query("BEGIN IMMEDIATE")
+            .execute(&mut *connection)
+            .await?;
+        let result = async {
+            for path in paths {
+                sqlx::query(
+                    "UPDATE outbox SET attempts = attempts + 1, last_error = ? \
+                     WHERE EXISTS (SELECT 1 FROM batches b \
+                     WHERE b.device_id = outbox.device_id \
+                     AND b.sequence = outbox.sequence AND b.path = ?)",
+                )
+                .bind(error_kind)
+                .bind(path)
+                .execute(&mut *connection)
+                .await?;
+            }
+            StoreResult::Ok(())
+        }
+        .await;
+        match result {
+            Ok(()) => {
+                sqlx::query("COMMIT").execute(&mut *connection).await?;
+                Ok(())
+            }
+            Err(error) => {
+                let _ = sqlx::query("ROLLBACK").execute(&mut *connection).await;
+                Err(error)
+            }
+        }
     }
 
     pub async fn record_sync_success(&self) -> StoreResult<()> {
@@ -308,7 +415,6 @@ async fn adopt_library_id(
 async fn apply_remote_batch(
     connection: &mut SqliteConnection,
     path: &str,
-    blob_sha: &str,
     envelope_json: &str,
     envelope: &UpdateEnvelope,
 ) -> StoreResult<RemoteBatchResult> {
@@ -330,7 +436,6 @@ async fn apply_remote_batch(
                 "batch identity collision at {path}"
             )));
         }
-        observe_remote(connection, path, blob_sha).await?;
         let acknowledged_outbox = remove_outbox(connection, envelope).await?;
         return Ok(RemoteBatchResult {
             disposition: RemoteBatchDisposition::AlreadyApplied,
@@ -412,7 +517,6 @@ async fn apply_remote_batch(
             .execute(&mut *connection)
             .await?;
     }
-    observe_remote(connection, path, blob_sha).await?;
     Ok(RemoteBatchResult {
         disposition: RemoteBatchDisposition::Applied,
         acknowledged_outbox: false,
@@ -425,15 +529,24 @@ async fn observe_remote(
     blob_sha: &str,
 ) -> StoreResult<()> {
     sqlx::query(
-        "INSERT INTO remote_observations (path, blob_sha, observed_at) VALUES (?, ?, ?) \
-         ON CONFLICT(path) DO UPDATE SET blob_sha = excluded.blob_sha, \
-         observed_at = excluded.observed_at",
+        "INSERT OR IGNORE INTO remote_observations (path, blob_sha, observed_at) \
+         VALUES (?, ?, ?)",
     )
     .bind(path)
     .bind(blob_sha)
     .bind(now_rfc3339())
     .execute(&mut *connection)
     .await?;
+    let observed: String =
+        sqlx::query_scalar("SELECT blob_sha FROM remote_observations WHERE path = ?")
+            .bind(path)
+            .fetch_one(&mut *connection)
+            .await?;
+    if observed != blob_sha {
+        return Err(StoreError::SyncIntegrity(format!(
+            "immutable remote path {path} changed after it was observed"
+        )));
+    }
     Ok(())
 }
 

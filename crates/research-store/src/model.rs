@@ -204,6 +204,7 @@ pub struct SyncIdentity {
     pub pristine: bool,
 }
 
+#[derive(Clone, Debug)]
 pub struct PendingBatch {
     pub device_id: String,
     pub sequence: String,
@@ -223,6 +224,14 @@ pub enum RemoteBatchDisposition {
 pub struct RemoteBatchResult {
     pub disposition: RemoteBatchDisposition,
     pub acknowledged_outbox: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RemotePackResult {
+    pub member_count: u64,
+    pub applied: u64,
+    pub already_applied: u64,
+    pub acknowledged_outbox: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

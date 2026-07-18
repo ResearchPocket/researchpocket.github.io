@@ -74,6 +74,12 @@ export interface RemoteEnvelopeInput {
   envelopeJson: string;
 }
 
+export interface RemoteOperationPackInput {
+  path: string;
+  blobSha: string;
+  memberEnvelopes: string[];
+}
+
 export type SyncConfiguration = PersistedSyncConfiguration;
 
 export interface PendingSyncBatch {
@@ -121,6 +127,18 @@ interface EnvelopeIdentity {
   device_id: string;
   sequence: string;
   payload_sha256: string;
+}
+
+interface ValidatedRemoteMember {
+  path: string;
+  envelopeJson: string;
+  identity: EnvelopeIdentity;
+}
+
+interface ValidatedRemoteArtifact {
+  path: string;
+  blobSha: string;
+  members: ValidatedRemoteMember[];
 }
 
 type TextUpdate =
@@ -386,14 +404,30 @@ class LibraryRepository {
   }
 
   async recordOutboxAttempt(path: string, errorKind: string | null): Promise<void> {
+    await this.recordOutboxAttempts([path], errorKind);
+  }
+
+  async recordOutboxAttempts(paths: string[], errorKind: string | null): Promise<void> {
+    const uniquePaths = [...new Set(paths)];
+    if (uniquePaths.length === 0) return;
     await this.write(async (database) => {
-      const entry = await database.get("outbox", path);
-      if (!entry) return;
-      await database.put("outbox", {
-        ...entry,
-        attempts: entry.attempts + 1,
-        lastErrorKind: errorKind,
-      });
+      const transaction = database.transaction("outbox", "readwrite");
+      try {
+        const outbox = transaction.objectStore("outbox");
+        for (const path of uniquePaths) {
+          const entry = await outbox.get(path);
+          if (!entry) continue;
+          await outbox.put({
+            ...entry,
+            attempts: entry.attempts + 1,
+            lastErrorKind: errorKind,
+          });
+        }
+        await transaction.done;
+      } catch (error) {
+        abortTransaction(transaction);
+        throw error;
+      }
     });
   }
 
@@ -409,38 +443,41 @@ class LibraryRepository {
     await this.recordSyncResult(kind);
   }
 
-  async applyRemote(inputs: RemoteEnvelopeInput[]): Promise<void> {
-    if (inputs.length === 0) return;
+  async applyRemote(
+    inputs: RemoteEnvelopeInput[],
+    packs: RemoteOperationPackInput[] = [],
+  ): Promise<number> {
+    if (inputs.length === 0 && packs.length === 0) return 0;
+    let applied = 0;
     await this.write(async (database) => {
       const persisted = await readPersisted(database);
-      const paths = new Set<string>();
-      const identities = inputs.map((input) => {
-        if (paths.has(input.path)) {
-          throw new Error(`A remote update was discovered twice at ${input.path}.`);
-        }
-        paths.add(input.path);
-        const identity = parseEnvelope(input.envelopeJson);
-        validateRemoteIdentity(input, identity, persisted.meta.libraryId);
-        validateBlobSha(input.blobSha);
-        return identity;
-      });
-      const newInputs: RemoteEnvelopeInput[] = [];
-      for (const input of inputs) {
-        const [existing, observation] = await Promise.all([
-          database.get("batches", input.path),
-          database.get("remoteObservations", input.path),
-        ]);
-        if (existing && existing.envelopeJson !== input.envelopeJson) {
-          throw new Error("An immutable remote update changed after it was observed.");
-        }
-        if (observation && observation.blobSha !== input.blobSha) {
+      const artifacts = validateRemoteArtifacts(inputs, packs, persisted.meta.libraryId);
+      const newMembers: ValidatedRemoteMember[] = [];
+      const newMemberPaths = new Set<string>();
+      for (const artifact of artifacts) {
+        const observation = await database.get("remoteObservations", artifact.path);
+        if (observation && observation.blobSha !== artifact.blobSha) {
           throw new Error("An immutable remote path changed its Git object identity.");
         }
-        if (!existing) newInputs.push(input);
+        for (const member of artifact.members) {
+          const existing = await database.get("batches", member.path);
+          if (existing && existing.envelopeJson !== member.envelopeJson) {
+            throw new Error("An immutable remote update changed after it was observed.");
+          }
+          if (!existing && !newMemberPaths.has(member.path)) {
+            newMembers.push(member);
+            newMemberPaths.add(member.path);
+          }
+        }
       }
+      applied = newMembers.length;
       const deferred = await database.getAll("deferred");
       const combined = [
-        ...newInputs,
+        ...newMembers.map((member) => ({
+          path: member.path,
+          blobSha: "",
+          envelopeJson: member.envelopeJson,
+        })),
         ...deferred.map((entry) => ({
           path: entry.path,
           blobSha: "",
@@ -459,12 +496,15 @@ class LibraryRepository {
       const now = new Date().toISOString();
       const items = materializeProjection(result.projection);
       const pendingRecords = materializeDeferred(result.pending_indices, combined);
-      const newBatchRecords = newInputs.map((input) => {
-        const index = inputs.indexOf(input);
-        const identity = identities[index];
-        if (!identity) throw new Error("A remote update identity is missing.");
-        return batchRecord(input.path, input.envelopeJson, identity, "remote", now);
-      });
+      const newBatchRecords = newMembers.map((member) =>
+        batchRecord(
+          member.path,
+          member.envelopeJson,
+          member.identity,
+          "remote",
+          now,
+        ),
+      );
       const transaction = database.transaction(
         ["state", "items", "batches", "outbox", "deferred", "remoteObservations"],
         "readwrite",
@@ -483,11 +523,13 @@ class LibraryRepository {
         for (const record of newBatchRecords) {
           await transaction.objectStore("batches").add(record);
         }
-        for (const input of inputs) {
-          await transaction.objectStore("outbox").delete(input.path);
+        for (const artifact of artifacts) {
+          for (const member of artifact.members) {
+            await transaction.objectStore("outbox").delete(member.path);
+          }
           await transaction.objectStore("remoteObservations").put({
-            path: input.path,
-            blobSha: input.blobSha,
+            path: artifact.path,
+            blobSha: artifact.blobSha,
             observedAt: now,
           });
         }
@@ -498,6 +540,7 @@ class LibraryRepository {
       }
     });
     await this.afterCommit("Remote changes applied");
+    return applied;
   }
 
   private async commitMutation(
@@ -1009,6 +1052,62 @@ function validateRemoteIdentity(
   ) {
     throw new Error("A remote update path does not match its immutable identity.");
   }
+}
+
+function validateRemoteArtifacts(
+  inputs: RemoteEnvelopeInput[],
+  packs: RemoteOperationPackInput[],
+  expectedLibraryId: string,
+): ValidatedRemoteArtifact[] {
+  const artifactPaths = new Set<string>();
+  const memberBytesByPath = new Map<string, string>();
+  const artifacts: ValidatedRemoteArtifact[] = [];
+
+  const addArtifact = (artifact: ValidatedRemoteArtifact) => {
+    if (artifactPaths.has(artifact.path)) {
+      throw new Error(`A remote artifact was discovered twice at ${artifact.path}.`);
+    }
+    artifactPaths.add(artifact.path);
+    validateBlobSha(artifact.blobSha);
+    for (const member of artifact.members) {
+      const existingBytes = memberBytesByPath.get(member.path);
+      if (existingBytes !== undefined && existingBytes !== member.envelopeJson) {
+        throw new Error(`A remote update identity has conflicting bytes at ${member.path}.`);
+      }
+      memberBytesByPath.set(member.path, member.envelopeJson);
+    }
+    artifacts.push(artifact);
+  };
+
+  for (const input of inputs) {
+    const identity = parseEnvelope(input.envelopeJson);
+    validateRemoteIdentity(input, identity, expectedLibraryId);
+    addArtifact({
+      path: input.path,
+      blobSha: input.blobSha,
+      members: [{ path: input.path, envelopeJson: input.envelopeJson, identity }],
+    });
+  }
+
+  for (const pack of packs) {
+    if (!pack.path.startsWith("sync/v1/ops/packs/") || pack.memberEnvelopes.length < 2) {
+      throw new Error("A remote operation pack is malformed.");
+    }
+    const members = pack.memberEnvelopes.map((envelopeJson) => {
+      const identity = parseEnvelope(envelopeJson);
+      if (identity.library_id !== expectedLibraryId) {
+        throw new Error("A remote operation pack belongs to another library.");
+      }
+      return {
+        path: operationPath(identity.device_id, identity.sequence),
+        envelopeJson,
+        identity,
+      };
+    });
+    addArtifact({ path: pack.path, blobSha: pack.blobSha, members });
+  }
+
+  return artifacts;
 }
 
 function operationPath(deviceId: string, sequence: string): string {

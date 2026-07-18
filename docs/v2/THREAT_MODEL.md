@@ -212,7 +212,7 @@ flowchart LR
     V --> I[IndexedDB state and applied receipts]
     E[Owner edit] --> I
     I --> Q[Durable browser outbox]
-    Q -->|serialized immutable upload| A
+    Q -->|exact envelopes in immutable bounded pack| A
     M -. never persisted .-> I
 ```
 
@@ -360,8 +360,8 @@ Activating a new shell version removes old caches.
 | Malicious Pages update captures credentials | Owner PAT cannot write the application repository; keep source, Pages workflow, releases, and protected `main` and `v*` tags in the same reviewed repository with required checks and pinned deployment inputs | A compromised maintainer or hosting account can publish malicious first-party code. |
 | Private data leaks through publication | Separate repositories; explicit collection and field allowlists; notes off by default; unresolved visibility private; negative artifact scans | Previously published Git history remains until rewritten. |
 | Service worker retains a token or API response | Never pass tokens to the worker; bypass Authorization/cross-origin traffic; cache shell allowlist only | Browser implementation defects remain possible. |
-| Git race loses or overwrites an edit | Immutable unique paths, pull-before-push, serialized upload, hash equality for idempotency, retry unchanged outbox | GitHub outage delays sync but does not discard local edits. |
-| Corrupt/replayed remote update changes state | Envelope schema/version checks, library identity, payload SHA-256, immutable device sequence/path, applied receipt | A repository writer can delete history; clients must detect missing/inconsistent data. |
+| Git race loses or overwrites an edit | Immutable unique direct/pack paths, pull-before-push, serialized upload, hash equality for idempotency, retry unchanged exact envelope bytes | GitHub outage delays sync but does not discard local edits. |
+| Corrupt/replayed remote update changes state | Pack path/body SHA-256 and bounds, exact member-envelope validation, library identity, payload SHA-256, immutable device sequence/path, applied receipt, all-or-nothing pack transaction | A repository writer can delete history; clients must detect missing/inconsistent data. |
 | Token appears in logs or URLs | Authorization header only; redacted errors; no analytics; no token interpolation; production console off | User-installed debugging tools may capture traffic. |
 | Untrusted page invokes native capture | Browser external-protocol confirmation; exact route/version; bounded append-only field allowlist; no read, edit, delete, sync, or publication action | Remembered site permission can permit unwanted save spam. |
 | Capture URI injects a command or selects private state | Direct argument handling without shell evaluation; reject unknown fields, paths, credentials, provider names, user information, fragments, and non-HTTP(S) targets | Browser, OS diagnostics, or same-user processes may observe accepted URL/title/description/language data. |

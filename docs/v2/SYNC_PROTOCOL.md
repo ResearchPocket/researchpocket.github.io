@@ -1,6 +1,6 @@
 # ResearchPocket synchronization protocol v1
 
-Status: protocol decision for issue #33
+Status: protocol decisions for issues #33 and #68
 
 Protocol version: 1  
 Domain schema version: 2  
@@ -42,6 +42,8 @@ publication rules in the [privacy threat model](./THREAT_MODEL.md).
    before application and preserves local state for an upgraded client.
 10. Synchronization and public publication use separate repositories and
     credentials.
+11. Transport packing may group exact immutable operation bytes, but it never
+    combines, replaces, or changes their logical identities.
 
 ## Identities
 
@@ -52,6 +54,7 @@ publication rules in the [privacy threat model](./THREAT_MODEL.md).
 | Item | Canonical lowercase UUIDv7. Equal URLs do not imply equal items. |
 | Device sequence | Decimal integer `1..=u64::MAX`, encoded as exactly 20 digits with leading zeroes. Gaps are allowed; reuse is forbidden. |
 | Batch | Tuple `(library_id, device_id, sequence)`. The repository path contains device and sequence. |
+| Operation pack | Lowercase SHA-256 of the exact serialized pack bytes, scoped to one library and device. |
 | Loro peer | Unsigned 64-bit Loro identifier. It is causal metadata, not a device or user identity. |
 | Checkpoint | Lowercase SHA-256 of the decoded full Loro snapshot payload. |
 | Collection | Canonical lowercase UUIDv7 when the collections feature is introduced. Names are mutable labels, not identity. |
@@ -70,6 +73,9 @@ sync/
     ops/
       <device-uuid>/
         <20-digit-sequence>.json
+      packs/
+        <device-uuid>/
+          <pack-sha256>.json
     checkpoints/
       <snapshot-sha256>.json
 ```
@@ -152,6 +158,61 @@ Protocol-v1 readers interpret those omissions as schema 2, codec 1.13.6, and
 empty feature/extension sets. No other missing required field receives a
 default.
 
+## Operation pack
+
+When two or more local envelopes are queued at the start of an upload flush, a
+client normally transports their exact stored bytes in one immutable operation
+pack. Packing is not a domain merge or Git squash: every embedded envelope keeps
+its original identity, causal frontier, payload, hash, timestamp, receipt, and
+outbox acknowledgement.
+
+The strict UTF-8 JSON body at
+`sync/v1/ops/packs/<device>/<pack-sha256>.json` is:
+
+```json
+{
+  "format": "researchpocket-operation-pack",
+  "protocol_version": 1,
+  "pack_version": 1,
+  "required_features": ["operation-packs-v1"],
+  "extensions": {},
+  "library_id": "019...",
+  "device_id": "019...",
+  "envelopes": [
+    "standard-padded-base64-of-exact-envelope-json",
+    "standard-padded-base64-of-exact-envelope-json"
+  ]
+}
+```
+
+Validation is performed before applying any member:
+
+1. the path matches the pack path grammar and contains canonical device and
+   lowercase 64-character SHA-256 identities;
+2. the SHA-256 of the exact pack bytes equals the path identity;
+3. the document has exactly the specified fields and versions, the sole
+   `operation-packs-v1` required feature, and an empty extensions object;
+4. the pack library and device are canonical UUIDv7 values and the path device
+   equals the body device;
+5. the pack contains between 2 and 1,000 members and its exact bytes are no more
+   than 20 MiB;
+6. members use padded standard Base64 and decode to valid UTF-8 exact envelope
+   JSON;
+7. every member passes the ordinary envelope validation for the same library
+   and device; and
+8. members are unique and sorted by fixed-width device sequence.
+
+The pack contains no timestamp. The exact bytes are canonical retry input and
+the member timestamps remain audit metadata. A pack-aware client accepts both
+legacy direct operation files and packs. Duplicate batch identities across
+direct files or packs require byte-identical envelope JSON; another value is an
+integrity error.
+
+Logical receipts and checkpoint coverage record each embedded batch. Physical
+remote observations record the pack path and Git blob identity. Applying a pack
+and acknowledging every matching member outbox row is one local transaction.
+An invalid member rolls back the entire pack.
+
 ## Domain convergence rules
 
 The payload is an opaque Loro update. Git and the transport do not inspect or
@@ -232,21 +293,29 @@ The browser uses `cache: "no-store"`; service workers bypass all API traffic.
 Native clients do not place authorization headers, response bodies, private
 paths, or item fields in logs.
 
-Clients sort discovered operation identities by `(device_id, sequence)` for
-repeatable diagnostics, but correctness is independent of that processing
-order. An update may arrive before its causal predecessor; the client retains
-its exact deferred envelope and convergence is checked after the complete
+Clients classify direct operation and pack paths, process physical paths in
+lowercase path order for repeatable diagnostics, and require each pack's members
+to be sorted by device sequence. Correctness is independent of container or
+processing order. An update may arrive before its causal predecessor; the client
+retains its exact deferred envelope and convergence is checked after the complete
 discovered set is applied.
 
 ## Upload, idempotency, and branch races
 
-Clients upload one outbox file at a time through
-`PUT /repos/{owner}/{repo}/contents/{path}` with Contents write permission. The
-body contains the exact operation-file bytes encoded once more as Base64 for the
-API. The commit message may identify the protocol path for audit, but no client
-reads it as state.
+Clients prepare the logical outbox present at the start of a flush after pulling
+and resolving every deferred update. One queued envelope is uploaded directly.
+Two or more envelopes from one device are sorted and placed in a bounded pack;
+an exceptional outbox larger than the pack limits is divided deterministically.
+New local mutations wait for the next flush.
 
-Before upload, the client refreshes discovery. For each batch:
+Each direct file or pack is uploaded through
+`PUT /repos/{owner}/{repo}/contents/{path}` with Contents write permission. The
+body contains the exact operation or pack bytes encoded once more as Base64 for
+the API. The commit message may identify the protocol path for audit, but no
+client reads it as state. A normal multi-edit flush therefore creates one
+immutable repository file and one Contents commit.
+
+Before upload, the client refreshes discovery. For each direct file or pack:
 
 - absent path: attempt create without a `sha` replacement parameter;
 - existing path with identical bytes: mark uploaded (idempotent success);
@@ -254,9 +323,9 @@ Before upload, the client refreshes discovery. For each batch:
 - `409`, `422`, timeout, or ambiguous connection loss: refresh the tree/blob,
   perform the same equality check, and retry the unchanged outbox bytes with
   bounded jitter;
-- `401`: require a new credential and preserve the outbox;
-- `403`/`429`: honor rate-limit/reset/retry headers and preserve the outbox;
-- `5xx` or offline: exponential backoff with jitter and preserve the outbox.
+- `401`: require a new credential and preserve every member outbox row;
+- `403`/`429`: honor rate-limit/reset/retry headers and preserve every member;
+- `5xx` or offline: exponential backoff with jitter and preserve every member.
 
 Contents writes are serialized because GitHub documents conflicts for
 concurrent content mutations. A branch-head race is transport contention, not an
@@ -272,10 +341,10 @@ An explicit or scheduled sync performs:
 
 ```text
 validate configuration and immutable library genesis
-discover remote operation and checkpoint blobs
+discover remote direct-operation, operation-pack, and checkpoint blobs
 select/validate an optional compatible checkpoint
-download and atomically apply every unseen valid operation
-upload queued local operations serially and idempotently
+download and atomically apply every unseen valid logical operation
+pack the starting local outbox and upload each bounded transport object serially
 discover/download/apply once more
 report local pending count, remote observations, and any retry state
 ```
@@ -340,6 +409,14 @@ Loro codecs: {1.13.6}
 required features: {}
 ```
 
+Pack-aware clients additionally support the transport feature
+`operation-packs-v1`. Because immutable genesis predates this optional transport
+feature, it is asserted and validated by each pack. A pack-unaware protocol-v1
+client discovers the recognized `sync/v1/ops/` object and must stop before
+application or upload; it must never silently ignore the file. After a pack is
+first uploaded, every client for that library must be upgraded to a pack-aware
+release before synchronizing.
+
 Genesis, checkpoint, and every operation must fit that tuple. Protocol v1 does
 not perform best-effort partial application. On an unsupported value, the client:
 
@@ -364,7 +441,9 @@ unknown required features. CI runs it natively and in a headless browser.
 ## Browser, publisher, and CLI consumption
 
 - **CLI/native:** SQLite holds canonical snapshot, projection, applied receipts,
-  immutable batches, and outbox. Credentials live outside SQLite.
+  immutable logical batches, and outbox. Packs are deterministic transport
+  containers and need no second semantic state store. Credentials live outside
+  SQLite.
 - **Browser owner mode:** IndexedDB holds the equivalent private state and
   outbox. The PAT follows the threat-model lifecycle and never enters IndexedDB
   or service-worker/cache state.
@@ -377,7 +456,10 @@ unknown required features. CI runs it natively and in a headless browser.
 ## Recovery and integrity failures
 
 - Missing local SQLite/IndexedDB state is recoverable from genesis plus all valid
-  operations, optionally accelerated by a checkpoint.
+  direct operations and pack members, optionally accelerated by a checkpoint.
+- A malformed pack, changed content-addressed pack path, invalid member, or
+  unsupported pack feature rolls back the complete pack application and retains
+  local/outbox data.
 - Missing remote operation paths, path/body mismatches, hash mismatch, sequence
   collision, incompatible versions, invalid Loro bytes, or a checkpoint claiming
   invalid coverage stop sync and retain local/outbox data.
@@ -391,6 +473,7 @@ unknown required features. CI runs it natively and in a headless browser.
 
 - Git merge semantics, shared mutable state files, last-push-wins, or manual
   source-control conflict resolution;
+- Git history rewriting or retroactive deletion of existing operation files;
 - a continuously running ResearchPocket backend;
 - multi-user collaboration or authorization within a library;
 - end-to-end encryption of the private repository;

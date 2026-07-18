@@ -7,6 +7,7 @@ mod document;
 mod envelope;
 mod genesis;
 mod identity;
+mod pack;
 mod projection;
 #[cfg(target_arch = "wasm32")]
 mod wasm;
@@ -14,6 +15,11 @@ mod wasm;
 pub use document::{DomainError, DomainResult, ItemSeed, Library, validate_item_url};
 pub use envelope::{DOMAIN_SCHEMA_VERSION, LORO_CODEC, PROTOCOL_VERSION, UpdateEnvelope};
 pub use genesis::{LibraryGenesis, SYNC_FORMAT};
+pub use pack::{
+    MAX_OPERATION_PACK_BYTES, MAX_OPERATION_PACK_MEMBERS, OPERATION_PACK_FEATURE,
+    OPERATION_PACK_FORMAT, OPERATION_PACK_VERSION, OperationPack, OperationPackArtifact,
+    create_operation_pack, unpack_operation_pack,
+};
 pub use projection::{
     CanonicalItem, CanonicalProjection, LifecycleRevision, LifecycleState, LifecycleView,
     ScalarRevision, ScalarView,
