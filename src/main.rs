@@ -5,6 +5,7 @@ use cli::CliArgs;
 
 mod capture;
 mod cli;
+mod enrichment;
 mod sync;
 mod tui;
 mod v2;

@@ -6,22 +6,33 @@ use std::process::{Command, Stdio};
 
 use directories::ProjectDirs;
 use research_domain::validate_item_url;
-use research_store::{CreateItemRequest, StoreError, StoredItem, V2Store};
+use research_store::{CreateItemRequest, EnrichmentProvider, StoreError, StoredItem, V2Store};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use url::Url;
 
 const CAPTURE_SCHEME: &str = "researchpocket";
 const CAPTURE_HOST: &str = "capture";
-const CAPTURE_VERSION: &str = "1";
+const CAPTURE_VERSION_V1: &str = "1";
+const CAPTURE_VERSION_V2: &str = "2";
 const MAX_CAPTURE_URI_BYTES: usize = 64 * 1024;
 const MAX_PAGE_URL_BYTES: usize = 32 * 1024;
 const MAX_TITLE_BYTES: usize = 4 * 1024;
+const MAX_EXCERPT_BYTES: usize = 8 * 1024;
+const MAX_LANGUAGE_BYTES: usize = 128;
 const MAX_NOTE_BYTES: usize = 32 * 1024;
 const MAX_TAGS: usize = 64;
 const MAX_TAG_BYTES: usize = 1024;
 const REGISTRATION_SCHEMA_VERSION: u8 = 1;
 const REGISTRATION_FILE: &str = "capture-handler.json";
+const NOTIFICATION_SECRET_ENV_VARS: [&str; 6] = [
+    "FIRECRAWL_API_KEY",
+    "RESEARCHPOCKET_GITHUB_TOKEN",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "GH_ENTERPRISE_TOKEN",
+    "GITHUB_ENTERPRISE_TOKEN",
+];
 
 #[derive(Debug, Error)]
 pub enum CaptureError {
@@ -43,8 +54,10 @@ pub type CaptureResult<T> = Result<T, CaptureError>;
 struct CaptureRequest {
     url: String,
     title: Option<String>,
+    excerpt: Option<String>,
     note: String,
     favorite: bool,
+    language: Option<String>,
     tags: Vec<String>,
 }
 
@@ -115,23 +128,26 @@ pub async fn handle(
     data_dir: &Path,
     capture_uri: &str,
     send_notification: bool,
+    enrichment_provider: Option<EnrichmentProvider>,
 ) -> CaptureResult<StoredItem> {
     let result = async {
         let request = parse_capture_uri(capture_uri)?;
         let store = V2Store::open(data_dir).await?;
-        store
-            .create_item(CreateItemRequest {
-                url: request.url,
-                title: request.title,
-                excerpt: None,
-                favorite: request.favorite,
-                language: None,
-                saved_at: None,
-                note: request.note,
-                tags: request.tags,
-            })
-            .await
-            .map_err(CaptureError::from)
+        let request = CreateItemRequest {
+            url: request.url,
+            title: request.title,
+            excerpt: request.excerpt,
+            favorite: request.favorite,
+            language: request.language,
+            saved_at: None,
+            note: request.note,
+            tags: request.tags,
+        };
+        match enrichment_provider {
+            Some(provider) => store.create_item_with_enrichment(request, provider).await,
+            None => store.create_item(request).await,
+        }
+        .map_err(CaptureError::from)
     }
     .await;
 
@@ -172,8 +188,10 @@ fn parse_capture_uri(capture_uri: &str) -> CaptureResult<CaptureRequest> {
     let mut version = None;
     let mut page_url = None;
     let mut title = None;
+    let mut excerpt = None;
     let mut note = None;
     let mut favorite = None;
+    let mut language = None;
     let mut tags = Vec::new();
 
     for (key, value) in parsed.query_pairs() {
@@ -182,8 +200,10 @@ fn parse_capture_uri(capture_uri: &str) -> CaptureResult<CaptureRequest> {
             "version" => set_once(&mut version, value, "version")?,
             "url" => set_once(&mut page_url, value, "url")?,
             "title" => set_once(&mut title, value, "title")?,
+            "excerpt" => set_once(&mut excerpt, value, "excerpt")?,
             "note" => set_once(&mut note, value, "note")?,
             "favorite" => set_once(&mut favorite, value, "favorite")?,
+            "language" => set_once(&mut language, value, "language")?,
             "tag" => {
                 if tags.len() == MAX_TAGS {
                     return Err(invalid_uri("capture contains too many tags"));
@@ -200,8 +220,16 @@ fn parse_capture_uri(capture_uri: &str) -> CaptureResult<CaptureRequest> {
         }
     }
 
-    if version.as_deref() != Some(CAPTURE_VERSION) {
-        return Err(invalid_uri("version must appear once and equal 1"));
+    let version = version
+        .as_deref()
+        .ok_or_else(|| invalid_uri("version must appear once and equal 1 or 2"))?;
+    if version != CAPTURE_VERSION_V1 && version != CAPTURE_VERSION_V2 {
+        return Err(invalid_uri("version must appear once and equal 1 or 2"));
+    }
+    if version == CAPTURE_VERSION_V1 && (excerpt.is_some() || language.is_some()) {
+        return Err(invalid_uri(
+            "capture contains a field that is unknown to version 1",
+        ));
     }
     let page_url = page_url
         .filter(|url: &String| !url.is_empty())
@@ -217,8 +245,14 @@ fn parse_capture_uri(capture_uri: &str) -> CaptureResult<CaptureRequest> {
     if let Some(title) = title.as_deref() {
         validate_text_field(title, "title", MAX_TITLE_BYTES, false)?;
     }
+    if let Some(excerpt) = excerpt.as_deref() {
+        validate_text_field(excerpt, "excerpt", MAX_EXCERPT_BYTES, false)?;
+    }
     if let Some(note) = note.as_deref() {
         validate_text_field(note, "note", MAX_NOTE_BYTES, true)?;
+    }
+    if let Some(language) = language.as_deref() {
+        validate_text_field(language, "language", MAX_LANGUAGE_BYTES, false)?;
     }
     let favorite = match favorite.as_deref() {
         None | Some("false") => false,
@@ -229,8 +263,10 @@ fn parse_capture_uri(capture_uri: &str) -> CaptureResult<CaptureRequest> {
     Ok(CaptureRequest {
         url: page_url,
         title,
+        excerpt,
         note: note.unwrap_or_default(),
         favorite,
+        language,
         tags,
     })
 }
@@ -1050,14 +1086,14 @@ fn notify(success: bool) {
     };
 
     #[cfg(target_os = "linux")]
-    let _ = Command::new("notify-send")
+    let _ = notification_command("notify-send")
         .args(["--app-name", "ResearchPocket", "ResearchPocket", message])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
 
     #[cfg(target_os = "macos")]
-    let _ = Command::new("/usr/bin/osascript")
+    let _ = notification_command("/usr/bin/osascript")
         .args([
             "-e",
             "on run argv",
@@ -1078,7 +1114,7 @@ fn notify(success: bool) {
         } else {
             WINDOWS_FAILURE_NOTIFICATION
         };
-        let _ = Command::new("powershell.exe")
+        let _ = notification_command("powershell.exe")
             .args([
                 "-NoProfile",
                 "-NonInteractive",
@@ -1096,6 +1132,14 @@ fn notify(success: bool) {
     let _ = success;
 }
 
+fn notification_command(program: &str) -> Command {
+    let mut command = Command::new(program);
+    for variable in NOTIFICATION_SECRET_ENV_VARS {
+        command.env_remove(variable);
+    }
+    command
+}
+
 #[cfg(target_os = "windows")]
 const WINDOWS_SUCCESS_NOTIFICATION: &str = r#"$x=[Windows.Data.Xml.Dom.XmlDocument,Windows.Data.Xml.Dom.XmlDocument,ContentType=WindowsRuntime]::new();$x.LoadXml('<toast><visual><binding template="ToastGeneric"><text>ResearchPocket</text><text>Link saved locally</text></binding></visual></toast>');[Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,ContentType=WindowsRuntime]::CreateToastNotifier('ResearchPocket').Show([Windows.UI.Notifications.ToastNotification]::new($x))"#;
 
@@ -1108,26 +1152,73 @@ mod tests {
 
     #[tokio::test]
     async fn versioned_capture_validation_and_v2_mutation_are_one_atomic_boundary() {
+        let command = notification_command("unused-notification-helper");
+        for variable in NOTIFICATION_SECRET_ENV_VARS {
+            assert!(command.get_envs().any(|(name, value)| {
+                name == std::ffi::OsStr::new(variable) && value.is_none()
+            }));
+        }
+
         let directory = tempfile::tempdir().expect("temporary library");
         let store = V2Store::init(directory.path())
             .await
             .expect("initialize V2");
         drop(store);
 
-        let valid = "researchpocket://capture?version=1&url=https%3A%2F%2Fexample.com%2Fa%20b%3Fx%3D1%26y%3D%2525&title=Unicode%20%E2%9C%93%20%22quote%22%20%26%20spaces&tag=one%2Ctwo&tag=%20exact%20&note=Keep%20%24%28this%29%20private&favorite=true";
-        let item = handle(directory.path(), valid, false)
+        let valid_v1 = "researchpocket://capture?version=1&url=https%3A%2F%2Fexample.com%2Fa%20b%3Fx%3D1%26y%3D%2525&title=Unicode%20%E2%9C%93%20%22quote%22%20%26%20spaces&tag=one%2Ctwo&tag=%20exact%20&note=Keep%20%24%28this%29%20private&favorite=true";
+        let item = handle(directory.path(), valid_v1, false, None)
             .await
-            .expect("valid capture");
+            .expect("valid version 1 capture");
         assert_eq!(item.url, "https://example.com/a b?x=1&y=%25");
         assert_eq!(item.title.as_deref(), Some("Unicode ✓ \"quote\" & spaces"));
+        assert_eq!(item.excerpt, None);
         assert_eq!(item.tags, [" exact ", "one,two"]);
         assert_eq!(item.note.as_deref(), Some("Keep $(this) private"));
         assert!(item.favorite);
+        assert_eq!(item.language, None);
+
+        let valid_v2 = "researchpocket://capture?version=2&url=https%3A%2F%2Fexample.com%2Fv2&title=Captured%20page&excerpt=Human-first%20research%20%E2%9C%93&language=en-GB";
+        let item = handle(
+            directory.path(),
+            valid_v2,
+            false,
+            Some(EnrichmentProvider::Direct),
+        )
+        .await
+        .expect("valid version 2 capture");
+        assert_eq!(item.url, "https://example.com/v2");
+        assert_eq!(item.title.as_deref(), Some("Captured page"));
+        assert_eq!(item.excerpt.as_deref(), Some("Human-first research ✓"));
+        assert_eq!(item.language.as_deref(), Some("en-GB"));
 
         let store = V2Store::open(directory.path()).await.expect("open V2");
+        let saved = store
+            .list(Default::default())
+            .await
+            .expect("list persisted captures");
+        let persisted_v2 = saved
+            .items
+            .iter()
+            .find(|saved| saved.id == item.id)
+            .expect("persisted version 2 capture");
+        assert_eq!(
+            persisted_v2.excerpt.as_deref(),
+            Some("Human-first research ✓")
+        );
+        assert_eq!(persisted_v2.language.as_deref(), Some("en-GB"));
+        let enrichment = store
+            .enrichment_job(&item.id)
+            .await
+            .expect("read atomic enrichment job")
+            .expect("version 2 capture enrichment job");
+        assert_eq!(enrichment.provider, EnrichmentProvider::Direct);
+        assert_eq!(enrichment.status, research_store::EnrichmentStatus::Skipped);
+        assert!(!enrichment.target_title);
+        assert!(!enrichment.target_excerpt);
+        assert!(!enrichment.target_language);
         let after_valid = store.status().await.expect("status after capture");
-        assert_eq!(after_valid.active_items, 1);
-        assert_eq!(after_valid.pending_updates, 1);
+        assert_eq!(after_valid.active_items, 2);
+        assert_eq!(after_valid.pending_updates, 2);
         drop(store);
 
         let invalid = vec![
@@ -1135,6 +1226,11 @@ mod tests {
             "researchpocket://capture/?version=1&url=https%3A%2F%2Fexample.com".to_owned(),
             "researchpocket://capture?version=1&url=https%3A%2F%2Fexample.com&url=https%3A%2F%2Fexample.org".to_owned(),
             "researchpocket://capture?version=1&url=https%3A%2F%2Fexample.com&db_path=%2Ftmp%2Flibrary.sqlite3".to_owned(),
+            "researchpocket://capture?version=1&url=https%3A%2F%2Fexample.com&excerpt=not%20valid%20in%20v1".to_owned(),
+            "researchpocket://capture?version=1&url=https%3A%2F%2Fexample.com&language=en".to_owned(),
+            "researchpocket://capture?version=3&url=https%3A%2F%2Fexample.com".to_owned(),
+            "researchpocket://capture?version=2&url=https%3A%2F%2Fexample.com&excerpt=one&excerpt=two".to_owned(),
+            "researchpocket://capture?version=2&url=https%3A%2F%2Fexample.com&language=en&language=fr".to_owned(),
             "researchpocket://capture?version=1&url=https%3A%2F%2Fuser%3Asecret%40example.com".to_owned(),
             "researchpocket://capture?version=1&url=https%3A%2F%2Fexample.com&title=%1Bterminal".to_owned(),
             "researchpocket://capture?version=1&url=https%3A%2F%2Fexample.com&title=%FF".to_owned(),
@@ -1150,15 +1246,31 @@ mod tests {
                 "researchpocket://capture?version=1&url=https%3A%2F%2Fexample.com{}",
                 "&tag=tag".repeat(MAX_TAGS + 1)
             ),
+            format!(
+                "researchpocket://capture?version=2&url=https%3A%2F%2Fexample.com&excerpt={}",
+                "x".repeat(MAX_EXCERPT_BYTES + 1)
+            ),
+            format!(
+                "researchpocket://capture?version=2&url=https%3A%2F%2Fexample.com&language={}",
+                "x".repeat(MAX_LANGUAGE_BYTES + 1)
+            ),
         ];
         for capture_uri in &invalid {
-            assert!(handle(directory.path(), capture_uri, false).await.is_err());
+            assert!(
+                handle(directory.path(), capture_uri, false, None)
+                    .await
+                    .is_err()
+            );
         }
         let oversized = format!(
             "researchpocket://capture?version=1&url=https%3A%2F%2Fexample.com&note={}",
             "x".repeat(MAX_CAPTURE_URI_BYTES)
         );
-        assert!(handle(directory.path(), &oversized, false).await.is_err());
+        assert!(
+            handle(directory.path(), &oversized, false, None)
+                .await
+                .is_err()
+        );
 
         let store = V2Store::open(directory.path()).await.expect("open V2");
         let after_invalid = store.status().await.expect("status after rejection");

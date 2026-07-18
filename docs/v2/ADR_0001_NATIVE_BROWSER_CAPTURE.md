@@ -1,5 +1,9 @@
 # ADR 0001: Native browser capture through a custom URL scheme
 
+Post-save metadata enrichment and capture URI version 2 extend this decision in
+[ADR 0002](./ADR_0002_LINK_ENRICHMENT.md). The provider-neutral handler,
+pre-network durability boundary, and version 1 compatibility remain unchanged.
+
 - Status: accepted
 - Date: 2026-07-13
 - Issue: [#6](https://github.com/ResearchPocket/researchpocket.github.io/issues/6)
@@ -35,7 +39,7 @@ It requires one absolute HTTP(S) target URL, accepts only the documented authore
 capture fields, rejects duplicate singleton and unknown fields, and treats every
 decoded value as inert data. An accepted request calls the same
 `V2Store::create_item` transaction as `research add`, producing one local item
-and one durable immutable outbox update without a network request.
+and one durable immutable outbox update without a pre-commit network request.
 
 Platform registration follows each operating system's per-user mechanism:
 
@@ -89,9 +93,9 @@ capture through the installed local library.
   prompt is useful but is not the security boundary because a user can remember
   the choice. Strict validation and an append-only action reduce abuse to bounded
   unwanted saves; the handler cannot read, edit, delete, publish, or synchronize.
-- The captured page URL and title pass through Firefox, OS dispatch, and process
-  arguments. The standard bookmarklet therefore includes no note, tags, path,
-  repository identity, or credential.
+- The captured page URL and bounded DOM metadata pass through Firefox, OS
+  dispatch, and process arguments. The standard bookmarklet therefore includes
+  no note, tags, path, repository identity, provider, or credential.
 - Custom scheme ownership is not globally exclusive. Another application can
   replace the association; status and reinstall are the recovery path.
 

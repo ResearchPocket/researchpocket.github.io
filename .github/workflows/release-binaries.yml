@@ -93,6 +93,7 @@ jobs:
           trap 'rm -rf "$smoke_directory"' EXIT
           "$binary" --data-dir "$smoke_directory/library" init --format json >/dev/null
           "$binary" --data-dir "$smoke_directory/library" status --format json >/dev/null
+          "$binary" --data-dir "$smoke_directory/library" enrich status --format json >/dev/null
 
       - name: Smoke-test Windows binary
         if: runner.os == 'Windows'
@@ -118,6 +119,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "The release binary init smoke test failed" }
           & $binary --data-dir (Join-Path $smokeDirectory "library") status --format json | Out-Null
           if ($LASTEXITCODE -ne 0) { throw "The release binary status smoke test failed" }
+          & $binary --data-dir (Join-Path $smokeDirectory "library") enrich status --format json | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "The release binary enrichment smoke test failed" }
 
       - name: Package Unix archive
         if: matrix.package == 'tar.gz'

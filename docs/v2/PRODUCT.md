@@ -66,6 +66,14 @@ feeds; they do not need a ResearchPocket or GitHub account.
 
 - Save a URL immediately while offline; metadata enrichment may be retried and
   must never block or discard the save.
+- Fill only missing title, excerpt, and language metadata through an explicit
+  local direct fetch or user-configured Firecrawl service. Human-authored values
+  remain canonical across in-flight and concurrent edits, local job leases avoid
+  duplicate provider calls, and using Firecrawl is a visible third-party
+  disclosure.
+- Capture bounded title, description, and language metadata from the current
+  browser DOM through the installed local protocol handler without requiring a
+  browser extension or always-on backend.
 - Edit titles, notes, tags, collection membership, favorite state, archive
   state, and lifecycle state through the CLI, TUI, or local web UI.
 - Search locally across saved metadata and user-authored notes.
@@ -162,6 +170,8 @@ V2 is successful when all of the following are true:
   machine-generated tags and summaries.
 - Standalone notes, full webpage archival, PDFs, attachments, highlights, or a
   general-purpose wiki.
+- Autonomous crawling, AI-generated memory, automatic provider fallback, or
+  silently sending saved URLs to a third-party extraction service.
 - Native mobile applications.
 - End-to-end encryption of remote state or encrypted public sharing. V2 trusts
   GitHub's private-repository access control; encryption can be added behind

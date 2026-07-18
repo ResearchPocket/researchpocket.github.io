@@ -1,6 +1,7 @@
 use research_store::{
-    CreateItemRequest, EditItemRequest, ListQuery, OptionalTextUpdate, SearchQuery, StoreError,
-    V2Store,
+    CreateItemRequest, ENRICHMENT_MAX_ATTEMPTS, EditItemRequest, EnrichmentCandidates,
+    EnrichmentProvider, EnrichmentStatus, ListQuery, OptionalTextUpdate, SearchQuery,
+    StoreError, V2Store,
 };
 
 #[tokio::test]
@@ -215,4 +216,182 @@ async fn local_mutations_are_atomic_durable_and_lifecycle_safe() {
     assert_eq!(first.title.as_deref(), Some(""));
     assert_eq!(first.note.as_deref(), Some("human 😀 note"));
     assert_eq!(first.tags, ["Added", "Keep"]);
+}
+
+#[tokio::test]
+async fn enrichment_is_durable_bounded_and_never_overwrites_authored_values() {
+    let directory = tempfile::tempdir().expect("library temp directory");
+    let library_directory = directory.path().join("library");
+    let store = V2Store::init(&library_directory)
+        .await
+        .expect("initialize store");
+
+    let item = store
+        .create_item_with_enrichment(
+            CreateItemRequest {
+                url: "https://example.com/enrich".into(),
+                title: None,
+                excerpt: Some(String::new()),
+                favorite: false,
+                language: None,
+                saved_at: Some(1_700_000_000),
+                note: String::new(),
+                tags: Vec::new(),
+            },
+            EnrichmentProvider::Direct,
+        )
+        .await
+        .expect("atomically create and queue item");
+    let queued = store
+        .enrichment_job(&item.id)
+        .await
+        .expect("read enrichment job")
+        .expect("created enrichment job");
+    assert_eq!(queued.status, EnrichmentStatus::Pending);
+    assert!(queued.target_title);
+    assert!(!queued.target_excerpt);
+    assert!(queued.target_language);
+    let claim = store
+        .claim_next_due_enrichment_job()
+        .await
+        .expect("claim due enrichment job")
+        .expect("one due enrichment job");
+    assert_eq!(claim.job.status, EnrichmentStatus::InProgress);
+    assert!(matches!(
+        store
+            .claim_item_enrichment(&item.id)
+            .await
+            .expect_err("an active lease prevents duplicate provider calls"),
+        StoreError::EnrichmentJobNotPending(_)
+    ));
+    assert!(matches!(
+        store
+            .queue_item_enrichment(&item.id, EnrichmentProvider::Firecrawl)
+            .await
+            .expect_err("requeue cannot erase an active lease"),
+        StoreError::EnrichmentJobNotPending(_)
+    ));
+
+    let moved_url = "https://example.com/enrich-moved";
+    store
+        .edit_item(EditItemRequest {
+            item_id: item.id.clone(),
+            url: Some(moved_url.into()),
+            title: Some(OptionalTextUpdate::Clear),
+            ..EditItemRequest::default()
+        })
+        .await
+        .expect("author title and URL while enrichment is in flight");
+    let candidates = EnrichmentCandidates {
+        title: Some("Fetched title".into()),
+        excerpt: Some("Fetched excerpt".into()),
+        language: Some("en".into()),
+    };
+    assert!(matches!(
+        store
+            .apply_item_enrichment(
+                &item.id,
+                &claim.lease_token,
+                &item.url,
+                &item.state,
+                candidates.clone(),
+            )
+            .await
+            .expect_err("reject metadata fetched for the old URL"),
+        StoreError::StaleEdit
+    ));
+    let still_queued = store
+        .enrichment_job(&item.id)
+        .await
+        .expect("read job after stale enrichment")
+        .expect("job remains after stale enrichment");
+    assert_eq!(still_queued.status, EnrichmentStatus::InProgress);
+    assert_eq!(still_queued.attempts, 0);
+    let applied = store
+        .apply_item_enrichment(
+            &item.id,
+            &claim.lease_token,
+            moved_url,
+            &item.state,
+            candidates,
+        )
+        .await
+        .expect("apply still-missing enrichment fields");
+    assert_eq!(applied.item.title, None);
+    assert_eq!(applied.item.excerpt.as_deref(), Some(""));
+    assert_eq!(applied.item.language.as_deref(), Some("en"));
+    assert!(!applied.applied_title);
+    assert!(!applied.applied_excerpt);
+    assert!(applied.applied_language);
+    assert_eq!(applied.job.status, EnrichmentStatus::Succeeded);
+    let cleared_requeue = store
+        .queue_item_enrichment(&item.id, EnrichmentProvider::Direct)
+        .await
+        .expect("requeue after a human clear");
+    assert_eq!(cleared_requeue.status, EnrichmentStatus::Skipped);
+    assert_eq!(
+        store.item(&item.id).await.expect("read cleared item").title,
+        None
+    );
+
+    let retry_item = store
+        .create_item_with_enrichment(
+            CreateItemRequest {
+                url: "https://example.com/retry".into(),
+                title: None,
+                excerpt: None,
+                favorite: false,
+                language: None,
+                saved_at: Some(1_700_000_001),
+                note: String::new(),
+                tags: Vec::new(),
+            },
+            EnrichmentProvider::Firecrawl,
+        )
+        .await
+        .expect("create retry item");
+    for attempt in 1..=ENRICHMENT_MAX_ATTEMPTS {
+        let claim = store
+            .claim_item_enrichment(&retry_item.id)
+            .await
+            .expect("claim retry attempt");
+        let failed = store
+            .record_enrichment_failure(&retry_item.id, &claim.lease_token, "request_timeout")
+            .await
+            .expect("record sanitized failure");
+        assert_eq!(failed.attempts, attempt);
+        let expected = if attempt == ENRICHMENT_MAX_ATTEMPTS {
+            EnrichmentStatus::Failed
+        } else {
+            EnrichmentStatus::Retry
+        };
+        assert_eq!(failed.status, expected);
+    }
+    assert!(matches!(
+        store
+            .record_enrichment_failure(
+                &retry_item.id,
+                "unused-lease",
+                "secret=https://example.com",
+            )
+            .await
+            .expect_err("reject unsanitized error detail"),
+        StoreError::InvalidInput(_)
+    ));
+
+    drop(store);
+    let reopened = V2Store::open(&library_directory)
+        .await
+        .expect("reopen store");
+    let persisted = reopened
+        .enrichment_job(&retry_item.id)
+        .await
+        .expect("read persisted retry state")
+        .expect("persisted retry job");
+    assert_eq!(persisted.status, EnrichmentStatus::Failed);
+    assert_eq!(persisted.attempts, ENRICHMENT_MAX_ATTEMPTS);
+    assert_eq!(
+        persisted.last_error_kind.as_deref(),
+        Some("request_timeout")
+    );
 }

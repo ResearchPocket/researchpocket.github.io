@@ -40,8 +40,14 @@ pub enum Commands {
     /// Initialize a V2 library in the platform data directory
     Init,
 
-    /// Save a URL immediately without network access
+    /// Save a URL locally, with optional post-save metadata enrichment
     Add(AddArgs),
+
+    /// Configure and run optional link metadata enrichment
+    Enrich {
+        #[command(subcommand)]
+        command: EnrichCommands,
+    },
 
     /// Edit one saved item by UUID
     Edit(EditArgs),
@@ -115,6 +121,58 @@ pub struct AddArgs {
     /// Original saved time as Unix seconds; defaults to now
     #[arg(long, value_name = "UNIX_SECONDS")]
     pub saved_at: Option<i64>,
+
+    /// Save first, then fill missing page metadata with this provider
+    #[arg(long, value_enum, value_name = "PROVIDER")]
+    pub enrich: Option<EnrichmentProviderArg>,
+}
+
+#[derive(Subcommand)]
+pub enum EnrichCommands {
+    /// Choose the default provider and optional browser-capture policy
+    Configure(EnrichConfigureArgs),
+
+    /// Inspect local enrichment configuration without revealing credentials
+    Status,
+
+    /// Disable automatic enrichment and remove the stored Firecrawl credential
+    Disable,
+
+    /// Enrich one save, or process the durable retry queue when no ID is supplied
+    Run(EnrichRunArgs),
+}
+
+#[derive(Args)]
+pub struct EnrichConfigureArgs {
+    /// Metadata provider used by queued and automatic enrichment
+    #[arg(value_enum)]
+    pub provider: EnrichmentProviderArg,
+
+    /// Automatically enrich browser captures after their durable local save
+    #[arg(long)]
+    pub on_capture: bool,
+
+    /// Read a Firecrawl API key from standard input without echoing or persisting it in SQLite
+    #[arg(long)]
+    pub api_key_stdin: bool,
+
+    /// Firecrawl API origin for an explicitly configured self-hosted deployment
+    #[arg(long, value_name = "URL")]
+    pub api_url: Option<String>,
+}
+
+#[derive(Args)]
+pub struct EnrichRunArgs {
+    /// Saved item UUID; omit it to process due retry jobs
+    pub item_id: Option<String>,
+
+    /// Provider for a newly queued item; defaults to local configuration
+    #[arg(long, value_enum, value_name = "PROVIDER")]
+    pub provider: Option<EnrichmentProviderArg>,
+
+    /// Maximum due jobs to process when no item ID is supplied
+    #[arg(long, default_value_t = 25, value_parser = parse_enrichment_limit)]
+    pub limit: usize,
 }
 
 #[derive(Args)]
@@ -294,6 +352,15 @@ pub enum OutputFormat {
     Ndjson,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+#[value(rename_all = "lower")]
+pub enum EnrichmentProviderArg {
+    /// Fetch public HTML directly from this device
+    Direct,
+    /// Send the URL to an explicitly configured Firecrawl API
+    Firecrawl,
+}
+
 fn parse_limit(value: &str) -> Result<usize, String> {
     let limit = value
         .parse::<usize>()
@@ -312,4 +379,14 @@ fn parse_sync_interval(value: &str) -> Result<u64, String> {
         return Err("sync interval must be between 15 and 86400 seconds".to_owned());
     }
     Ok(seconds)
+}
+
+fn parse_enrichment_limit(value: &str) -> Result<usize, String> {
+    let limit = value
+        .parse::<usize>()
+        .map_err(|_| "limit must be an integer".to_owned())?;
+    if !(1..=100).contains(&limit) {
+        return Err("limit must be between 1 and 100".to_owned());
+    }
+    Ok(limit)
 }

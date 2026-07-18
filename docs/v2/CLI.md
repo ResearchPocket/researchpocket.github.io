@@ -7,6 +7,10 @@ The shipped CLI is the V2 surface:
 ```text
 research init
 research add <URL>
+research enrich configure <direct|firecrawl>
+research enrich status
+research enrich run [<ITEM_ID>]
+research enrich disable
 research capture install
 research capture status
 research capture uninstall
@@ -72,12 +76,106 @@ research add https://example.com/article \
   --tag reading,rust \
   --favorite \
   --note "Come back to section three"
+research add https://example.com/article --enrich direct
 ```
 
-Capture is immediate and makes no network request. Only the URL is required.
-Title, excerpt, language, note, favorite state, tags, and an optional original
-`--saved-at <UNIX_SECONDS>` value are stored exactly as supplied. Saving the same
-URL twice creates two distinct items.
+Only the URL is required. Without `--enrich`, capture is immediate and makes no
+network request. Title, excerpt, language, note, favorite state, tags, and an
+optional original `--saved-at <UNIX_SECONDS>` value are stored exactly as
+supplied. Saving the same URL twice creates two distinct items.
+
+`--enrich direct|firecrawl` still commits the item first. The create transaction
+also writes a local retry job. When at least one eligible metadata field is
+missing, the CLI then attempts the network request; a fully populated item is
+marked skipped without contacting the provider. If a request fails, `research
+add` remains successful, prints a sanitized warning to stderr, and leaves the
+job queued instead of inviting a duplicate save.
+
+## Metadata enrichment
+
+Enrichment can fill a missing title, excerpt, or language after the URL is
+durable. It never changes the URL, note, tags, favorite state, saved time, or
+lifecycle state. A field is eligible only when the exact missing-field revision
+recorded at queue time is still current when the result is applied. A later
+human clear/edit and a concurrent unsynchronized human revision both win.
+`--title ""`, `--excerpt ""`, and `--language ""` are authored values and are
+not replaced.
+
+### Direct public-HTML provider
+
+Use it for one item without changing configuration:
+
+```sh
+research add https://example.com/article --enrich direct
+research enrich run "$ITEM_ID" --provider direct
+```
+
+Or make it the provider for browser captures:
+
+```sh
+research enrich configure direct --on-capture
+research enrich status
+```
+
+The direct provider sends an unauthenticated HTTP(S) request from the local
+device. It sends no cookie, authorization header, referrer, or browser state;
+validates every redirect and resolved address; rejects private and special-use
+destinations; and bounds redirects, time, content type, and response size. It
+parses only public HTML metadata.
+
+### Firecrawl REST provider
+
+Firecrawl is never an automatic fallback. Selecting it means the saved target
+URL is sent to the configured Firecrawl service. ResearchPocket uses the narrow
+`/v2/scrape` REST endpoint through its existing HTTP client and retains only
+normalized metadata; it adds no Firecrawl Cargo dependency. The request disables
+Firecrawl cache storage, requires target TLS validation, uses the basic proxy
+tier, and discards returned Markdown or page content.
+
+Store the key in a separate per-library file without placing it in process
+arguments or shell history:
+
+```sh
+printf '%s' "$FIRECRAWL_API_KEY" | \
+  research enrich configure firecrawl --api-key-stdin --on-capture
+research enrich status
+```
+
+Alternatively, set `FIRECRAWL_API_KEY` only for a command. An explicitly
+configured self-hosted API origin may be selected with `--api-url <URL>`. The
+non-secret configuration and optional key file remain outside SQLite, CRDT
+updates, sync repositories, handler manifests, and command output. Status shows
+only whether a credential is available and its source, together with aggregate
+pending/retry/in-progress/completed/failed/skipped job counts.
+
+The key file is created with owner-only mode on Unix. On Windows it inherits the
+selected data directory's access controls; owners who use a custom data directory
+must keep that directory restricted to their account.
+
+### Queue and retries
+
+```sh
+# Process due jobs, up to 25 by default.
+research enrich run
+
+# Process or queue one item immediately.
+research enrich run "$ITEM_ID"
+
+# Inspect configuration without exposing a key.
+research enrich status --format json
+
+# Remove configuration and any locally stored Firecrawl key.
+research enrich disable
+```
+
+Jobs are local operational state. A short-lived transactional lease ensures two
+local CLI processes cannot contact the provider for the same job concurrently;
+an abandoned lease becomes retryable after it expires. Provider failures use
+bounded retries and a sanitized category; page bodies and credentials are never
+stored in a job. A successful result is one V2 edit/outbox update only when at
+least one eligible field is applied. Full webpage, Markdown, PDF, and attachment
+storage is outside this feature; see
+[ADR 0002](./ADR_0002_LINK_ENRICHMENT.md).
 
 ## Firefox bookmarklet capture
 
@@ -133,20 +231,24 @@ re-run installation after every CLI upgrade as well.
    and may be scoped to the current site or browser profile.
 7. Run `research list` to confirm the local capture.
 
-The supplied bookmarklet sends only `version`, `url`, and `title`. It does not
-contain a token, repository name, filesystem path, provider name, note, or tags.
-Firefox may ask again in private browsing or when site permissions are cleared.
-Do not disable Firefox's external-protocol safety checks globally.
+The supplied bookmarklet sends version 2 plus the current page `url`, `title`,
+bounded description metadata as `excerpt`, and the document `language`, all read
+from the already-loaded DOM. It does not contain a token, repository name,
+filesystem path, provider name, note, or tags. Firefox may ask again in private
+browsing or when site permissions are cleared. Do not disable Firefox's
+external-protocol safety checks globally.
 
 ### Capture URI contract
 
-The version 1 transport has this shape:
+The version 2 transport used by the supplied bookmarklet has this shape:
 
 ```text
-researchpocket://capture?version=1&url=<percent-encoded-http(s)-url>&title=<percent-encoded-title>
+researchpocket://capture?version=2&url=<percent-encoded-http(s)-url>&title=<percent-encoded-title>&excerpt=<percent-encoded-description>&language=<percent-encoded-language>
 ```
 
-`version=1` and one absolute HTTP(S) `url` are required. `title` is optional.
+Version 1 remains accepted with URL/title and the existing advanced authored
+fields. Version 2 adds optional singleton `excerpt` and `language` fields. In
+both versions, one absolute HTTP(S) `url` is required; `title` is optional.
 Advanced local integrations may repeat `tag`, and may provide one `note` and one
 `favorite=true` field:
 
@@ -174,13 +276,18 @@ Percent-decoded values are passed as data rather than evaluated by a shell.
 
 One accepted URI creates exactly one item through the normal atomic V2 path. Its
 CRDT state, SQLite projection, immutable update, durable outbox, and device
-sequence commit together. A desktop-notification failure occurs only after that
-commit and cannot roll the save back.
+sequence commit together. When local `--on-capture` configuration is enabled,
+the same transaction also records a local-only enrichment job; the URI cannot
+choose that provider. Network work starts only after commit, and its failure
+cannot roll the save back. A desktop-notification failure likewise cannot roll
+back the durable save.
 
 ### Sync, removal, and troubleshooting
 
 Browser capture is deliberately local. It never starts synchronization or reads
-a GitHub token. Upload queued captures separately:
+a GitHub token. Optional locally configured enrichment may contact the captured
+public URL or explicitly selected Firecrawl service only after the save commits.
+Upload queued captures separately:
 
 ```sh
 research sync run
@@ -212,8 +319,9 @@ owner remembers external-protocol permission may attempt unwanted captures. URI
 validation limits that risk to bounded save spam: the transport cannot read or
 edit the library, execute commands, select a database, obtain credentials, or
 start sync. See [THREAT_MODEL.md](./THREAT_MODEL.md#native-bookmarklet-capture).
-The architectural tradeoff is recorded in
-[ADR 0001](./ADR_0001_NATIVE_BROWSER_CAPTURE.md).
+The custom-handler tradeoff is recorded in
+[ADR 0001](./ADR_0001_NATIVE_BROWSER_CAPTURE.md); the post-save enrichment
+boundary is recorded in [ADR 0002](./ADR_0002_LINK_ENRICHMENT.md).
 
 ## Edit and lifecycle
 
@@ -431,6 +539,13 @@ protocol versions.
 Create, edit, delete, and restore JSON output use the same materialized item
 shape as list entries, plus top-level `schema_version` and `command` fields. They
 do not expose causal revisions, CRDT bytes, or transport payloads.
+
+Enrichment configuration/status JSON reports the selected provider,
+capture-default flag, API origin, credential availability/source, and aggregate
+queue counts; it never contains the credential. Enrichment-run JSON reports
+aggregate outcomes plus item ID, provider, job status, attempt count, applied
+field names, sanitized error category, and next retry time for each attempted
+job. It never emits fetched candidates or raw response content.
 
 Sync JSON includes only repository identity, aggregate pull/apply/upload counts,
 whether a pristine device adopted the remote library, and the remaining pending

@@ -74,6 +74,73 @@ pub struct StoredItem {
     pub state: String,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EnrichmentProvider {
+    Direct,
+    Firecrawl,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EnrichmentStatus {
+    Pending,
+    Retry,
+    InProgress,
+    Succeeded,
+    Failed,
+    Skipped,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct EnrichmentCandidates {
+    pub title: Option<String>,
+    pub excerpt: Option<String>,
+    pub language: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct EnrichmentJob {
+    pub item_id: String,
+    pub provider: EnrichmentProvider,
+    pub status: EnrichmentStatus,
+    pub attempts: u64,
+    pub target_title: bool,
+    pub target_excerpt: bool,
+    pub target_language: bool,
+    pub queued_at: String,
+    pub updated_at: String,
+    pub next_attempt_at: Option<String>,
+    pub last_attempt_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub last_error_kind: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EnrichmentClaim {
+    pub job: EnrichmentJob,
+    pub lease_token: String,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct EnrichmentQueueCounts {
+    pub pending: u64,
+    pub retrying: u64,
+    pub in_progress: u64,
+    pub succeeded: u64,
+    pub failed: u64,
+    pub skipped: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct EnrichmentApplyResult {
+    pub item: StoredItem,
+    pub job: EnrichmentJob,
+    pub applied_title: bool,
+    pub applied_excerpt: bool,
+    pub applied_language: bool,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ListPage {
     pub total: u64,

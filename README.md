@@ -11,7 +11,7 @@ rather than a conflict resolver.
 
 This is a preview release, not V2 GA. The available workflows and remaining
 boundaries are listed below and in the
-[preview release guide](docs/releases/v2.0.0-preview.2.md).
+[preview release guide](docs/releases/v2.0.0-preview.3.md).
 
 ## Current V2 CLI
 
@@ -22,6 +22,8 @@ and synchronizes immutable updates through a private GitHub repository:
 ```sh
 research init
 research add https://example.com/article --tag reading
+research add https://example.com/article --enrich direct
+research enrich status
 research capture install
 research import v1 /path/to/v1/research.sqlite
 research list
@@ -42,7 +44,7 @@ data compatibility lives only in the read-only importer.
 
 ## Install the V2 preview
 
-The `v2.0.0-preview.2` release provides archives for Apple Silicon and Intel
+The `v2.0.0-preview.3` release provides archives for Apple Silicon and Intel
 macOS, Linux amd64, and Windows amd64, plus `SHA256SUMS`. Download the archive
 for your platform from the [release page](https://github.com/ResearchPocket/researchpocket.github.io/releases),
 verify it, place `research` (or `research.exe`) somewhere stable on your `PATH`,
@@ -57,7 +59,7 @@ research status
 On macOS, native capture binds the current executable location into its local
 application bridge, so install the binary at its long-term path before running
 `research capture install`. The complete archive names and setup sequence are in
-the [release guide](docs/releases/v2.0.0-preview.2.md).
+the [release guide](docs/releases/v2.0.0-preview.3.md).
 
 ## Build from this repository
 
@@ -124,10 +126,11 @@ To add the bookmarklet in Firefox:
    the site.
 5. Confirm the local result with `research list`.
 
-The standard bookmarklet sends only protocol version 1, the current HTTP(S) URL,
-and the page title. The CLI validates and saves them locally as one normal V2
-item and one durable outbox update. It performs no metadata request and does not
-silently deduplicate a URL.
+The standard bookmarklet sends protocol version 2, the current HTTP(S) URL, page
+title, and any bounded description/language metadata already present in the
+loaded DOM. The CLI validates and saves them locally as one normal V2 item and
+one durable outbox update. The bookmarklet performs no metadata request and does
+not silently deduplicate a URL. Version 1 bookmarklets remain accepted.
 
 Capture does not upload anything. Run `research sync run`, or keep the optional
 foreground `research sync run --every 60` loop active, when you want queued
@@ -147,6 +150,49 @@ See the [complete capture and troubleshooting guide](docs/v2/CLI.md#firefox-book
 and [privacy boundary](docs/v2/THREAT_MODEL.md#native-bookmarklet-capture). The
 custom-scheme decision and alternatives are recorded in
 [ADR 0001](docs/v2/ADR_0001_NATIVE_BROWSER_CAPTURE.md).
+
+## Optional metadata enrichment
+
+Saving stays URL-first: ResearchPocket commits the item before contacting a
+page or extraction service. A failed request therefore leaves the save intact
+and a bounded local retry job. Fetched metadata fills only title, excerpt, and
+language fields whose exact missing-field revisions are still current; authored
+values, including a clear, an explicit empty string, or a concurrent edit from
+another client, always win. Short-lived local leases prevent concurrent CLI
+processes from sending the same queued request twice.
+
+Use the built-in direct HTML extractor for one save or make it the browser
+capture default:
+
+```sh
+research add https://example.com/article --enrich direct
+research enrich configure direct --on-capture
+research enrich run
+research enrich status
+```
+
+Firecrawl is an explicit alternative for pages whose useful metadata needs a
+hosted extractor. The URL is sent to Firecrawl. ResearchPocket calls the small
+REST scrape endpoint with its existing HTTP client; it does not depend on the
+Firecrawl Cargo package. Pass the key through standard input so it never appears
+in shell history:
+
+```sh
+printf '%s' "$FIRECRAWL_API_KEY" | \
+  research enrich configure firecrawl --api-key-stdin --on-capture
+research add https://example.com/article --enrich firecrawl
+research enrich run
+research enrich disable
+```
+
+The optional key file is separate from SQLite, CRDT updates, and the sync
+repository. It is created with owner-only mode on Unix; on Windows it inherits
+the selected data directory's access controls, so keep a custom data directory
+restricted to the owner. `FIRECRAWL_API_KEY` may instead be supplied to the
+current process. Only normalized title, excerpt, and language are retained;
+HTML, Markdown, PDFs, and page files are not archived. The complete contract is
+in [the CLI guide](docs/v2/CLI.md#metadata-enrichment) and
+[ADR 0002](docs/v2/ADR_0002_LINK_ENRICHMENT.md).
 
 ## Migrate an existing library
 
