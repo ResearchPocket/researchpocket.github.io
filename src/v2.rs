@@ -1,24 +1,28 @@
 use std::error::Error;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use directories::ProjectDirs;
 use research_store::{
-    CreateItemRequest, EditItemRequest, ListQuery, OptionalTextUpdate, SearchQuery, V2Store,
+    CreateItemRequest, EditItemRequest, EnrichmentClaim, EnrichmentJob, EnrichmentProvider,
+    EnrichmentQueueCounts, EnrichmentStatus as StoreEnrichmentStatus, ListQuery,
+    OptionalTextUpdate, SearchQuery, StoreError, StoredItem, V2Store,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
 
 use crate::cli::{
-    CaptureCommands, CliArgs, Commands, ImportCommands, OutputFormat, SyncCommands,
+    CaptureCommands, CliArgs, Commands, EnrichCommands, EnrichmentProviderArg, ImportCommands,
+    OutputFormat, SyncCommands,
 };
-use crate::{capture, sync, tui};
+use crate::{capture, enrichment, sync, tui};
 
 type CliResult<T> = Result<T, Box<dyn Error>>;
 
 const OUTPUT_SCHEMA_VERSION: u8 = 1;
 const DATABASE_FILE: &str = "library.sqlite3";
+const MAX_ENRICHMENT_SECRET_BYTES: u64 = 16 * 1024;
 
 pub async fn handle(args: &CliArgs) -> CliResult<()> {
     let data_dir = resolve_data_dir(args.data_dir.as_deref())?;
@@ -27,21 +31,27 @@ pub async fn handle(args: &CliArgs) -> CliResult<()> {
         Commands::Init => handle_init(&data_dir, args.format).await,
         Commands::Add(add) => {
             let store = V2Store::open(&data_dir).await?;
-            let item = store
-                .create_item(CreateItemRequest {
-                    url: add.url.clone(),
-                    title: add.title.clone(),
-                    excerpt: add.excerpt.clone(),
-                    favorite: add.favorite,
-                    language: add.language.clone(),
-                    saved_at: add.saved_at,
-                    note: add.note.clone().unwrap_or_default(),
-                    tags: add.tag.clone(),
-                })
-                .await?;
+            let request = CreateItemRequest {
+                url: add.url.clone(),
+                title: add.title.clone(),
+                excerpt: add.excerpt.clone(),
+                favorite: add.favorite,
+                language: add.language.clone(),
+                saved_at: add.saved_at,
+                note: add.note.clone().unwrap_or_default(),
+                tags: add.tag.clone(),
+            };
+            let item = if let Some(provider) = add.enrich {
+                let provider = store_provider(provider);
+                let saved = store.create_item_with_enrichment(request, provider).await?;
+                finish_post_save_enrichment(&store, &data_dir, saved).await
+            } else {
+                store.create_item(request).await?
+            };
             let output = command_output("add", item)?;
             write_single(args.format, &output, human_add)
         }
+        Commands::Enrich { command } => handle_enrich(&data_dir, args.format, command).await,
         Commands::Edit(edit) => {
             let store = V2Store::open(&data_dir).await?;
             let item = store
@@ -154,13 +164,468 @@ async fn handle_capture(
             write_single(format, &output, human_capture_uninstall)
         }
         CaptureCommands::Handle(handle) => {
-            let item = capture::handle(data_dir, &handle.uri, handle.notify).await?;
+            let provider = match automatic_capture_provider(data_dir) {
+                Ok(provider) => provider,
+                Err(error) => {
+                    eprintln!(
+                        "Capture will continue without metadata enrichment: {}",
+                        error.kind()
+                    );
+                    None
+                }
+            };
+            let item = capture::handle(data_dir, &handle.uri, handle.notify, provider).await?;
+            let item = if provider.is_some() {
+                let store = V2Store::open(data_dir).await?;
+                finish_post_save_enrichment(&store, data_dir, item).await
+            } else {
+                item
+            };
             if handle.notify {
                 return Ok(());
             }
             let output = command_output("capture_handle", item)?;
             write_single(format, &output, human_capture_handle)
         }
+    }
+}
+
+async fn handle_enrich(
+    data_dir: &Path,
+    format: OutputFormat,
+    command: &EnrichCommands,
+) -> CliResult<()> {
+    // Enrichment configuration belongs to an initialized library even though
+    // its secrets and retry state live outside synchronized protocol data.
+    let store = V2Store::open(data_dir).await?;
+    match command {
+        EnrichCommands::Configure(configure) => {
+            let provider = store_provider(configure.provider);
+            if provider == EnrichmentProvider::Direct
+                && (configure.api_key_stdin || configure.api_url.is_some())
+            {
+                return Err(io::Error::other(
+                    "--api-key-stdin and --api-url apply only to the firecrawl provider",
+                )
+                .into());
+            }
+            let api_key = if configure.api_key_stdin {
+                Some(read_secret_from_stdin()?)
+            } else {
+                None
+            };
+            let status = enrichment::configure(
+                data_dir,
+                provider,
+                configure.on_capture,
+                configure.api_url.as_deref(),
+                api_key.as_deref(),
+            )?;
+            let output = command_output(
+                "enrich_configure",
+                EnrichmentStatusOutput {
+                    configuration: status,
+                    queue: store.enrichment_queue_counts().await?,
+                },
+            )?;
+            write_single(format, &output, human_enrich_status)
+        }
+        EnrichCommands::Status => {
+            let output = command_output(
+                "enrich_status",
+                EnrichmentStatusOutput {
+                    configuration: enrichment::status(data_dir)?,
+                    queue: store.enrichment_queue_counts().await?,
+                },
+            )?;
+            write_single(format, &output, human_enrich_status)
+        }
+        EnrichCommands::Disable => {
+            let output = command_output(
+                "enrich_disable",
+                EnrichmentStatusOutput {
+                    configuration: enrichment::disable(data_dir)?,
+                    queue: store.enrichment_queue_counts().await?,
+                },
+            )?;
+            write_single(format, &output, human_enrich_status)
+        }
+        EnrichCommands::Run(run) => {
+            if run.item_id.is_none() && run.provider.is_some() {
+                return Err(io::Error::other(
+                    "--provider requires an item ID; queued jobs retain their chosen provider",
+                )
+                .into());
+            }
+
+            let mut result = EnrichmentRunResult::default();
+            if let Some(item_id) = run.item_id.as_deref() {
+                let outcome = match explicit_enrichment_job(
+                    &store,
+                    data_dir,
+                    item_id,
+                    run.provider.map(store_provider),
+                )
+                .await?
+                {
+                    Some(claim) => attempt_enrichment(&store, data_dir, claim).await?,
+                    None => current_enrichment_outcome(&store, item_id).await?,
+                };
+                result.push(outcome);
+            } else {
+                for _ in 0..run.limit {
+                    let Some(claim) = store.claim_next_due_enrichment_job().await? else {
+                        break;
+                    };
+                    result.push(attempt_enrichment(&store, data_dir, claim).await?);
+                }
+            }
+            let output = command_output("enrich_run", result)?;
+            write_single(format, &output, human_enrich_run)
+        }
+    }
+}
+
+async fn explicit_enrichment_job(
+    store: &V2Store,
+    data_dir: &Path,
+    item_id: &str,
+    requested_provider: Option<EnrichmentProvider>,
+) -> CliResult<Option<EnrichmentClaim>> {
+    match store.enrichment_job(item_id).await? {
+        Some(job)
+            if matches!(
+                job.status,
+                StoreEnrichmentStatus::Pending | StoreEnrichmentStatus::Retry
+            ) =>
+        {
+            if requested_provider.is_some_and(|provider| provider != job.provider) {
+                return Err(io::Error::other(
+                    "this item already has a pending job with another provider",
+                )
+                .into());
+            }
+            Ok(Some(store.claim_item_enrichment(item_id).await?))
+        }
+        Some(job) if job.status == StoreEnrichmentStatus::InProgress => {
+            match store.claim_item_enrichment(item_id).await {
+                Ok(claim) => Ok(Some(claim)),
+                Err(StoreError::EnrichmentJobNotPending(_)) => Err(io::Error::other(
+                    "this item is already being enriched; retry after its local lease expires",
+                )
+                .into()),
+                Err(error) => Err(error.into()),
+            }
+        }
+        Some(job) if job.status == StoreEnrichmentStatus::Failed => {
+            let queued = store
+                .queue_item_enrichment(item_id, requested_provider.unwrap_or(job.provider))
+                .await?;
+            claim_queued_enrichment(store, queued).await
+        }
+        Some(job) => {
+            let provider = requested_provider.ok_or_else(|| {
+                io::Error::other(format!(
+                    "this item's enrichment job is {:?}; pass --provider to queue it again",
+                    job.status
+                ))
+            })?;
+            let queued = store.queue_item_enrichment(item_id, provider).await?;
+            claim_queued_enrichment(store, queued).await
+        }
+        None => {
+            let provider = match requested_provider {
+                Some(provider) => provider,
+                None => configured_provider(data_dir)?.ok_or_else(|| {
+                    io::Error::other(
+                        "no enrichment provider is configured; pass --provider or run enrich configure",
+                    )
+                })?,
+            };
+            let queued = store.queue_item_enrichment(item_id, provider).await?;
+            claim_queued_enrichment(store, queued).await
+        }
+    }
+}
+
+async fn claim_queued_enrichment(
+    store: &V2Store,
+    queued: EnrichmentJob,
+) -> CliResult<Option<EnrichmentClaim>> {
+    if queued.status == StoreEnrichmentStatus::Skipped {
+        Ok(None)
+    } else {
+        Ok(Some(store.claim_item_enrichment(&queued.item_id).await?))
+    }
+}
+
+async fn finish_post_save_enrichment(
+    store: &V2Store,
+    data_dir: &Path,
+    saved: StoredItem,
+) -> StoredItem {
+    let claim = match store.enrichment_job(&saved.id).await {
+        Ok(Some(job))
+            if matches!(
+                job.status,
+                StoreEnrichmentStatus::Pending | StoreEnrichmentStatus::Retry
+            ) =>
+        {
+            match store.claim_item_enrichment(&saved.id).await {
+                Ok(claim) => claim,
+                Err(StoreError::EnrichmentJobNotPending(_)) => return saved,
+                Err(_) => {
+                    eprintln!("Saved locally; metadata enrichment remains queued");
+                    return saved;
+                }
+            }
+        }
+        Ok(_) => return saved,
+        Err(_) => {
+            eprintln!("Saved locally; metadata enrichment remains queued");
+            return saved;
+        }
+    };
+    match attempt_enrichment(store, data_dir, claim).await {
+        Ok(outcome) => {
+            if let Some(kind) = outcome.summary.last_error_kind.as_deref() {
+                if outcome.summary.status == StoreEnrichmentStatus::Retry {
+                    eprintln!("Saved locally; metadata enrichment will retry: {kind}");
+                } else {
+                    eprintln!("Saved locally; metadata enrichment failed: {kind}");
+                }
+            }
+            outcome.item
+        }
+        Err(_) => {
+            eprintln!("Saved locally; metadata enrichment remains queued");
+            saved
+        }
+    }
+}
+
+async fn attempt_enrichment(
+    store: &V2Store,
+    data_dir: &Path,
+    claim: EnrichmentClaim,
+) -> CliResult<EnrichmentAttemptOutcome> {
+    let EnrichmentClaim { job, lease_token } = claim;
+    let current = store.item(&job.item_id).await?;
+    if job.status != StoreEnrichmentStatus::InProgress {
+        return Ok(EnrichmentAttemptOutcome {
+            item: current,
+            summary: enrichment_attempt_summary(job, Vec::new()),
+        });
+    }
+    if current.state != "active" {
+        let skipped = match store
+            .apply_item_enrichment(
+                &job.item_id,
+                &lease_token,
+                &current.url,
+                &current.state,
+                Default::default(),
+            )
+            .await
+        {
+            Ok(skipped) => skipped,
+            Err(StoreError::StaleEdit | StoreError::EnrichmentJobNotPending(_)) => {
+                return current_enrichment_outcome(store, &job.item_id).await;
+            }
+            Err(error) => return Err(error.into()),
+        };
+        return Ok(EnrichmentAttemptOutcome {
+            item: skipped.item,
+            summary: enrichment_attempt_summary(skipped.job, Vec::new()),
+        });
+    }
+    match enrichment::extract(data_dir, job.provider, &current.url).await {
+        Ok(candidates) => {
+            let applied = match store
+                .apply_item_enrichment(
+                    &job.item_id,
+                    &lease_token,
+                    &current.url,
+                    &current.state,
+                    research_store::EnrichmentCandidates {
+                        title: candidates.title,
+                        excerpt: candidates.excerpt,
+                        language: candidates.language,
+                    },
+                )
+                .await
+            {
+                Ok(applied) => applied,
+                Err(StoreError::StaleEdit) => {
+                    let retry = match store
+                        .record_enrichment_failure(&job.item_id, &lease_token, "stale_item")
+                        .await
+                    {
+                        Ok(retry) => retry,
+                        Err(StoreError::EnrichmentJobNotPending(_)) => {
+                            return current_enrichment_outcome(store, &job.item_id).await;
+                        }
+                        Err(error) => return Err(error.into()),
+                    };
+                    return Ok(EnrichmentAttemptOutcome {
+                        item: store.item(&job.item_id).await?,
+                        summary: enrichment_attempt_summary(retry, Vec::new()),
+                    });
+                }
+                Err(StoreError::EnrichmentJobNotPending(_)) => {
+                    return current_enrichment_outcome(store, &job.item_id).await;
+                }
+                Err(error) => return Err(error.into()),
+            };
+            let mut applied_fields = Vec::new();
+            if applied.applied_title {
+                applied_fields.push("title");
+            }
+            if applied.applied_excerpt {
+                applied_fields.push("excerpt");
+            }
+            if applied.applied_language {
+                applied_fields.push("language");
+            }
+            Ok(EnrichmentAttemptOutcome {
+                item: applied.item,
+                summary: enrichment_attempt_summary(applied.job, applied_fields),
+            })
+        }
+        Err(error) => {
+            let failed = match store
+                .record_enrichment_failure(&job.item_id, &lease_token, error.kind())
+                .await
+            {
+                Ok(failed) => failed,
+                Err(StoreError::EnrichmentJobNotPending(_)) => {
+                    return current_enrichment_outcome(store, &job.item_id).await;
+                }
+                Err(error) => return Err(error.into()),
+            };
+            Ok(EnrichmentAttemptOutcome {
+                item: current,
+                summary: enrichment_attempt_summary(failed, Vec::new()),
+            })
+        }
+    }
+}
+
+async fn current_enrichment_outcome(
+    store: &V2Store,
+    item_id: &str,
+) -> CliResult<EnrichmentAttemptOutcome> {
+    let job = store
+        .enrichment_job(item_id)
+        .await?
+        .ok_or_else(|| io::Error::other("the enrichment job disappeared"))?;
+    Ok(EnrichmentAttemptOutcome {
+        item: store.item(item_id).await?,
+        summary: enrichment_attempt_summary(job, Vec::new()),
+    })
+}
+
+fn configured_provider(
+    data_dir: &Path,
+) -> enrichment::EnrichmentResult<Option<EnrichmentProvider>> {
+    let status = enrichment::status(data_dir)?;
+    Ok(status.configured.then_some(status.provider).flatten())
+}
+
+fn automatic_capture_provider(
+    data_dir: &Path,
+) -> enrichment::EnrichmentResult<Option<EnrichmentProvider>> {
+    let status = enrichment::status(data_dir)?;
+    Ok((status.configured && status.on_capture)
+        .then_some(status.provider)
+        .flatten())
+}
+
+fn store_provider(provider: EnrichmentProviderArg) -> EnrichmentProvider {
+    match provider {
+        EnrichmentProviderArg::Direct => EnrichmentProvider::Direct,
+        EnrichmentProviderArg::Firecrawl => EnrichmentProvider::Firecrawl,
+    }
+}
+
+fn read_secret_from_stdin() -> CliResult<String> {
+    let mut value = String::new();
+    let stdin = io::stdin();
+    stdin
+        .lock()
+        .take(MAX_ENRICHMENT_SECRET_BYTES + 1)
+        .read_to_string(&mut value)?;
+    if value.len() as u64 > MAX_ENRICHMENT_SECRET_BYTES {
+        return Err(io::Error::other("API key input is too large").into());
+    }
+    let value = value.trim_end_matches(['\r', '\n']).to_owned();
+    if value.is_empty() {
+        return Err(io::Error::other("standard input did not contain an API key").into());
+    }
+    Ok(value)
+}
+
+#[derive(Default, Serialize)]
+struct EnrichmentRunResult {
+    processed: usize,
+    succeeded: usize,
+    skipped: usize,
+    retrying: usize,
+    in_progress: usize,
+    failed: usize,
+    attempts: Vec<EnrichmentAttemptSummary>,
+}
+
+#[derive(Serialize)]
+struct EnrichmentStatusOutput {
+    #[serde(flatten)]
+    configuration: enrichment::EnrichmentStatus,
+    queue: EnrichmentQueueCounts,
+}
+
+impl EnrichmentRunResult {
+    fn push(&mut self, outcome: EnrichmentAttemptOutcome) {
+        self.processed += 1;
+        match outcome.summary.status {
+            StoreEnrichmentStatus::Succeeded => self.succeeded += 1,
+            StoreEnrichmentStatus::Skipped => self.skipped += 1,
+            StoreEnrichmentStatus::Retry => self.retrying += 1,
+            StoreEnrichmentStatus::Failed => self.failed += 1,
+            StoreEnrichmentStatus::InProgress => self.in_progress += 1,
+            StoreEnrichmentStatus::Pending => {}
+        }
+        self.attempts.push(outcome.summary);
+    }
+}
+
+struct EnrichmentAttemptOutcome {
+    item: StoredItem,
+    summary: EnrichmentAttemptSummary,
+}
+
+#[derive(Serialize)]
+struct EnrichmentAttemptSummary {
+    item_id: String,
+    provider: EnrichmentProvider,
+    status: StoreEnrichmentStatus,
+    attempts: u64,
+    applied_fields: Vec<&'static str>,
+    next_attempt_at: Option<String>,
+    last_error_kind: Option<String>,
+}
+
+fn enrichment_attempt_summary(
+    job: EnrichmentJob,
+    applied_fields: Vec<&'static str>,
+) -> EnrichmentAttemptSummary {
+    EnrichmentAttemptSummary {
+        item_id: job.item_id,
+        provider: job.provider,
+        status: job.status,
+        attempts: job.attempts,
+        applied_fields,
+        next_attempt_at: job.next_attempt_at,
+        last_error_kind: job.last_error_kind,
     }
 }
 
@@ -433,6 +898,62 @@ fn human_delete(value: &Value) {
 
 fn human_restore(value: &Value) {
     human_mutation("Restored", value);
+}
+
+fn human_enrich_status(value: &Value) {
+    let configured = value
+        .get("configured")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    println!(
+        "Metadata enrichment: {}",
+        if configured { "configured" } else { "disabled" }
+    );
+    print_string(value, "provider", "Provider");
+    print_bool(value, "on_capture", "Automatic after browser capture");
+    print_bool(value, "credential_available", "Credential available");
+    print_string(value, "credential_source", "Credential source");
+    print_string(value, "api_base", "API base");
+    if let Some(queue) = value.get("queue") {
+        print_number(queue, "pending", "Pending jobs");
+        print_number(queue, "retrying", "Waiting to retry");
+        print_number(queue, "in_progress", "Active jobs");
+        print_number(queue, "failed", "Retries exhausted");
+        print_number(queue, "succeeded", "Completed jobs");
+        print_number(queue, "skipped", "Skipped jobs");
+    }
+}
+
+fn human_enrich_run(value: &Value) {
+    println!("Metadata enrichment complete");
+    print_number(value, "processed", "Processed");
+    print_number(value, "succeeded", "Enriched");
+    print_number(value, "skipped", "No missing metadata found");
+    print_number(value, "retrying", "Queued for retry");
+    print_number(value, "in_progress", "Already active elsewhere");
+    print_number(value, "failed", "Retries exhausted");
+    let Some(attempts) = value.get("attempts").and_then(Value::as_array) else {
+        return;
+    };
+    for attempt in attempts {
+        let item_id = attempt
+            .get("item_id")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown item");
+        let status = attempt
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        println!("{item_id}: {status}");
+        if let Some(fields) = attempt.get("applied_fields").and_then(Value::as_array) {
+            let fields = fields.iter().filter_map(Value::as_str).collect::<Vec<_>>();
+            if !fields.is_empty() {
+                println!("  applied: {}", fields.join(", "));
+            }
+        }
+        print_indented_string(attempt, "last_error_kind", "error");
+        print_indented_string(attempt, "next_attempt_at", "next retry");
+    }
 }
 
 fn human_capture_install(value: &Value) {

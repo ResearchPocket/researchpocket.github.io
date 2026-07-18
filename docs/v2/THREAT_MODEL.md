@@ -5,15 +5,17 @@ owner mode, and publication. The immutable paths, envelopes, retries, receipts,
 and version negotiation are specified by the
 [synchronization protocol](./SYNC_PROTOCOL.md).
 
-Last verified against GitHub, platform, and CSP documentation: 2026-07-13
+Last verified against GitHub, platform, Firecrawl, and CSP documentation:
+2026-07-18
 
 ## Scope and security goals
 
-This document covers the local V2 client, the Firefox bookmarklet and native
-protocol bridge, a private GitHub data repository, the GitHub API, the public
-GitHub Pages application shell, browser persistence, and a separate public
-publication repository. It is a prerequisite for native capture, the sync
-protocol, hosted owner editor, and publisher.
+This document covers the local V2 client, optional native metadata providers,
+the Firefox bookmarklet and native protocol bridge, a private GitHub data
+repository, the GitHub API, the public GitHub Pages application shell, browser
+persistence, and a separate public publication repository. It is a prerequisite
+for native capture and enrichment, the sync protocol, hosted owner editor, and
+publisher.
 
 ResearchPocket protects:
 
@@ -44,6 +46,7 @@ from existing Git history are outside the V2 guarantee.
 | TM-10 | Deletion creates a tombstone. Historical erasure requires repository replacement or an explicit history rewrite. |
 | TM-11 | Native bookmarklet capture uses a per-user `researchpocket://capture` handler with a versioned, append-only field allowlist. The URI never selects a filesystem path, carries a credential, executes a command, or starts synchronization. |
 | TM-12 | The owner application has exclusive use of the `https://researchpocket.github.io` origin. The former `/ResearchPocket/` paths may contain only compatibility redirects built from the same protected source; no unrelated active Pages project may share the origin. |
+| TM-13 | Optional native enrichment starts only after the item and local retry job commit. Direct fetches are public-network-only and SSRF bounded; Firecrawl is explicit, provider-neutral capture URIs carry no key, and only normalized missing metadata is retained. |
 
 ## Trust boundaries
 
@@ -58,9 +61,11 @@ from existing Git history are outside the V2 guarantee.
 | Private data repository | Complete immutable updates, checkpoints, and private policy. GitHub collaborators and repository administrators can read its history. |
 | GitHub REST API | Trusted transport/authentication boundary. Every returned protocol object is still hash- and schema-verified locally. |
 | Publisher workflow | Trusted, pinned workflow in the private repository. It reads private state and writes only an allowlisted projection using a separate credential. |
-| Firefox bookmarklet | User-triggered but runs in the current page's untrusted browser context. The standard bookmarklet may send only the current page URL and title in a versioned capture URI. |
+| Firefox bookmarklet | User-triggered but runs in the current page's untrusted browser context. The standard bookmarklet may send only the current page URL and bounded title, description, and language values in a versioned capture URI. |
 | OS protocol dispatcher | Trusted only to deliver one URI to the installed per-user handler. Browser and operating-system history, diagnostics, or other same-user processes may observe that payload. |
-| Third-party pages and networks | Untrusted. They receive no owner data, analytics events, referrers containing secrets, or runtime requests from owner mode. |
+| Native direct enrichment | Untrusted public HTTP(S) target. It may receive a metadata-only request for its own saved URL, but no owner credential, cookie, referrer, note, tag, browser state, or other library data. |
+| Firecrawl enrichment | Explicitly selected third party. It receives the saved target URL and the Firecrawl API credential, but no ResearchPocket library, note, tag, GitHub credential, or capture URI. Returned page content is discarded. |
+| Other third-party pages and networks | Untrusted. They receive no owner data, analytics events, referrers containing secrets, or runtime requests from hosted owner mode. |
 
 The implemented browser-store, static-shell, and private synchronization
 behavior is documented in [WEB.md](./WEB.md). The credential lifecycle below is
@@ -133,6 +138,26 @@ any other persistent storage. Owners should populate the variable with a silent
 shell prompt immediately before synchronization and unset it afterward. The TUI
 and native capture handler neither read this credential nor start a sync.
 
+## Native enrichment credential lifecycle
+
+Firecrawl uses `FIRECRAWL_API_KEY` from the current process when present. An
+owner may instead pass a key through standard input to `research enrich
+configure firecrawl --api-key-stdin`; ResearchPocket writes it to a separate
+per-library credential file. ResearchPocket creates that file with owner-only
+mode on Unix. On Windows it inherits the selected data directory's access
+controls, so an owner using a custom data directory must restrict that directory
+to their account. The non-secret provider configuration is a separate file.
+Neither enters SQLite, CRDT state, immutable updates, the sync repository,
+capture URI, handler manifest, command output, logs, or publication artifacts.
+`research enrich status` exposes only credential availability/source, and
+`research enrich disable` removes the stored key and provider configuration.
+
+The Firecrawl URL is never an implicit fallback. A user must select the provider
+for an individual job or configure it locally. The capture URI cannot select a
+provider, API base, or key. A browser-launched capture therefore uses only the
+provider already bound to that local library; a bad or unavailable credential
+cannot prevent the URL from being saved.
+
 ## Browser credential lifecycle
 
 1. The owner pastes the PAT into a password input on the Pages origin.
@@ -199,28 +224,57 @@ responses decide only transport success; Loro updates decide application state.
 
 ```mermaid
 flowchart LR
-    O[Owner clicks Firefox bookmarklet] --> B[Version 1 researchpocket URI]
+    O[Owner clicks Firefox bookmarklet] --> B[Version 2 researchpocket URI]
     B --> P[Per-user OS protocol handler]
     P --> C[Installed V2 CLI]
     C --> V{Route and field validation}
     V -->|valid| L[Local V2 mutation and durable outbox]
     V -->|invalid| F[Fail without mutation]
-    L -. no automatic network access .-> S[Later explicit sync]
+    L --> J{Local enrichment enabled?}
+    J -->|no| S[Later explicit sync]
+    J -->|yes, after commit| E[Bounded direct or Firecrawl request]
+    E -->|eligible metadata| A[Ordinary V2 edit and outbox update]
+    E -->|failure| R[Local bounded retry job]
+    A --> S
+    R -. independent of sync .-> S
 ```
 
-The standard bookmarklet transports only the current HTTP(S) page URL and title.
-The OS registration binds an executable and one resolved local V2 data directory;
-the URI cannot choose either. The internal handler accepts only the exact
-`researchpocket://capture` route, protocol version 1, an absolute HTTP(S) target,
-and bounded authored capture fields. Singleton fields cannot repeat; `tag` is the
-only repeatable field. Unknown or malformed input fails before opening a mutation.
+The standard bookmarklet transports version 2 with the current HTTP(S) page URL
+and bounded title, description, and language metadata from the already-loaded
+DOM. Version 1 remains accepted. The OS registration binds an executable and one
+resolved local V2 data directory; the URI cannot choose either. The internal
+handler accepts only the exact `researchpocket://capture` route, a supported
+protocol version, an absolute HTTP(S) target, and bounded allowlisted fields.
+Singleton fields cannot repeat; `tag` is the only repeatable field. Unknown or
+malformed input fails before opening a mutation.
 
 The OS passes one encoded URI to the handler as an argument; the handler decodes
 its values as structured data, never as a shell command. It calls the same atomic
-V2 create operation as `research add` and does not fetch metadata, read
-credentials, contact GitHub, or start sync. A best-effort desktop notification
-happens after commit, so notification failure cannot discard or duplicate the
-durable capture.
+V2 create operation as `research add`. When local configuration enables
+enrichment, that create transaction also records the provider and exact
+missing-field revision targets as a local-only job. A processor transactionally
+claims a short-lived lease before any provider request, preventing duplicate
+calls from concurrent local CLI processes while allowing recovery after a
+crash. The handler commits before any request; a fetch,
+credential, parsing, or notification failure therefore cannot discard or
+duplicate the save. It never reads a GitHub credential, contacts GitHub, or
+starts synchronization.
+
+The direct provider resolves and pins each HTTP(S) hop, rejects loopback,
+private, link-local, multicast, reserved, documentation, and cloud-metadata
+addresses, and revalidates redirects. It sends no cookies, authorization,
+referrer, or browser state and bounds redirects, connection/response time,
+content type, and decoded body size. DNS rebinding, alternate address families,
+and redirect targets are treated as SSRF inputs, not trusted page metadata.
+
+The Firecrawl provider sends the saved URL only after explicit local selection.
+It uses an authorization header against the configured `/v2/scrape` API and
+bounds the response. The request disables Firecrawl cache storage, requires
+target TLS validation, and selects the basic proxy tier to avoid silent enhanced
+proxy escalation. ResearchPocket retains only normalized title, excerpt, and
+language candidates; it discards Markdown, HTML, screenshots, and response
+bodies. Provider error categories are sanitized before entering retry state or
+diagnostics.
 
 Custom protocol schemes do not authenticate their caller. Firefox normally asks
 before handing an external link to an application, but a permission remembered
@@ -292,9 +346,10 @@ Activating a new shell version removes old caches.
 - Browser extensions and a compromised profile can read in-use private data and
   memory credentials; V2 cannot defend against that device-level compromise.
 - Capture URI payloads are not logged by ResearchPocket, but the current page URL,
-  title, and any advanced authored fields pass through Firefox, OS protocol
-  dispatch, and process arguments. The bookmarklet therefore includes no note,
-  tags, path, repository identity, or credential by default.
+  title, bounded description/language, and any advanced authored fields pass
+  through Firefox, OS protocol dispatch, and process arguments. The bookmarklet
+  therefore includes no note, tags, path, repository identity, provider, or
+  credential by default.
 
 ## Threats and mitigations
 
@@ -309,8 +364,13 @@ Activating a new shell version removes old caches.
 | Corrupt/replayed remote update changes state | Envelope schema/version checks, library identity, payload SHA-256, immutable device sequence/path, applied receipt | A repository writer can delete history; clients must detect missing/inconsistent data. |
 | Token appears in logs or URLs | Authorization header only; redacted errors; no analytics; no token interpolation; production console off | User-installed debugging tools may capture traffic. |
 | Untrusted page invokes native capture | Browser external-protocol confirmation; exact route/version; bounded append-only field allowlist; no read, edit, delete, sync, or publication action | Remembered site permission can permit unwanted save spam. |
-| Capture URI injects a command or selects private state | Direct argument handling without shell evaluation; reject unknown fields, paths, credentials, provider names, user information, fragments, and non-HTTP(S) targets | Browser, OS diagnostics, or same-user processes may observe the accepted URL and title. |
+| Capture URI injects a command or selects private state | Direct argument handling without shell evaluation; reject unknown fields, paths, credentials, provider names, user information, fragments, and non-HTTP(S) targets | Browser, OS diagnostics, or same-user processes may observe accepted URL/title/description/language data. |
 | Capture writes to the wrong library | Installer binds one resolved absolute data directory; status displays the binding; URI cannot override it | Moving the executable or changing libraries requires reinstalling the association. |
+| Direct enrichment reaches a local or cloud-internal service | Resolve and pin DNS for every hop; reject all non-public address classes and embedded credentials; revalidate manual redirects; cap redirects, time, type, and bytes | Public services can still return hostile or misleading metadata, which remains untrusted text. |
+| Firecrawl receives URLs unexpectedly | Never fallback automatically; require explicit job/provider configuration; keep provider out of the capture URI; disclose the third-party boundary in CLI help/docs | An owner who enables automatic capture enrichment has chosen to reveal each captured URL to that provider. |
+| Firecrawl key leaks into library or diagnostics | Environment or separate key file with owner-only Unix mode or a restricted Windows data-directory ACL; authorization header only; no raw response/error persistence; status reports only availability/source; disable removes stored key | Same-user processes, a broadly accessible custom data directory, and a compromised device can expose process environment or local files. |
+| Enrichment overwrites an authored value | Record exact missing-field revisions at queue time and recheck revision plus value inside the apply transaction; give enrichment revisions a reserved lower sort priority than app-generated human revisions; explicit clears/empty strings count as authored; never enrich URL or notes | Fetched metadata can still be inaccurate when no human value exists. |
+| Concurrent CLIs duplicate an enrichment request | Transactionally claim a short-lived per-job lease before network access; require the matching lease token to apply or fail an attempt; reclaim only after expiry | A process paused beyond the lease can overlap a recovery attempt, but bounded request time makes this exceptional. |
 | Clickjacking tricks PAT entry | Header CSP with `frame-ancestors 'none'` where supported; document weaker Pages meta-CSP boundary | Standard Pages meta CSP cannot enforce `frame-ancestors`. |
 | Delete is mistaken for secure erase | UI calls it delete/tombstone and documents history retention; provide repository replacement procedure | GitHub and local backups may retain earlier bytes. |
 
@@ -352,10 +412,19 @@ Native-capture, hosted-editor, and sync changes must demonstrate:
 
 - strict capture route, version, scheme, field, duplicate, size, and HTTP(S)
   target validation before mutation;
-- one accepted capture produces exactly one normal durable outbox update, while
-  rejected input produces none;
+- one accepted capture produces exactly one initial durable outbox update, while
+  rejected input produces none; optional enrichment starts only after commit and
+  adds at most one low-priority metadata update when an eligible field changes;
 - capture registration is per-user and repeatable, binds one data directory, and
   treats notification as best-effort after commit;
+- enrichment queue creation is atomic with an opted-in save, failures are
+  bounded/retryable, active jobs are locally leased, and a concurrent human edit,
+  explicit clear, or explicit-empty human field is not replaced;
+- direct-provider SSRF checks cover private/special-use addresses, redirects,
+  DNS/address-family handling, content type, time, and body bounds;
+- Firecrawl is direct REST rather than an SDK, remains explicit, bounds its
+  response, and exposes neither the API key nor raw response bodies through
+  SQLite, CRDT updates, output, logs, or generated artifacts;
 - token absence from localStorage, IndexedDB, Cache API, service-worker messages,
   URLs, logs, source maps, and generated artifacts;
 - a token scoped only to the private data repository with Contents read/write;

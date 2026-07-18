@@ -113,6 +113,21 @@ impl V2Store {
         &self.database_path
     }
 
+    pub async fn item(&self, item_id: &str) -> StoreResult<StoredItem> {
+        let row = sqlx::query_as::<_, ItemRow>(
+            "SELECT item_id, url, title, excerpt, favorite, language, saved_at, note, \
+             lifecycle_state FROM items WHERE item_id = ?",
+        )
+        .bind(item_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| StoreError::ItemNotFound(item_id.to_owned()))?;
+        self.materialize_rows(vec![row])
+            .await?
+            .pop()
+            .ok_or_else(|| StoreError::InvalidStore("item projection disappeared".into()))
+    }
+
     pub async fn list(&self, query: ListQuery) -> StoreResult<ListResult> {
         let total = self.count_items(&query).await?;
         let offset =

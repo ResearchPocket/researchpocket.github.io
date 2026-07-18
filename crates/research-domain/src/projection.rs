@@ -135,3 +135,44 @@ pub(crate) fn lifecycle_view(
         revisions,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{ScalarRevision, scalar_view};
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn concurrent_human_revision_wins_over_low_priority_enrichment_revision() {
+        let base = "01900000-0000-7000-8000-000000000001/00000000000000000001/title";
+        let enrichment = "!researchpocket-enrichment/01900000/title";
+        let human = "01900000-0000-7000-8000-000000000002/00000000000000000001/title";
+        let revisions = BTreeMap::from([
+            (
+                base.to_owned(),
+                ScalarRevision {
+                    parents: Vec::new(),
+                    value: None::<String>,
+                },
+            ),
+            (
+                enrichment.to_owned(),
+                ScalarRevision {
+                    parents: vec![base.to_owned()],
+                    value: Some("Fetched title".to_owned()),
+                },
+            ),
+            (
+                human.to_owned(),
+                ScalarRevision {
+                    parents: vec![base.to_owned()],
+                    value: None,
+                },
+            ),
+        ]);
+
+        let view = scalar_view(revisions).expect("project concurrent scalar revisions");
+        assert_eq!(view.heads, [enrichment, human]);
+        assert_eq!(view.winner, human);
+        assert_eq!(view.value, None);
+    }
+}

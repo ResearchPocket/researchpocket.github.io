@@ -28,6 +28,10 @@ pub enum StoreError {
     NumericRange(&'static str),
     #[error("item {0} was not found")]
     ItemNotFound(String),
+    #[error("item {0} does not have an enrichment job")]
+    EnrichmentJobNotFound(String),
+    #[error("the enrichment job for item {0} is not pending")]
+    EnrichmentJobNotPending(String),
     #[error("the edit does not contain any changes")]
     NoChanges,
     #[error("the item changed after editing began; reopen it before saving")]

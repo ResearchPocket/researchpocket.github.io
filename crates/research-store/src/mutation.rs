@@ -5,15 +5,32 @@ use research_domain::{CanonicalProjection, ItemSeed, Library, LifecycleState};
 use sqlx::{Row, SqliteConnection};
 use uuid::Uuid;
 
+use crate::enrichment::queue_enrichment_on_connection;
 use crate::import::persist_item_projection;
 use crate::store::{fresh_peer_id, now_rfc3339, sha256_hex};
 use crate::{
-    CreateItemRequest, EditItemRequest, OptionalTextUpdate, StoreError, StoreResult,
-    StoredItem, V2Store,
+    CreateItemRequest, EditItemRequest, EnrichmentProvider, OptionalTextUpdate, StoreError,
+    StoreResult, StoredItem, V2Store,
 };
 
 impl V2Store {
     pub async fn create_item(&self, request: CreateItemRequest) -> StoreResult<StoredItem> {
+        self.create_item_inner(request, None).await
+    }
+
+    pub async fn create_item_with_enrichment(
+        &self,
+        request: CreateItemRequest,
+        provider: EnrichmentProvider,
+    ) -> StoreResult<StoredItem> {
+        self.create_item_inner(request, Some(provider)).await
+    }
+
+    async fn create_item_inner(
+        &self,
+        request: CreateItemRequest,
+        enrichment_provider: Option<EnrichmentProvider>,
+    ) -> StoreResult<StoredItem> {
         let item_id = Uuid::now_v7().to_string();
         let saved_at = request.saved_at.unwrap_or_else(|| Utc::now().timestamp());
         validate_timestamp(saved_at)?;
@@ -29,16 +46,41 @@ impl V2Store {
             tags: request.tags,
         };
 
-        self.commit_item_mutation(&item_id, move |library, projection, prefix| {
-            if projection.items.contains_key(&seed.item_id) {
-                return Err(StoreError::InvalidInput(
-                    "generated item identity already exists".into(),
-                ));
+        let mut connection = self.pool.acquire().await?;
+        sqlx::query("BEGIN IMMEDIATE")
+            .execute(&mut *connection)
+            .await?;
+        let result = async {
+            let item = apply_item_mutation(
+                &mut connection,
+                &item_id,
+                move |library, projection, prefix| {
+                    if projection.items.contains_key(&seed.item_id) {
+                        return Err(StoreError::InvalidInput(
+                            "generated item identity already exists".into(),
+                        ));
+                    }
+                    library.create_item(&seed, &format!("{prefix}/create"))?;
+                    Ok(())
+                },
+            )
+            .await?;
+            if let Some(provider) = enrichment_provider {
+                queue_enrichment_on_connection(&mut connection, &item_id, provider).await?;
             }
-            library.create_item(&seed, &format!("{prefix}/create"))?;
-            Ok(())
-        })
-        .await
+            Ok(item)
+        }
+        .await;
+        match result {
+            Ok(item) => {
+                sqlx::query("COMMIT").execute(&mut *connection).await?;
+                Ok(item)
+            }
+            Err(error) => {
+                let _ = sqlx::query("ROLLBACK").execute(&mut *connection).await;
+                Err(error)
+            }
+        }
     }
 
     pub async fn edit_item(&self, request: EditItemRequest) -> StoreResult<StoredItem> {
@@ -193,7 +235,7 @@ impl V2Store {
     }
 }
 
-async fn apply_item_mutation<F>(
+pub(crate) async fn apply_item_mutation<F>(
     connection: &mut SqliteConnection,
     item_id: &str,
     mutate: F,

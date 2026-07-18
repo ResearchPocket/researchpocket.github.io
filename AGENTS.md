@@ -83,7 +83,11 @@ The target CLI is:
 ```text
 research init
 research import <v1|pocket|bookmarks|json|csv> <source>
-research add <url>
+research add <url> [--enrich direct|firecrawl]
+research enrich configure <direct|firecrawl>
+research enrich status
+research enrich run [<item-id>]
+research enrich disable
 research capture install
 research capture status
 research capture uninstall
@@ -125,6 +129,11 @@ These rules are hard requirements, not implementation suggestions.
   batch or an update batch without its corresponding local projection.
 - Metadata retrieval is asynchronous and retryable. A failed or offline fetch
   must never prevent the URL from being saved.
+- Enrichment jobs record exact missing-field revision preconditions and use a
+  short-lived transactional lease before network access. Human clears, explicit
+  empty values, and concurrent human revisions must win over fetched metadata;
+  concurrent local processes must not duplicate a provider request while a
+  lease is active.
 - V1 imports are read-only with respect to the source database, are idempotent,
   and create a new V2 library in the platform data directory. Ignore credentials
   found in a V1 database.
@@ -137,15 +146,23 @@ These rules are hard requirements, not implementation suggestions.
 - The capture URI is versioned and append-only. Accept only the exact route,
   allowlisted authored fields, and an absolute HTTP(S) target. Reject unknown,
   malformed, duplicated singleton, or oversized input before mutation.
+- Version 1 accepts URL/title plus the existing authored capture fields. Version
+  2 additionally accepts bounded excerpt and language values read from the
+  already-loaded browser DOM. The URI never selects an enrichment provider.
 - Bind the resolved executable and local data directory during installation.
   Never accept a database path, provider, repository coordinate, credential,
   executable option, or shell fragment from the URI.
 - Treat every decoded value as data without shell interpolation. Registration
   and unregistration are repeatable, per-user operations and do not require
   administrator access.
-- A capture commits locally and queues one normal immutable update. It does not
-  fetch metadata, read a GitHub token, run synchronization, or depend on a
-  notification succeeding.
+- A capture commits locally and queues one normal immutable update before any
+  optional network work. If local configuration enables enrichment, its durable
+  local-only job is created in that same transaction and runs only after commit.
+  Provider failure must leave the save usable and retryable; successful eligible
+  metadata may create one later low-priority enrichment update.
+- Capture never reads a GitHub token, runs synchronization, accepts credentials
+  through the URI, or depends on a fetch or notification succeeding. Firecrawl
+  is explicit and is called through its narrow REST endpoint, not an SDK.
 
 ### Application-level convergence
 
