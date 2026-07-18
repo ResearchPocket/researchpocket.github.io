@@ -9,6 +9,9 @@ import {
   browserDatabase,
   type BrowserDatabase,
   type PersistedBatch,
+  type PersistedChangeField,
+  type PersistedChangeKind,
+  type PersistedChangeSummary,
   type PersistedDeferred,
   type PersistedItem,
   type PersistedLibraryMeta,
@@ -24,9 +27,24 @@ export interface LibraryState {
   initialized: boolean;
   loading: boolean;
   items: LibraryItem[];
+  pendingChanges: PendingSyncChange[];
   pendingCount: number;
   status: string;
   error: string | null;
+}
+
+export interface PendingSyncChange {
+  path: string;
+  enqueuedAt: string;
+  attempts: number;
+  lastErrorKind: string | null;
+  kind: PersistedChangeKind | "queued";
+  itemId: string | null;
+  label: string;
+  fields: PersistedChangeField[];
+  favorite: boolean | null;
+  addedTags: string[];
+  removedTags: string[];
 }
 
 export interface AddItemInput {
@@ -125,6 +143,7 @@ class LibraryRepository {
     initialized: false,
     loading: true,
     items: [],
+    pendingChanges: [],
     pendingCount: 0,
     status: "Opening your private library…",
     error: null,
@@ -211,11 +230,6 @@ class LibraryRepository {
   }
 
   async edit(itemId: string, input: EditItemInput): Promise<void> {
-    const database = await browserDatabase();
-    const current = await database.get("items", itemId);
-    if (!current) {
-      throw new Error("That save no longer exists in this browser library.");
-    }
     const mutation: Record<string, unknown> = { type: "edit", item_id: itemId };
     if (input.url !== undefined) mutation.url = input.url;
     if (input.title !== undefined) mutation.title = textUpdate(input.title);
@@ -226,14 +240,10 @@ class LibraryRepository {
     }
     if (input.favorite !== undefined) mutation.favorite = input.favorite;
     if (input.language !== undefined) mutation.language = textUpdate(input.language);
-    if (input.tags !== undefined) {
-      const nextTags = exactTags(input.tags);
-      const currentTags = new Set(current.tags);
-      const requestedTags = new Set(nextTags);
-      mutation.add_tags = nextTags.filter((tag) => !currentTags.has(tag));
-      mutation.remove_tags = current.tags.filter((tag) => !requestedTags.has(tag));
-    }
-    await this.commitMutation(mutation);
+    await this.commitMutation(
+      mutation,
+      input.tags === undefined ? undefined : exactTags(input.tags),
+    );
   }
 
   async remove(itemId: string): Promise<void> {
@@ -490,9 +500,17 @@ class LibraryRepository {
     await this.afterCommit("Remote changes applied");
   }
 
-  private async commitMutation(mutation: Record<string, unknown>): Promise<void> {
+  private async commitMutation(
+    mutation: Record<string, unknown>,
+    targetTags?: string[],
+  ): Promise<void> {
+    let committed = false;
     await this.write(async (database) => {
       const persisted = await readPersisted(database);
+      const itemId = mutationItemId(mutation);
+      const beforeItem = await database.get("items", itemId);
+      const normalizedMutation = normalizeMutation(mutation, beforeItem, targetTags);
+      if (!normalizedMutation) return;
       await ensureWasm();
       const now = new Date().toISOString();
       const result = JSON.parse(
@@ -503,7 +521,7 @@ class LibraryRepository {
           persisted.meta.deviceId,
           persisted.meta.nextSequence,
           now,
-          JSON.stringify(mutation),
+          JSON.stringify(normalizedMutation),
         ),
       ) as MutationResult;
       const identity = parseEnvelope(result.envelope);
@@ -520,12 +538,15 @@ class LibraryRepository {
         nextSequence: incrementSequence(persisted.meta.nextSequence),
       };
       const items = materializeProjection(result.projection);
+      const afterItem = items.find((item) => item.id === itemId);
+      const summary = summarizeMutation(normalizedMutation, beforeItem, afterItem);
       const batch = batchRecord(path, result.envelope, identity, "local", now);
       const outbox: PersistedOutbox = {
         path,
         enqueuedAt: now,
         attempts: 0,
         lastErrorKind: null,
+        summary,
       };
       const transaction = database.transaction(
         ["meta", "state", "items", "batches", "outbox"],
@@ -542,12 +563,15 @@ class LibraryRepository {
         await transaction.objectStore("batches").add(batch);
         await transaction.objectStore("outbox").add(outbox);
         await transaction.done;
+        committed = true;
       } catch (error) {
         abortTransaction(transaction);
         throw error;
       }
     });
-    await this.afterCommit("Saved offline — queued for synchronization");
+    if (committed) {
+      await this.afterCommit("Saved offline — queued for synchronization");
+    }
   }
 
   private async recordSyncResult(errorKind: string | null): Promise<void> {
@@ -573,6 +597,7 @@ class LibraryRepository {
           initialized: false,
           loading: false,
           items: [],
+          pendingChanges: [],
           pendingCount: 0,
           status: "Create an offline library to begin",
           error: null,
@@ -580,15 +605,18 @@ class LibraryRepository {
         this.emit();
         return;
       }
-      const [items, pendingCount] = await Promise.all([
+      const [items, outbox] = await Promise.all([
         database.getAll("items"),
-        database.count("outbox"),
+        database.getAll("outbox"),
       ]);
       items.sort(compareItems);
+      const pendingChanges = materializePendingChanges(outbox, items);
+      const pendingCount = pendingChanges.length;
       this.state = {
         initialized: true,
         loading: false,
         items,
+        pendingChanges,
         pendingCount,
         status: pendingCount === 0 ? "All changes are stored locally" : `${pendingCount} change${pendingCount === 1 ? "" : "s"} waiting to sync`,
         error: null,
@@ -731,6 +759,207 @@ function materializeItem(item: RawProjection["items"][number]): PersistedItem {
     tags: [...item.tags],
     deleted: item.state === "deleted",
   };
+}
+
+function mutationItemId(mutation: Record<string, unknown>): string {
+  const itemId = mutation.item_id;
+  if (typeof itemId !== "string" || itemId.length === 0) {
+    throw new Error("A browser mutation is missing its item identity.");
+  }
+  return itemId;
+}
+
+function mutationKind(mutation: Record<string, unknown>): PersistedChangeKind {
+  const kind = mutation.type;
+  if (kind === "create" || kind === "edit" || kind === "delete" || kind === "restore") {
+    return kind;
+  }
+  throw new Error("A browser mutation has an unsupported change type.");
+}
+
+function normalizeMutation(
+  mutation: Record<string, unknown>,
+  beforeItem: PersistedItem | undefined,
+  targetTags?: string[],
+): Record<string, unknown> | null {
+  const kind = mutationKind(mutation);
+  if (kind !== "edit") return mutation;
+  if (!beforeItem) {
+    throw new Error("That save no longer exists in this browser library.");
+  }
+
+  const normalized = { ...mutation };
+  if (normalized.url === beforeItem.url) delete normalized.url;
+  removeUnchangedTextUpdate(normalized, "title", beforeItem.title);
+  removeUnchangedTextUpdate(normalized, "excerpt", beforeItem.excerpt);
+  removeUnchangedTextUpdate(normalized, "note", beforeItem.note);
+  removeUnchangedTextUpdate(normalized, "language", beforeItem.language);
+  if (normalized.favorite === beforeItem.favorite) delete normalized.favorite;
+
+  if (!("note" in normalized)) delete normalized.expected_note;
+
+  if (targetTags !== undefined) {
+    const currentTags = new Set(beforeItem.tags);
+    const requestedTags = new Set(targetTags);
+    const addedTags = targetTags.filter((tag) => !currentTags.has(tag));
+    const removedTags = beforeItem.tags.filter((tag) => !requestedTags.has(tag));
+    if (addedTags.length > 0) normalized.add_tags = addedTags;
+    else delete normalized.add_tags;
+    if (removedTags.length > 0) normalized.remove_tags = removedTags;
+    else delete normalized.remove_tags;
+  }
+
+  const hasChange = Object.keys(normalized).some(
+    (key) => key !== "type" && key !== "item_id",
+  );
+  return hasChange ? normalized : null;
+}
+
+function removeUnchangedTextUpdate(
+  mutation: Record<string, unknown>,
+  field: "title" | "excerpt" | "note" | "language",
+  current: string | null,
+): void {
+  if (!(field in mutation)) return;
+  if (textUpdateValue(mutation[field]) === current) delete mutation[field];
+}
+
+function textUpdateValue(value: unknown): string | null {
+  if (typeof value !== "object" || value === null || !("type" in value)) {
+    throw new Error("A browser text change is malformed.");
+  }
+  const update = value as Partial<TextUpdate>;
+  if (update.type === "clear") return null;
+  if (update.type === "set" && typeof update.value === "string") return update.value;
+  throw new Error("A browser text change is malformed.");
+}
+
+function summarizeMutation(
+  mutation: Record<string, unknown>,
+  beforeItem: PersistedItem | undefined,
+  afterItem: PersistedItem | undefined,
+): PersistedChangeSummary {
+  const kind = mutationKind(mutation);
+  const itemId = mutationItemId(mutation);
+  if (!afterItem) {
+    throw new Error("The domain core omitted the changed item from its projection.");
+  }
+
+  const fields: PersistedChangeField[] = [];
+  let favorite: boolean | null = null;
+  let addedTags: string[] = [];
+  let removedTags: string[] = [];
+
+  if (kind === "create") {
+    fields.push("url");
+    if (afterItem.title) fields.push("title");
+    if (afterItem.excerpt) fields.push("excerpt");
+    if (afterItem.note) fields.push("note");
+    if (afterItem.language) fields.push("language");
+    favorite = afterItem.favorite ? true : null;
+    addedTags = [...afterItem.tags];
+  } else if (kind === "edit") {
+    if (!beforeItem) {
+      throw new Error("The edited item is missing its previous projection.");
+    }
+    for (const field of ["url", "title", "excerpt", "note", "language"] as const) {
+      if (beforeItem[field] !== afterItem[field]) fields.push(field);
+    }
+    if (beforeItem.favorite !== afterItem.favorite) favorite = afterItem.favorite;
+    addedTags = afterItem.tags.filter((tag) => !beforeItem.tags.includes(tag));
+    removedTags = beforeItem.tags.filter((tag) => !afterItem.tags.includes(tag));
+  }
+
+  return {
+    version: 1,
+    kind,
+    itemId,
+    fields,
+    favorite,
+    addedTags,
+    removedTags,
+  };
+}
+
+function materializePendingChanges(
+  outbox: PersistedOutbox[],
+  items: PersistedItem[],
+): PendingSyncChange[] {
+  const itemsById = new Map(items.map((item) => [item.id, item]));
+  return [...outbox]
+    .sort(
+      (left, right) =>
+        left.enqueuedAt.localeCompare(right.enqueuedAt) || left.path.localeCompare(right.path),
+    )
+    .map((entry) => {
+      const summary = isPersistedChangeSummary(entry.summary) ? entry.summary : null;
+      if (!summary) {
+        return {
+          path: entry.path,
+          enqueuedAt: entry.enqueuedAt,
+          attempts: entry.attempts,
+          lastErrorKind: entry.lastErrorKind,
+          kind: "queued",
+          itemId: null,
+          label: "Earlier local change",
+          fields: [],
+          favorite: null,
+          addedTags: [],
+          removedTags: [],
+        };
+      }
+      const item = itemsById.get(summary.itemId);
+      return {
+        path: entry.path,
+        enqueuedAt: entry.enqueuedAt,
+        attempts: entry.attempts,
+        lastErrorKind: entry.lastErrorKind,
+        kind: summary.kind,
+        itemId: summary.itemId,
+        label: pendingItemLabel(item),
+        fields: [...summary.fields],
+        favorite: summary.favorite,
+        addedTags: [...summary.addedTags],
+        removedTags: [...summary.removedTags],
+      };
+    });
+}
+
+function isPersistedChangeSummary(value: unknown): value is PersistedChangeSummary {
+  if (typeof value !== "object" || value === null) return false;
+  const summary = value as Partial<PersistedChangeSummary>;
+  const kinds: PersistedChangeKind[] = ["create", "edit", "delete", "restore"];
+  const fields: PersistedChangeField[] = [
+    "url",
+    "title",
+    "excerpt",
+    "note",
+    "language",
+  ];
+  return (
+    summary.version === 1 &&
+    kinds.includes(summary.kind as PersistedChangeKind) &&
+    typeof summary.itemId === "string" &&
+    summary.itemId.length > 0 &&
+    Array.isArray(summary.fields) &&
+    summary.fields.every((field) => fields.includes(field)) &&
+    (summary.favorite === null || typeof summary.favorite === "boolean") &&
+    Array.isArray(summary.addedTags) &&
+    summary.addedTags.every((tag) => typeof tag === "string") &&
+    Array.isArray(summary.removedTags) &&
+    summary.removedTags.every((tag) => typeof tag === "string")
+  );
+}
+
+function pendingItemLabel(item: PersistedItem | undefined): string {
+  const title = item?.title?.trim();
+  if (title) return title;
+  if (!item) return "Saved link";
+  try {
+    return new URL(item.url).hostname.replace(/^www\./, "");
+  } catch {
+    return "Saved link";
+  }
 }
 
 function parseProjection(json: string): RawProjection {

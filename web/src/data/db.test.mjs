@@ -52,6 +52,15 @@ test("a browser library commit survives reopen and an interrupted replacement ro
     enqueuedAt: "2026-07-11T00:00:01.000Z",
     attempts: 0,
     lastErrorKind: null,
+    summary: {
+      version: 1,
+      kind: "create",
+      itemId: item.id,
+      fields: ["url", "title", "note"],
+      favorite: true,
+      addedTags: ["reference"],
+      removedTags: [],
+    },
   };
   const syncConfig = {
     key: "github",

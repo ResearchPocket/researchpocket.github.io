@@ -9,6 +9,7 @@ import {
 } from "react";
 import {
   type LibraryState,
+  type PendingSyncChange,
   libraryRepository,
 } from "./data/library.ts";
 import {
@@ -44,6 +45,7 @@ const EMPTY_LIBRARY_STATE: LibraryState = {
   initialized: false,
   items: [],
   loading: true,
+  pendingChanges: [],
   pendingCount: 0,
   status: "opening",
 };
@@ -349,7 +351,11 @@ export function App() {
       <main id="workspace" tabIndex={-1}>
         <h1 className="sr-only">ResearchPocket owner library</h1>
 
-        <SyncPanel hidden={view !== "sync"} state={syncState} />
+        <SyncPanel
+          hidden={view !== "sync"}
+          pendingChanges={libraryState.pendingChanges}
+          state={syncState}
+        />
 
         <section
           aria-busy={searchPending}
@@ -727,9 +733,11 @@ function Welcome({
 
 function SyncPanel({
   hidden,
+  pendingChanges,
   state,
 }: {
   hidden: boolean;
+  pendingChanges: PendingSyncChange[];
   state: BrowserSyncState;
 }) {
   const [repository, setRepository] = useState("");
@@ -803,86 +811,141 @@ function SyncPanel({
         ) : null}
       </div>
 
-      {!remote ? (
-        <form className="sync-form" onSubmit={(event) => void connect(event)}>
-          <label className="field">
-            <span>Private data repository</span>
-            <input
-              autoCapitalize="none"
-              autoComplete="off"
-              id="sync-repository"
-              name="repository"
-              onChange={(event) => setRepository(event.target.value)}
-              placeholder="owner/private-repository"
-              required
-              spellCheck={false}
-              value={repository}
-            />
-          </label>
-          <label className="field">
-            <span>Branch <small>default branch when blank</small></span>
-            <input
-              autoCapitalize="none"
-              autoComplete="off"
-              id="sync-branch"
-              name="branch"
-              onChange={(event) => setBranch(event.target.value)}
-              placeholder="main"
-              spellCheck={false}
-              value={branch}
-            />
-          </label>
-          <TokenFields />
-          {error ? <p className="sync-error" role="alert">{error}</p> : null}
-          <button className="primary-button" disabled={state.syncing} type="submit">
-            {state.syncing ? "Connecting…" : "Connect private sync"}
-          </button>
-        </form>
-      ) : !state.credentialAvailable ? (
-        <form className="sync-form" onSubmit={(event) => void unlock(event)}>
-          <p>
-            Repository details stay on this device, but the credential does not.
-            Enter it again to pull and push queued changes.
-          </p>
-          <TokenFields />
-          {error ? <p className="sync-error" role="alert">{error}</p> : null}
-          <button className="primary-button" disabled={state.syncing} type="submit">
-            {state.syncing ? "Synchronizing…" : "Unlock and sync"}
-          </button>
-        </form>
-      ) : (
-        <div className="sync-controls">
-          <p>
-            Your credential is active only in this browser context and never enters
-            the library, an API URL, or the service-worker cache.
-          </p>
-          {state.lastCycle ? (
-            <dl className="sync-counts">
-              <div><dt>Downloaded</dt><dd>{state.lastCycle.downloaded}</dd></div>
-              <div><dt>Uploaded</dt><dd>{state.lastCycle.uploaded}</dd></div>
-              <div><dt>Pending</dt><dd>{state.lastCycle.pending}</dd></div>
-            </dl>
-          ) : null}
-          {error ? <p className="sync-error" role="alert">{error}</p> : null}
-          <div className="sync-actions">
-            <button
-              className="primary-button"
-              disabled={state.syncing}
-              onClick={() => void syncNow()}
-              type="button"
-            >
-              {state.syncing ? "Synchronizing…" : "Sync now"}
+      <div className="sync-content">
+        <PendingSyncChanges
+          changes={pendingChanges}
+          hasSynced={Boolean(remote?.lastSuccessAt)}
+          syncing={state.syncing}
+        />
+
+        {!remote ? (
+          <form className="sync-form" onSubmit={(event) => void connect(event)}>
+            <label className="field">
+              <span>Private data repository</span>
+              <input
+                autoCapitalize="none"
+                autoComplete="off"
+                id="sync-repository"
+                name="repository"
+                onChange={(event) => setRepository(event.target.value)}
+                placeholder="owner/private-repository"
+                required
+                spellCheck={false}
+                value={repository}
+              />
+            </label>
+            <label className="field">
+              <span>Branch <small>default branch when blank</small></span>
+              <input
+                autoCapitalize="none"
+                autoComplete="off"
+                id="sync-branch"
+                name="branch"
+                onChange={(event) => setBranch(event.target.value)}
+                placeholder="main"
+                spellCheck={false}
+                value={branch}
+              />
+            </label>
+            <TokenFields />
+            {error ? <p className="sync-error" role="alert">{error}</p> : null}
+            <button className="primary-button" disabled={state.syncing} type="submit">
+              {state.syncing ? "Connecting…" : "Connect private sync"}
             </button>
-            <button
-              className="secondary-button"
-              disabled={state.syncing}
-              onClick={() => browserSync.forgetCredential()}
-              type="button"
-            >
-              Forget token
+          </form>
+        ) : !state.credentialAvailable ? (
+          <form className="sync-form" onSubmit={(event) => void unlock(event)}>
+            <p>
+              Repository details stay on this device, but the credential does not.
+              Enter it again to pull and push queued changes.
+            </p>
+            <TokenFields />
+            {error ? <p className="sync-error" role="alert">{error}</p> : null}
+            <button className="primary-button" disabled={state.syncing} type="submit">
+              {state.syncing ? "Synchronizing…" : "Unlock and sync"}
             </button>
+          </form>
+        ) : (
+          <div className="sync-controls">
+            <p>
+              Your credential is active only in this browser context and never enters
+              the library, an API URL, or the service-worker cache.
+            </p>
+            {state.lastCycle ? (
+              <dl className="sync-counts">
+                <div><dt>Downloaded</dt><dd>{state.lastCycle.downloaded}</dd></div>
+                <div><dt>Uploaded</dt><dd>{state.lastCycle.uploaded}</dd></div>
+              </dl>
+            ) : null}
+            {error ? <p className="sync-error" role="alert">{error}</p> : null}
+            <div className="sync-actions">
+              <button
+                className="primary-button"
+                disabled={state.syncing}
+                onClick={() => void syncNow()}
+                type="button"
+              >
+                {state.syncing ? "Synchronizing…" : "Sync now"}
+              </button>
+              <button
+                className="secondary-button"
+                disabled={state.syncing}
+                onClick={() => browserSync.forgetCredential()}
+                type="button"
+              >
+                Forget token
+              </button>
+            </div>
           </div>
-        </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function PendingSyncChanges({
+  changes,
+  hasSynced,
+  syncing,
+}: {
+  changes: PendingSyncChange[];
+  hasSynced: boolean;
+  syncing: boolean;
+}) {
+  return (
+    <section
+      aria-busy={syncing}
+      aria-labelledby="sync-pending-heading"
+      className="sync-pending"
+    >
+      <div className="sync-pending-heading">
+        <h3 id="sync-pending-heading">Local changes waiting</h3>
+        <span>{pluralize(changes.length, "change")}</span>
+      </div>
+      <p className="sync-pending-help">
+        Outgoing changes stay on this device until GitHub confirms them. Incoming
+        changes are discovered during sync.
+      </p>
+
+      {changes.length > 0 ? (
+        <ol className="sync-change-list">
+          {changes.map((change) => (
+            <li className="sync-change" key={change.path}>
+              <span className="sync-change-kind">{pendingChangeAction(change.kind)}</span>
+              <div className="sync-change-copy">
+                <p>{change.label}</p>
+                <p>{pendingChangeDetails(change)}</p>
+              </div>
+              <time dateTime={change.enqueuedAt}>{formatDateTime(change.enqueuedAt)}</time>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="sync-pending-empty">
+          {hasSynced
+            ? "Everything from this browser is synced."
+            : "No local changes are waiting to sync."}
+        </p>
       )}
     </section>
   );
@@ -1615,6 +1678,67 @@ function readHostname(value: string) {
   }
 }
 
+function pendingChangeAction(kind: PendingSyncChange["kind"]) {
+  switch (kind) {
+    case "create":
+      return "Added";
+    case "edit":
+      return "Edited";
+    case "delete":
+      return "Deleted";
+    case "restore":
+      return "Restored";
+    default:
+      return "Queued";
+  }
+}
+
+function pendingChangeDetails(change: PendingSyncChange) {
+  if (change.kind === "queued") {
+    return "Stored before detailed change labels were available.";
+  }
+  if (change.kind === "delete") {
+    return "Will move this save to deleted items.";
+  }
+  if (change.kind === "restore") {
+    return "Will return this save to active items.";
+  }
+
+  const details: string[] = [];
+  if (change.fields.length > 0) {
+    const fields = change.fields.map(pendingFieldLabel).join(", ");
+    details.push(change.kind === "create" ? `Includes ${fields}` : `Changed ${fields}`);
+  }
+  if (change.favorite !== null) {
+    details.push(
+      change.favorite
+        ? change.kind === "create"
+          ? "Favorite"
+          : "Added to favorites"
+        : "Removed from favorites",
+    );
+  }
+  if (change.addedTags.length > 0) {
+    const tags = change.addedTags.map((tag) => `#${tag}`).join(", ");
+    details.push(change.kind === "create" ? `Tags ${tags}` : `Added ${tags}`);
+  }
+  if (change.removedTags.length > 0) {
+    details.push(`Removed ${change.removedTags.map((tag) => `#${tag}`).join(", ")}`);
+  }
+  return details.join(" · ") || "Local library edit.";
+}
+
+function pendingFieldLabel(field: PendingSyncChange["fields"][number]) {
+  switch (field) {
+    case "url":
+      return "URL";
+    case "note":
+      return "private note";
+    default:
+      return field;
+  }
+}
+
 function formatDate(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
@@ -1623,6 +1747,17 @@ function formatDate(value: string) {
 
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: "medium",
+  }).format(date);
+}
+
+function formatDateTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "Recently";
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
   }).format(date);
 }
 

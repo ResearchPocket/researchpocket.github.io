@@ -508,6 +508,13 @@
   max-width: 56rem;
 }
 
+.sync-content {
+  display: grid;
+  gap: var(--space-6);
+  max-width: 56rem;
+  min-width: 0;
+}
+
 .sync-form .field,
 .capture-form .field {
   align-items: start;
@@ -551,7 +558,7 @@
 
 .sync-counts {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   margin: 0;
 }
 
@@ -574,6 +581,93 @@
   font-size: var(--font-size-lg);
   font-weight: 800;
   margin: 0;
+}
+
+.sync-pending {
+  border-top: var(--rule) solid var(--color-border-strong);
+  min-width: 0;
+  padding-top: var(--space-3);
+}
+
+.sync-pending-heading {
+  align-items: baseline;
+  display: flex;
+  gap: var(--space-3);
+  justify-content: space-between;
+}
+
+.sync-pending-heading h3 {
+  font-size: var(--font-size-md);
+  margin: 0;
+}
+
+.sync-pending-heading > span,
+.sync-pending-help,
+.sync-pending-empty,
+.sync-change-kind,
+.sync-change-copy > p:last-child,
+.sync-change time {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.sync-pending-heading > span {
+  flex: 0 0 auto;
+}
+
+.sync-pending-help {
+  margin: var(--space-1) 0 var(--space-3);
+}
+
+.sync-pending-empty {
+  border-bottom: var(--rule) solid var(--color-border);
+  border-top: var(--rule) solid var(--color-border);
+  margin: 0;
+  padding: var(--space-3) 0;
+}
+
+.sync-change-list {
+  border-top: var(--rule) solid var(--color-border-strong);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.sync-change {
+  align-items: start;
+  border-bottom: var(--rule) solid var(--color-border);
+  display: grid;
+  gap: var(--space-2) var(--space-4);
+  grid-template-columns: 5rem minmax(0, 1fr) max-content;
+  padding: var(--space-3) 0;
+}
+
+.sync-change-kind {
+  font-weight: 750;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.sync-change-copy {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.sync-change-copy > p {
+  margin: 0;
+}
+
+.sync-change-copy > p:first-child {
+  font-size: var(--font-size-sm);
+  font-weight: 750;
+}
+
+.sync-change-copy > p:last-child {
+  margin-top: var(--space-1);
+}
+
+.sync-change time {
+  white-space: nowrap;
 }
 
 .sync-actions {
@@ -1494,6 +1588,25 @@ footer {
 
   .sync-section {
     grid-template-columns: 1fr;
+  }
+
+  .sync-change {
+    grid-template-columns: minmax(0, 1fr) max-content;
+  }
+
+  .sync-change-kind {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .sync-change time {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .sync-change-copy {
+    grid-column: 1 / -1;
+    grid-row: 2;
   }
 
   .library-section {
