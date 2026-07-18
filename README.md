@@ -11,7 +11,7 @@ rather than a conflict resolver.
 
 This is a preview release, not V2 GA. The available workflows and remaining
 boundaries are listed below and in the
-[preview release guide](docs/releases/v2.0.0-preview.3.md).
+[preview release guide](docs/releases/v2.0.0-preview.4.md).
 
 ## Current V2 CLI
 
@@ -44,7 +44,7 @@ data compatibility lives only in the read-only importer.
 
 ## Install the V2 preview
 
-The `v2.0.0-preview.3` release provides archives for Apple Silicon and Intel
+The `v2.0.0-preview.4` release provides archives for Apple Silicon and Intel
 macOS, Linux amd64, and Windows amd64, plus `SHA256SUMS`. Download the archive
 for your platform from the [release page](https://github.com/ResearchPocket/researchpocket.github.io/releases),
 verify it, place `research` (or `research.exe`) somewhere stable on your `PATH`,
@@ -59,7 +59,7 @@ research status
 On macOS, native capture binds the current executable location into its local
 application bridge, so install the binary at its long-term path before running
 `research capture install`. The complete archive names and setup sequence are in
-the [release guide](docs/releases/v2.0.0-preview.3.md).
+the [release guide](docs/releases/v2.0.0-preview.4.md).
 
 ## Build from this repository
 

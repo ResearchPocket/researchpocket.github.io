@@ -203,6 +203,14 @@ Store update batches at:
 sync/v1/ops/<device-uuid>/<zero-padded-sequence>.json
 ```
 
+When a sync flush contains multiple queued batches, clients may transport their
+exact bytes in one immutable content-addressed pack at
+`sync/v1/ops/packs/<device-uuid>/<pack-sha256>.json`. Packing must preserve every
+logical envelope identity, receipt, outbox acknowledgement, and exact retry
+byte. It must not recompute domain state, append to a mutable log, or use Git
+history as compaction. Pack-unaware clients must fail closed rather than ignore
+a recognized packed operation.
+
 Each envelope includes the protocol version, library ID, device ID, durable
 device sequence, causal frontier, creation timestamp, base64 CRDT update, and
 payload hash. Never rewrite an operation file. If a target path already exists,
@@ -217,9 +225,10 @@ documented repository-history rewrite or migration to a new data repository.
 
 Sync must be safe after every local mutation, on application start/exit, through
 `research sync`, and through optional platform scheduling. Pull before push,
-apply all unseen batches, upload queued unique batches, and pull once more after
-a remote race. Never drop queued changes on timeout, rate limit, token expiry,
-process interruption, or browser reload.
+apply all unseen batches, pack the starting outbox into bounded immutable
+transport objects, upload them, and pull once more after a remote race. Never
+drop queued changes on timeout, rate limit, token expiry, process interruption,
+or browser reload.
 
 ## Hosted Editing, Privacy, and Publishing
 

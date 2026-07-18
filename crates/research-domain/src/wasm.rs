@@ -6,7 +6,9 @@ use wasm_bindgen::prelude::*;
 
 use crate::{
     CanonicalProjection, DomainError, DomainResult, ItemSeed, Library, LibraryGenesis,
-    LifecycleState, UpdateEnvelope, identity::validate_uuid_v7,
+    LifecycleState, UpdateEnvelope,
+    identity::validate_uuid_v7,
+    pack::{create_operation_pack, unpack_operation_pack},
 };
 
 #[derive(Serialize)]
@@ -197,6 +199,23 @@ pub fn validate_sync_genesis(genesis_json: &str) -> Result<String, JsValue> {
         .map_err(js_error)?;
     genesis.validate().map_err(js_error)?;
     Ok(genesis.library_id)
+}
+
+/// Build one deterministic immutable operation pack from envelope JSON strings.
+#[wasm_bindgen(js_name = createOperationPack)]
+pub fn create_operation_pack_wasm(envelope_json_array: &str) -> Result<String, JsValue> {
+    let envelopes: Vec<String> = serde_json::from_str(envelope_json_array)
+        .map_err(DomainError::from)
+        .map_err(js_error)?;
+    let artifact = create_operation_pack(&envelopes).map_err(js_error)?;
+    serde_json::to_string(&artifact).map_err(|error| js_error(error.into()))
+}
+
+/// Validate and unpack one immutable operation pack into exact envelope JSON strings.
+#[wasm_bindgen(js_name = unpackOperationPack)]
+pub fn unpack_operation_pack_wasm(path: &str, pack_json: &str) -> Result<String, JsValue> {
+    let artifact = unpack_operation_pack(path, pack_json).map_err(js_error)?;
+    serde_json::to_string(&artifact).map_err(|error| js_error(error.into()))
 }
 
 fn initialize(peer_id: &str) -> DomainResult<String> {

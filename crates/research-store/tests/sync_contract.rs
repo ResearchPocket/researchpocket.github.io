@@ -1,7 +1,116 @@
+use research_domain::create_operation_pack;
 use research_store::{
     CreateItemRequest, EditItemRequest, ListQuery, OptionalTextUpdate, RemoteBatchDisposition,
     SearchQuery, StoreError, V2Store,
 };
+
+#[tokio::test]
+async fn one_operation_pack_applies_and_acknowledges_several_exact_updates() {
+    let root = tempfile::tempdir().expect("temporary test root");
+    let sender = V2Store::init(root.path().join("sender"))
+        .await
+        .expect("sender store");
+    let receiver = V2Store::init(root.path().join("receiver"))
+        .await
+        .expect("receiver store");
+    let identity = sender.sync_identity().await.expect("sender identity");
+    receiver
+        .adopt_library_id_if_pristine(&identity.library_id)
+        .await
+        .expect("receiver adopts library");
+
+    let item = sender
+        .create_item(CreateItemRequest {
+            url: "https://example.com/packed".into(),
+            title: Some("Before packing".into()),
+            excerpt: None,
+            favorite: false,
+            language: None,
+            saved_at: Some(1_700_000_000),
+            note: String::new(),
+            tags: vec![],
+        })
+        .await
+        .expect("create item");
+    sender
+        .edit_item(EditItemRequest {
+            item_id: item.id.clone(),
+            favorite: Some(true),
+            ..EditItemRequest::default()
+        })
+        .await
+        .expect("favorite item");
+    sender
+        .edit_item(EditItemRequest {
+            item_id: item.id,
+            title: Some(OptionalTextUpdate::Set("After packing".into())),
+            ..EditItemRequest::default()
+        })
+        .await
+        .expect("retitle item");
+
+    let pending = sender.pending_batches().await.expect("sender outbox");
+    assert_eq!(pending.len(), 3);
+    let artifact = create_operation_pack(
+        &pending
+            .iter()
+            .map(|batch| batch.envelope_json.clone())
+            .collect::<Vec<_>>(),
+    )
+    .expect("build operation pack");
+    let pack_blob_sha = "a".repeat(40);
+
+    let applied = receiver
+        .receive_remote_pack(&artifact.path, &pack_blob_sha, artifact.json.as_bytes())
+        .await
+        .expect("apply pack");
+    assert_eq!(applied.member_count, 3);
+    assert_eq!(applied.applied, 3);
+    assert_eq!(applied.already_applied, 0);
+    assert_eq!(applied.acknowledged_outbox, 0);
+    let received = receiver
+        .list(ListQuery::default())
+        .await
+        .expect("receiver projection");
+    assert_eq!(received.items.len(), 1);
+    assert!(received.items[0].favorite);
+    assert_eq!(received.items[0].title.as_deref(), Some("After packing"));
+
+    let acknowledged = sender
+        .receive_remote_pack(&artifact.path, &pack_blob_sha, artifact.json.as_bytes())
+        .await
+        .expect("acknowledge packed upload");
+    assert_eq!(acknowledged.already_applied, 3);
+    assert_eq!(acknowledged.acknowledged_outbox, 3);
+    assert!(
+        sender
+            .pending_batches()
+            .await
+            .expect("drained sender outbox")
+            .is_empty()
+    );
+
+    let before_tamper = receiver
+        .list(ListQuery::default())
+        .await
+        .expect("projection before tamper");
+    let mut tampered = artifact.json.into_bytes();
+    let last = tampered.last_mut().expect("non-empty pack");
+    *last = if *last == b'}' { b']' } else { b'}' };
+    assert!(
+        receiver
+            .receive_remote_pack(&artifact.path, &"b".repeat(40), &tampered)
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        receiver
+            .list(ListQuery::default())
+            .await
+            .expect("projection after rejected tamper"),
+        before_tamper
+    );
+}
 
 #[tokio::test]
 async fn remote_replay_is_exact_idempotent_and_convergent() {

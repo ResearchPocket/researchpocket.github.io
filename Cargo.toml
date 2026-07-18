@@ -1,6 +1,6 @@
 [package]
 name = "research"
-version = "2.0.0-preview.3"
+version = "2.0.0-preview.4"
 edition = "2024"
 rust-version = "1.94"
 keywords = ["bookmarks", "reading-list", "local-first", "knowledge", "cli"]

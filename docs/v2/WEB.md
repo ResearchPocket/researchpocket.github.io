@@ -33,11 +33,12 @@ favorite or tag change, delete, and restore without decoding the opaque Loro
 payload or duplicating note and excerpt values. Older queued rows without a
 summary remain visible as earlier local changes until acknowledged.
 
-The WASM boundary also accepts a set of remote immutable envelopes in one Loro
-session and reports any causally deferred indices. The browser GitHub adapter
-discovers exact protocol blobs, validates immutable genesis, applies unseen
-envelopes through this boundary, serializes Contents API creates, and pulls once
-more after uploads or branch-head races.
+The WASM boundary also validates immutable operation packs and accepts their
+exact embedded envelopes in one Loro session, reporting any causally deferred
+indices. The browser GitHub adapter discovers exact protocol blobs, validates
+immutable genesis and containers, applies unseen envelopes through this
+boundary, serializes Contents API creates, and pulls once more after uploads or
+branch-head races.
 
 ## Browser persistence
 
@@ -113,13 +114,24 @@ unavailable, read-only, mismatched-library, malformed, or unsupported remotes
 before uploading queued work.
 
 One browser upload loop runs under a Web Lock. A cycle validates immutable
-genesis, discovers the Git tree, downloads and applies every unseen operation,
-uploads unchanged outbox bytes one at a time, and pulls again. Existing identical
-paths acknowledge the outbox; byte-different paths stop as integrity failures.
-`409`, `422`, ambiguous transport errors, rate limits, and server failures leave
-the exact outbox intact for bounded or later retry. Visible owner tabs request a
-cycle after local changes, on startup, focus, network recovery, and every 60
-seconds.
+genesis, discovers the Git tree, downloads and applies every unseen direct or
+packed operation, groups the exact starting outbox bytes into one bounded
+content-addressed pack when more than one change is waiting, uploads it, and
+pulls again. A single pending envelope remains a direct operation file. Existing
+identical paths acknowledge every represented outbox row; byte-different paths
+stop as integrity failures. `409`, `422`, ambiguous transport errors, rate
+limits, and server failures leave the exact outbox intact for bounded or later
+retry. Changes created after pack preparation wait for the next cycle. Visible
+owner tabs coalesce local-change notifications through a five-second quiet
+window so a normal curation burst shares one pack. Manual sync, startup, focus,
+and network recovery remain immediate, and visible tabs still refresh every 60
+seconds. A local change arriving during a running cycle guarantees a follow-up
+flush instead of waiting for the periodic timer.
+
+Once a pack-enabled client has uploaded the first operation pack, every browser
+and native client for that private library must run a pack-aware release. Older
+preview clients encounter the recognized unsupported object and stop rather
+than silently miss changes.
 
 An edit form carries the note value it originally displayed. If synchronization
 or another tab changes that note before submission, the shared WASM mutation

@@ -118,3 +118,11 @@ separate private data repository. A pristine CLI or browser device can then
 adopt the repository's library identity and restore all saves. Never synchronize
 `library.sqlite3` through Git; Git merge behavior does not resolve library
 changes.
+
+Pack-aware releases group multiple exact queued envelopes into one immutable
+operation pack during a normal sync flush. Existing direct operation files need
+no migration or rewrite. After any pack has been uploaded, upgrade every CLI and
+hosted browser client for that library before its next sync; older preview
+clients intentionally fail closed on the unsupported packed object. A fresh
+pack-aware client restores both direct files and pack members through the same
+logical receipts.

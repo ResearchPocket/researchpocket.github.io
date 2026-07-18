@@ -1,5 +1,7 @@
 import initWasm, {
+  createOperationPack,
   createSyncGenesis,
+  unpackOperationPack,
   validateSyncGenesis,
 } from "../generated/research_domain";
 
@@ -8,6 +10,7 @@ import {
   GitHubClient,
   GitHubSyncError,
   OPS_PREFIX,
+  PACKS_PREFIX,
   parseRepository,
   type GitHubRemote,
   type ProtocolTree,
@@ -17,6 +20,7 @@ import {
   libraryRepository,
   type PendingSyncBatch,
   type RemoteEnvelopeInput,
+  type RemoteOperationPackInput,
   type SyncConfiguration,
 } from "./library.ts";
 
@@ -57,11 +61,28 @@ interface PullStats {
   acknowledged: number;
 }
 
+interface OperationPackArtifact {
+  path: string;
+  json: string;
+  member_envelopes: string[];
+}
+
+interface PendingUpload {
+  path: string;
+  json: string;
+  members: PendingSyncBatch[];
+  packed: boolean;
+}
+
 const SYNC_LOCK = "researchpocket-v2-github-sync";
 const LIBRARY_CHANNEL = "researchpocket-v2-state";
 const SESSION_TOKEN_KEY = "researchpocket-v2-github-token";
 const MAX_UPLOAD_ATTEMPTS = 4;
 const PERIODIC_SYNC_MS = 60_000;
+const LOCAL_CHANGE_SYNC_DELAY_MS = 5_000;
+const MAX_PACK_MEMBERS = 1_000;
+const MAX_PACK_BYTES = 20 * 1024 * 1024;
+const PACK_JSON_OVERHEAD_BYTES = 1_024;
 
 let wasmPromise: Promise<unknown> | undefined;
 
@@ -83,13 +104,15 @@ class BrowserSyncService {
   #token: string | null = readSessionToken();
   private retryNotBefore = 0;
   private running: Promise<void> | null = null;
+  private localChangeTimer: number | null = null;
+  private rerunAfterCurrentSync = false;
   private readonly listeners = new Set<(state: BrowserSyncState) => void>();
   private readonly channel = new BroadcastChannel(LIBRARY_CHANNEL);
 
   constructor() {
     this.channel.addEventListener("message", () => {
       if (this.#token && this.state.configuration && document.visibilityState === "visible") {
-        void this.requestSync("local change");
+        this.scheduleLocalChangeSync();
       }
     });
     window.addEventListener("focus", () => void this.requestSync("window focus"));
@@ -198,7 +221,10 @@ class BrowserSyncService {
   }
 
   private async requestSync(reason: string, force = false): Promise<void> {
-    if (this.running) return this.running;
+    if (this.running) {
+      if (reason === "local changes") this.rerunAfterCurrentSync = true;
+      return this.running;
+    }
     if (!this.#token || !this.state.configuration) return;
     if (!navigator.onLine) {
       const error = new GitHubSyncError(
@@ -241,10 +267,26 @@ class BrowserSyncService {
         if (force) throw error;
       })
       .finally(() => {
+        const rerun = this.rerunAfterCurrentSync;
+        this.rerunAfterCurrentSync = false;
         this.patch({ syncing: false });
         this.running = null;
+        if (rerun) this.scheduleLocalChangeSync(0);
       });
     return this.running;
+  }
+
+  private scheduleLocalChangeSync(delay = LOCAL_CHANGE_SYNC_DELAY_MS): void {
+    if (this.localChangeTimer !== null) window.clearTimeout(this.localChangeTimer);
+    this.localChangeTimer = window.setTimeout(() => {
+      this.localChangeTimer = null;
+      void libraryRepository
+        .pendingSyncBatches()
+        .then((pending) => {
+          if (pending.length > 0) return this.requestSync("local changes");
+        })
+        .catch(() => undefined);
+    }, delay);
   }
 
   private async withSyncLock(
@@ -321,9 +363,11 @@ class BrowserSyncService {
     await client.inspectRepository(remote.owner, remote.repository);
     let pull = await this.pullRemote(client, remote);
     let uploaded = 0;
-    for (const batch of await libraryRepository.pendingSyncBatches()) {
-      const upload = await this.ensureUploaded(client, remote, batch);
-      uploaded += upload.created ? 1 : 0;
+    const pendingAtFlushStart = await libraryRepository.pendingSyncBatches();
+    const uploads = await buildPendingUploads(pendingAtFlushStart);
+    for (const pending of uploads) {
+      const upload = await this.ensureUploaded(client, remote, pending);
+      uploaded += upload.created ? pending.members.length : 0;
       pull = addPullStats(pull, upload.pull);
     }
     pull = addPullStats(pull, await this.pullRemote(client, remote));
@@ -353,6 +397,8 @@ class BrowserSyncService {
       .filter(([path]) => path.startsWith(OPS_PREFIX))
       .sort(([left], [right]) => left.localeCompare(right));
     const inputs: RemoteEnvelopeInput[] = [];
+    const packs: RemoteOperationPackInput[] = [];
+    let downloaded = 0;
     for (const [path, blobSha] of operations) {
       const observation = await libraryRepository.remoteObservation(path);
       if (observation) {
@@ -364,14 +410,18 @@ class BrowserSyncService {
         }
         continue;
       }
-      inputs.push({
-        path,
-        blobSha,
-        envelopeJson: await client.downloadText(remote, blobSha),
-      });
+      const json = await client.downloadText(remote, blobSha);
+      if (path.startsWith(PACKS_PREFIX)) {
+        const pack = await unpackRemotePack(path, blobSha, json);
+        packs.push(pack);
+        downloaded += 1;
+      } else {
+        inputs.push({ path, blobSha, envelopeJson: json });
+        downloaded += 1;
+      }
     }
     const pendingBefore = (await libraryRepository.pendingSyncBatches()).length;
-    await this.applyRemoteUpdates(inputs);
+    const applied = await this.applyRemoteUpdates(inputs, packs);
     if ((await libraryRepository.deferredSyncCount()) > 0) {
       throw new GitHubSyncError(
         "Remote updates are missing a causal predecessor. No local changes were uploaded.",
@@ -381,8 +431,8 @@ class BrowserSyncService {
     const pendingAfter = (await libraryRepository.pendingSyncBatches()).length;
     return {
       remoteSeen: operations.length,
-      downloaded: inputs.length,
-      applied: inputs.length,
+      downloaded,
+      applied,
       acknowledged: Math.max(0, pendingBefore - pendingAfter),
     };
   }
@@ -424,43 +474,47 @@ class BrowserSyncService {
   private async ensureUploaded(
     client: GitHubClient,
     remote: GitHubRemote,
-    batch: PendingSyncBatch,
+    pending: PendingUpload,
   ): Promise<{ created: boolean; pull: PullStats }> {
     let racePull = emptyPullStats();
     for (let attempt = 0; attempt < MAX_UPLOAD_ATTEMPTS; attempt += 1) {
       const tree = await client.discover(remote);
-      const existingSha = tree.blobs.get(batch.path);
+      const existingSha = tree.blobs.get(pending.path);
       if (existingSha) {
-        await this.applyRemoteUpdates([
-          {
-            path: batch.path,
-            blobSha: existingSha,
-            envelopeJson: await client.downloadText(remote, existingSha),
-          },
-        ]);
+        const existingJson = await client.downloadText(remote, existingSha);
+        await this.applyUploadedArtifact(pending, existingSha, existingJson);
         return { created: false, pull: racePull };
       }
 
-      const put = await client.putNew(
-        remote,
-        batch.path,
-        batch.envelopeJson,
-        remote.branch,
-      );
+      let put;
+      try {
+        put = await client.putNew(
+          remote,
+          pending.path,
+          pending.json,
+          remote.branch,
+        );
+      } catch (error) {
+        await libraryRepository.recordOutboxAttempts(
+          pending.members.map((member) => member.path),
+          error instanceof GitHubSyncError ? error.kind : "transport",
+        );
+        throw error;
+      }
       if (put.type === "created") {
-        await libraryRepository.recordOutboxAttempt(batch.path, null);
-        await this.applyRemoteUpdates([
-          {
-            path: batch.path,
-            blobSha: put.blobSha,
-            envelopeJson: batch.envelopeJson,
-          },
-        ]);
+        await libraryRepository.recordOutboxAttempts(
+          pending.members.map((member) => member.path),
+          null,
+        );
+        await this.applyUploadedArtifact(pending, put.blobSha, pending.json);
         return { created: true, pull: racePull };
       }
-      await libraryRepository.recordOutboxAttempt(batch.path, put.type === "race" ? "contention" : put.kind);
+      await libraryRepository.recordOutboxAttempts(
+        pending.members.map((member) => member.path),
+        put.type === "race" ? "contention" : put.kind,
+      );
       racePull = addPullStats(racePull, await this.pullRemote(client, remote));
-      await retryDelay(batch.path, attempt);
+      await retryDelay(pending.path, attempt);
     }
     throw new GitHubSyncError(
       "Synchronization remained contended after safe retries.",
@@ -468,9 +522,27 @@ class BrowserSyncService {
     );
   }
 
-  private async applyRemoteUpdates(inputs: RemoteEnvelopeInput[]): Promise<void> {
+  private async applyUploadedArtifact(
+    pending: PendingUpload,
+    blobSha: string,
+    json: string,
+  ): Promise<void> {
+    if (pending.packed) {
+      const pack = await unpackRemotePack(pending.path, blobSha, json);
+      await this.applyRemoteUpdates([], [pack]);
+      return;
+    }
+    await this.applyRemoteUpdates([
+      { path: pending.path, blobSha, envelopeJson: json },
+    ]);
+  }
+
+  private async applyRemoteUpdates(
+    inputs: RemoteEnvelopeInput[],
+    packs: RemoteOperationPackInput[] = [],
+  ): Promise<number> {
     try {
-      await libraryRepository.applyRemote(inputs);
+      return await libraryRepository.applyRemote(inputs, packs);
     } catch (error) {
       if (error instanceof DOMException) throw error;
       throw new GitHubSyncError(
@@ -532,6 +604,158 @@ class BrowserSyncService {
     this.state = { ...this.state, ...patch };
     for (const listener of this.listeners) listener(this.state);
   }
+}
+
+async function buildPendingUploads(
+  pending: PendingSyncBatch[],
+): Promise<PendingUpload[]> {
+  const chunks = chunkPendingBatches(pending);
+  if (chunks.some((chunk) => chunk.length > 1)) await ensureWasm();
+
+  return chunks.map((members) => {
+    const first = members[0];
+    if (!first) {
+      throw new GitHubSyncError(
+        "The browser outbox produced an empty synchronization upload.",
+        "local_state",
+      );
+    }
+    if (members.length === 1) {
+      return {
+        path: first.path,
+        json: first.envelopeJson,
+        members,
+        packed: false,
+      };
+    }
+
+    try {
+      const expectedEnvelopes = members.map((member) => member.envelopeJson);
+      const artifact = parseOperationPackArtifact(
+        createOperationPack(JSON.stringify(expectedEnvelopes)),
+      );
+      if (
+        artifact.member_envelopes.length !== expectedEnvelopes.length ||
+        artifact.member_envelopes.some(
+          (envelope, index) => envelope !== expectedEnvelopes[index],
+        )
+      ) {
+        throw new Error("The shared domain core changed the queued envelope bytes.");
+      }
+      return {
+        path: artifact.path,
+        json: artifact.json,
+        members,
+        packed: true,
+      };
+    } catch (error) {
+      if (error instanceof GitHubSyncError) throw error;
+      throw new GitHubSyncError(
+        "Queued changes failed shared operation-pack validation and remain safely stored here.",
+        "local_state",
+      );
+    }
+  });
+}
+
+function chunkPendingBatches(pending: PendingSyncBatch[]): PendingSyncBatch[][] {
+  const chunks: PendingSyncBatch[][] = [];
+  let current: PendingSyncBatch[] = [];
+  let currentDevice = "";
+  let estimatedBytes = PACK_JSON_OVERHEAD_BYTES;
+
+  const flush = () => {
+    if (current.length > 0) chunks.push(current);
+    current = [];
+    currentDevice = "";
+    estimatedBytes = PACK_JSON_OVERHEAD_BYTES;
+  };
+
+  for (const batch of [...pending].sort((left, right) => left.path.localeCompare(right.path))) {
+    const device = pendingBatchDevice(batch.path);
+    const memberBytes = estimatedEncodedMemberBytes(batch.envelopeJson);
+    const memberFitsPack = PACK_JSON_OVERHEAD_BYTES + memberBytes <= MAX_PACK_BYTES;
+    if (!memberFitsPack) {
+      flush();
+      chunks.push([batch]);
+      continue;
+    }
+    if (
+      current.length > 0 &&
+      (currentDevice !== device ||
+        current.length >= MAX_PACK_MEMBERS ||
+        estimatedBytes + memberBytes > MAX_PACK_BYTES)
+    ) {
+      flush();
+    }
+    currentDevice = device;
+    current.push(batch);
+    estimatedBytes += memberBytes;
+  }
+  flush();
+  return chunks;
+}
+
+function pendingBatchDevice(path: string): string {
+  const match = /^sync\/v1\/ops\/([^/]+)\/\d{20}\.json$/.exec(path);
+  if (!match?.[1] || match[1] === "packs") {
+    throw new GitHubSyncError(
+      "The browser outbox contains an invalid immutable update path.",
+      "local_state",
+    );
+  }
+  return match[1];
+}
+
+function estimatedEncodedMemberBytes(envelopeJson: string): number {
+  const exactBytes = new TextEncoder().encode(envelopeJson).byteLength;
+  return 4 * Math.ceil(exactBytes / 3) + 3;
+}
+
+async function unpackRemotePack(
+  path: string,
+  blobSha: string,
+  json: string,
+): Promise<RemoteOperationPackInput> {
+  try {
+    await ensureWasm();
+    const artifact = parseOperationPackArtifact(unpackOperationPack(path, json));
+    if (artifact.path !== path || artifact.json !== json) {
+      throw new Error("The shared domain core changed the immutable pack bytes.");
+    }
+    return {
+      path,
+      blobSha,
+      memberEnvelopes: artifact.member_envelopes,
+    };
+  } catch (error) {
+    if (error instanceof GitHubSyncError) throw error;
+    const message = error instanceof Error ? error.message : String(error);
+    const upgradeRequired = /unsupported (?:protocol|operation pack|feature)/i.test(message);
+    throw new GitHubSyncError(
+      upgradeRequired
+        ? "This private library uses a newer packed synchronization format. Upgrade ResearchPocket before syncing."
+        : "A remote operation pack is malformed or failed its content-address check.",
+      upgradeRequired ? "upgrade_required" : "integrity",
+    );
+  }
+}
+
+function parseOperationPackArtifact(json: string): OperationPackArtifact {
+  const value = JSON.parse(json) as Partial<OperationPackArtifact>;
+  if (
+    typeof value.path !== "string" ||
+    !value.path.startsWith(PACKS_PREFIX) ||
+    typeof value.json !== "string" ||
+    !Array.isArray(value.member_envelopes) ||
+    value.member_envelopes.length < 2 ||
+    value.member_envelopes.length > MAX_PACK_MEMBERS ||
+    value.member_envelopes.some((envelope) => typeof envelope !== "string") ||
+    new TextEncoder().encode(value.json).byteLength > MAX_PACK_BYTES
+  ) {
+    throw new Error("The shared domain core returned an invalid operation-pack artifact.");
+  }
+  return value as OperationPackArtifact;
 }
 
 function remoteFrom(configuration: SyncConfiguration): GitHubRemote {
