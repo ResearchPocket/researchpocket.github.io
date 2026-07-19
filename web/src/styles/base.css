@@ -8,7 +8,6 @@ html {
   background: var(--color-canvas);
   color: var(--color-text);
   min-width: 20rem;
-  overscroll-behavior-y: none;
   text-size-adjust: 100%;
   -webkit-text-size-adjust: 100%;
 }

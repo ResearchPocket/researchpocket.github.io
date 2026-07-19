@@ -1,5 +1,9 @@
 const API_ROOT = "https://api.github.com";
 const API_VERSION = "2026-03-10";
+const JSON_MEDIA_TYPE = "application/vnd.github+json";
+const RAW_BLOB_MEDIA_TYPE = "application/vnd.github.raw+json";
+const GET_ATTEMPTS = 2;
+const GET_RETRY_DELAY_MS = 250;
 
 export const GENESIS_PATH = "sync/v1/library.json";
 export const OPS_PREFIX = "sync/v1/ops/";
@@ -49,13 +53,6 @@ interface TreeEntry {
   sha: string;
 }
 
-interface BlobResponse {
-  content: string;
-  encoding: string;
-  sha: string;
-  size: number;
-}
-
 interface PutContentResponse {
   content?: {
     sha?: string;
@@ -95,7 +92,7 @@ export class GitHubClient {
       );
     }
     this.headers = new Headers({
-      Accept: "application/vnd.github+json",
+      Accept: JSON_MEDIA_TYPE,
       Authorization: `Bearer ${token}`,
       "X-GitHub-Api-Version": API_VERSION,
     });
@@ -250,19 +247,14 @@ export class GitHubClient {
 
   private async downloadBlob(remote: GitHubRemote, sha: string): Promise<Uint8Array> {
     validateGitSha(sha);
-    const blob = await this.getJson<BlobResponse>(
+    const bytes = await this.get(
       repositoryUrl(remote.owner, remote.repository, "git", "blobs", sha),
+      RAW_BLOB_MEDIA_TYPE,
+      async (response) => new Uint8Array(await response.arrayBuffer()),
     );
-    if (blob.sha !== sha || blob.encoding !== "base64") {
+    if ((await gitBlobSha(bytes, sha.length)) !== sha) {
       throw new GitHubSyncError(
-        "GitHub returned a synchronization blob with the wrong identity or encoding.",
-        "integrity",
-      );
-    }
-    const bytes = base64ToBytes(blob.content.replace(/\s/g, ""));
-    if (!Number.isSafeInteger(blob.size) || blob.size !== bytes.byteLength) {
-      throw new GitHubSyncError(
-        "GitHub returned a synchronization blob with an invalid size.",
+        "GitHub returned synchronization content that did not match its immutable identity.",
         "integrity",
       );
     }
@@ -270,24 +262,40 @@ export class GitHubClient {
   }
 
   private async getJson<T>(url: URL): Promise<T> {
-    let response: Response;
-    try {
-      response = await this.fetcher(url, {
-        method: "GET",
-        headers: this.headers,
-        cache: "no-store",
-        credentials: "omit",
-        redirect: "error",
-        referrerPolicy: "no-referrer",
-      });
-    } catch {
-      throw new GitHubSyncError(
-        "GitHub could not be reached. Your queued changes remain safely stored here.",
-        "transport",
-      );
+    return this.get(url, JSON_MEDIA_TYPE, readJsonResponse) as Promise<T>;
+  }
+
+  private async get<T>(
+    url: URL,
+    accept: string,
+    read: (response: Response) => Promise<T>,
+  ): Promise<T> {
+    const headers = new Headers(this.headers);
+    headers.set("Accept", accept);
+    for (let attempt = 0; attempt < GET_ATTEMPTS; attempt += 1) {
+      try {
+        const response = await this.fetcher(url, {
+          method: "GET",
+          headers,
+          cache: "no-store",
+          credentials: "omit",
+          redirect: "error",
+          referrerPolicy: "no-referrer",
+        });
+        if (!response.ok) throw apiError(response);
+        return await read(response);
+      } catch (error) {
+        if (error instanceof GitHubSyncError) throw error;
+        if (attempt + 1 < GET_ATTEMPTS) {
+          await delay(GET_RETRY_DELAY_MS);
+          continue;
+        }
+      }
     }
-    if (!response.ok) throw apiError(response);
-    return (await responseJson(response)) as T;
+    throw new GitHubSyncError(
+      "GitHub could not be reached. Your queued changes remain safely stored here.",
+      "transport",
+    );
   }
 }
 
@@ -380,19 +388,6 @@ function validateGitSha(sha: string): void {
   }
 }
 
-function base64ToBytes(value: string): Uint8Array {
-  let decoded: string;
-  try {
-    decoded = atob(value);
-  } catch {
-    throw new GitHubSyncError(
-      "GitHub returned invalid Base64 synchronization data.",
-      "integrity",
-    );
-  }
-  return Uint8Array.from(decoded, (character) => character.charCodeAt(0));
-}
-
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = "";
   const chunkSize = 32_768;
@@ -404,13 +399,57 @@ function bytesToBase64(bytes: Uint8Array): string {
 
 async function responseJson(response: Response): Promise<unknown> {
   try {
-    return await response.json();
+    return await readJsonResponse(response);
   } catch {
     throw new GitHubSyncError(
       "GitHub returned a malformed API response.",
       "github_api",
     );
   }
+}
+
+async function readJsonResponse(response: Response): Promise<unknown> {
+  const text = await response.text();
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    throw new GitHubSyncError(
+      "GitHub returned a malformed API response.",
+      "github_api",
+    );
+  }
+}
+
+async function gitBlobSha(bytes: Uint8Array, identityLength: number): Promise<string> {
+  if (!globalThis.crypto?.subtle) {
+    throw new GitHubSyncError(
+      "This browser cannot verify downloaded synchronization content.",
+      "local_state",
+    );
+  }
+  const header = new TextEncoder().encode(`blob ${bytes.byteLength}\0`);
+  const object = new Uint8Array(header.byteLength + bytes.byteLength);
+  object.set(header);
+  object.set(bytes, header.byteLength);
+  let digest: ArrayBuffer;
+  try {
+    digest = await globalThis.crypto.subtle.digest(
+      identityLength === 40 ? "SHA-1" : "SHA-256",
+      object,
+    );
+  } catch {
+    throw new GitHubSyncError(
+      "This browser could not verify downloaded synchronization content.",
+      "local_state",
+    );
+  }
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function delay(milliseconds: number): Promise<void> {
+  await new Promise((resolve) => globalThis.setTimeout(resolve, milliseconds));
 }
 
 function apiError(response: Response): GitHubSyncError {
