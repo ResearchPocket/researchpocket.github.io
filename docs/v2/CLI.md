@@ -225,32 +225,43 @@ re-run installation after every CLI upgrade as well.
 4. Copy the entire one-line [bookmarklet.js](../../bookmarklet.js) into the
    bookmark's **URL** or **Location** field. It must begin immediately with
    `javascript:`.
-5. Visit an HTTP(S) page and click the bookmarklet.
-6. The first time Firefox asks about an external application, choose
+5. Visit an HTTP(S) page and click the bookmarklet. Enter optional
+   comma-separated tags, leave the prompt blank for an untagged save, or choose
+   **Cancel** to abort the capture.
+6. The first time Firefox asks about an external application after a completed
+   prompt, choose
    ResearchPocket and allow the link to open. Remembering the choice is optional
    and may be scoped to the current site or browser profile.
 7. Run `research list` to confirm the local capture.
 
 The supplied bookmarklet sends version 2 plus the current page `url`, `title`,
 bounded description metadata as `excerpt`, and the document `language`, all read
-from the already-loaded DOM. It does not contain a token, repository name,
-filesystem path, provider name, note, or tags. Firefox may ask again in private
+from the already-loaded DOM. Each nonblank prompted tag is whitespace-normalized,
+deduplicated, and appended as one `tag` field. The prompt accepts at most 64 tags
+of at most 1,024 UTF-8 bytes each; tags cannot contain a comma in this compact
+input format. It does not contain a token, repository name, filesystem path,
+provider name, note, or favorite value. Firefox may ask again in private
 browsing or when site permissions are cleared. Do not disable Firefox's
 external-protocol safety checks globally.
+
+Bookmarklet code and its prompt run in the current page's untrusted JavaScript
+context. The open page may observe text entered there. Use the prompt only for
+non-sensitive organizational tags; add private or sensitive tags after the local
+save through `research edit`, `research tui`, or the owner app.
 
 ### Capture URI contract
 
 The version 2 transport used by the supplied bookmarklet has this shape:
 
 ```text
-researchpocket://capture?version=2&url=<percent-encoded-http(s)-url>&title=<percent-encoded-title>&excerpt=<percent-encoded-description>&language=<percent-encoded-language>
+researchpocket://capture?version=2&url=<percent-encoded-http(s)-url>&title=<percent-encoded-title>&excerpt=<percent-encoded-description>&language=<percent-encoded-language>&tag=<percent-encoded-tag>&tag=<percent-encoded-tag>
 ```
 
 Version 1 remains accepted with URL/title and the existing advanced authored
 fields. Version 2 adds optional singleton `excerpt` and `language` fields. In
-both versions, one absolute HTTP(S) `url` is required; `title` is optional.
-Advanced local integrations may repeat `tag`, and may provide one `note` and one
-`favorite=true` field:
+both versions, one absolute HTTP(S) `url` is required; `title` is optional. The
+standard bookmarklet and advanced local integrations may repeat `tag`; advanced
+integrations may also provide one `note` and one `favorite=true` field:
 
 ```text
 researchpocket://capture?version=1&url=https%3A%2F%2Fexample.com&title=Example&tag=read&tag=rust&note=Review&favorite=true

@@ -3,6 +3,10 @@
 Post-save metadata enrichment and capture URI version 2 extend this decision in
 [ADR 0002](./ADR_0002_LINK_ENRICHMENT.md). The provider-neutral handler,
 pre-network durability boundary, and version 1 compatibility remain unchanged.
+The optional standard-bookmarklet tag prompt was accepted in
+[#70](https://github.com/ResearchPocket/researchpocket.github.io/issues/70) on
+2026-07-19; it uses the existing repeated `tag` field and does not change the
+capture protocol.
 
 - Status: accepted
 - Date: 2026-07-13
@@ -93,9 +97,13 @@ capture through the installed local library.
   prompt is useful but is not the security boundary because a user can remember
   the choice. Strict validation and an append-only action reduce abuse to bounded
   unwanted saves; the handler cannot read, edit, delete, publish, or synchronize.
-- The captured page URL and bounded DOM metadata pass through Firefox, OS
-  dispatch, and process arguments. The standard bookmarklet therefore includes
-  no note, tags, path, repository identity, provider, or credential.
+- The captured page URL, bounded DOM metadata, and optional prompted tags pass
+  through Firefox, OS dispatch, and process arguments. Because the bookmarklet
+  prompt runs in the open page's untrusted JavaScript context, it labels that
+  boundary and is suitable only for non-sensitive organizational tags. Private
+  tags are added after capture through a trusted ResearchPocket interface. The
+  standard bookmarklet includes no note, path, repository identity, provider,
+  favorite value, or credential.
 - Custom scheme ownership is not globally exclusive. Another application can
   replace the association; status and reinstall are the recovery path.
 
