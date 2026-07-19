@@ -61,7 +61,7 @@ from existing Git history are outside the V2 guarantee.
 | Private data repository | Complete immutable updates, checkpoints, and private policy. GitHub collaborators and repository administrators can read its history. |
 | GitHub REST API | Trusted transport/authentication boundary. Every returned protocol object is still hash- and schema-verified locally. |
 | Publisher workflow | Trusted, pinned workflow in the private repository. It reads private state and writes only an allowlisted projection using a separate credential. |
-| Firefox bookmarklet | User-triggered but runs in the current page's untrusted browser context. The standard bookmarklet may send only the current page URL and bounded title, description, and language values in a versioned capture URI. |
+| Firefox bookmarklet | User-triggered but runs in the current page's untrusted browser context. The standard bookmarklet may send only the current page URL, bounded title/description/language values, and optional non-sensitive tags entered into its visibly labeled prompt in a versioned capture URI. The page may observe prompted text. |
 | OS protocol dispatcher | Trusted only to deliver one URI to the installed per-user handler. Browser and operating-system history, diagnostics, or other same-user processes may observe that payload. |
 | Native direct enrichment | Untrusted public HTTP(S) target. It may receive a metadata-only request for its own saved URL, but no owner credential, cookie, referrer, note, tag, browser state, or other library data. |
 | Firecrawl enrichment | Explicitly selected third party. It receives the saved target URL and the Firecrawl API credential, but no ResearchPocket library, note, tag, GitHub credential, or capture URI. Returned page content is discarded. |
@@ -224,7 +224,8 @@ responses decide only transport success; Loro updates decide application state.
 
 ```mermaid
 flowchart LR
-    O[Owner clicks Firefox bookmarklet] --> B[Version 2 researchpocket URI]
+    O[Owner clicks Firefox bookmarklet] --> T[Optional tag prompt in untrusted page]
+    T --> B[Version 2 researchpocket URI]
     B --> P[Per-user OS protocol handler]
     P --> C[Installed V2 CLI]
     C --> V{Route and field validation}
@@ -239,14 +240,19 @@ flowchart LR
     R -. independent of sync .-> S
 ```
 
-The standard bookmarklet transports version 2 with the current HTTP(S) page URL
-and bounded title, description, and language metadata from the already-loaded
-DOM. Version 1 remains accepted. The OS registration binds an executable and one
-resolved local V2 data directory; the URI cannot choose either. The internal
-handler accepts only the exact `researchpocket://capture` route, a supported
-protocol version, an absolute HTTP(S) target, and bounded allowlisted fields.
-Singleton fields cannot repeat; `tag` is the only repeatable field. Unknown or
-malformed input fails before opening a mutation.
+The standard bookmarklet transports version 2 with the current HTTP(S) page URL,
+bounded title, description, and language metadata from the already-loaded DOM,
+and up to 64 optional comma-separated tags entered by the owner. Blank input
+adds no tags and Cancel aborts before dispatch. The prompt runs in the current
+page's untrusted JavaScript context and labels that boundary; the page may
+observe the entered text, so private tags are added afterward in a trusted
+ResearchPocket interface. Version 1 remains accepted. The OS registration binds
+an executable and one resolved local V2 data directory; the URI cannot choose
+either. The internal handler accepts only the exact
+`researchpocket://capture` route, a supported protocol version, an absolute
+HTTP(S) target, and bounded allowlisted fields. Singleton fields cannot repeat;
+`tag` is the only repeatable field. Unknown or malformed input fails before
+opening a mutation.
 
 The OS passes one encoded URI to the handler as an argument; the handler decodes
 its values as structured data, never as a shell command. It calls the same atomic
@@ -345,11 +351,13 @@ Activating a new shell version removes old caches.
   credential but does not silently destroy the offline library or queued edits.
 - Browser extensions and a compromised profile can read in-use private data and
   memory credentials; V2 cannot defend against that device-level compromise.
-- Capture URI payloads are not logged by ResearchPocket, but the current page URL,
-  title, bounded description/language, and any advanced authored fields pass
-  through Firefox, OS protocol dispatch, and process arguments. The bookmarklet
-  therefore includes no note, tags, path, repository identity, provider, or
-  credential by default.
+- Capture URI payloads are not logged by ResearchPocket, but the current page
+  URL, title, bounded description/language, prompted tags, and any advanced
+  authored fields pass through Firefox, OS protocol dispatch, and process
+  arguments. Prompted tags also exist briefly in the current page's untrusted
+  JavaScript context. The bookmarklet therefore labels the prompt for
+  non-sensitive tags and includes no note, path, repository identity, provider,
+  favorite value, or credential by default.
 
 ## Threats and mitigations
 
@@ -364,7 +372,7 @@ Activating a new shell version removes old caches.
 | Corrupt/replayed remote update changes state | Pack path/body SHA-256 and bounds, exact member-envelope validation, library identity, payload SHA-256, immutable device sequence/path, applied receipt, all-or-nothing pack transaction | A repository writer can delete history; clients must detect missing/inconsistent data. |
 | Token appears in logs or URLs | Authorization header only; redacted errors; no analytics; no token interpolation; production console off | User-installed debugging tools may capture traffic. |
 | Untrusted page invokes native capture | Browser external-protocol confirmation; exact route/version; bounded append-only field allowlist; no read, edit, delete, sync, or publication action | Remembered site permission can permit unwanted save spam. |
-| Capture URI injects a command or selects private state | Direct argument handling without shell evaluation; reject unknown fields, paths, credentials, provider names, user information, fragments, and non-HTTP(S) targets | Browser, OS diagnostics, or same-user processes may observe accepted URL/title/description/language data. |
+| Capture URI injects a command or selects private state | Direct argument handling without shell evaluation; reject unknown fields, paths, credentials, provider names, user information, fragments, and non-HTTP(S) targets | The open page, browser/OS diagnostics, or same-user processes may observe accepted URL/title/description/language and prompted non-sensitive tag data. |
 | Capture writes to the wrong library | Installer binds one resolved absolute data directory; status displays the binding; URI cannot override it | Moving the executable or changing libraries requires reinstalling the association. |
 | Direct enrichment reaches a local or cloud-internal service | Resolve and pin DNS for every hop; reject all non-public address classes and embedded credentials; revalidate manual redirects; cap redirects, time, type, and bytes | Public services can still return hostile or misleading metadata, which remains untrusted text. |
 | Firecrawl receives URLs unexpectedly | Never fallback automatically; require explicit job/provider configuration; keep provider out of the capture URI; disclose the third-party boundary in CLI help/docs | An owner who enables automatic capture enrichment has chosen to reveal each captured URL to that provider. |

@@ -121,16 +121,25 @@ To add the bookmarklet in Firefox:
 2. Name the bookmark `Save to ResearchPocket`.
 3. Copy the complete single line from [bookmarklet.js](bookmarklet.js) into the
    bookmark's **URL** or **Location** field.
-4. Open a page and click the bookmarklet. On the first use, allow Firefox to open
-   the link with ResearchPocket; Firefox may offer to remember that choice for
-   the site.
-5. Confirm the local result with `research list`.
+4. Open a page and click the bookmarklet. Enter optional comma-separated tags,
+   or leave the prompt blank for an untagged save. Choosing **Cancel** aborts the
+   capture.
+5. On the first completed capture, allow Firefox to open the link with
+   ResearchPocket; Firefox may offer to remember that choice for the site.
+6. Confirm the local result with `research list`.
 
 The standard bookmarklet sends protocol version 2, the current HTTP(S) URL, page
-title, and any bounded description/language metadata already present in the
-loaded DOM. The CLI validates and saves them locally as one normal V2 item and
-one durable outbox update. The bookmarklet performs no metadata request and does
-not silently deduplicate a URL. Version 1 bookmarklets remain accepted.
+title, any bounded description/language metadata already present in the loaded
+DOM, and each nonblank prompted tag as a repeated `tag` field. Comma-separated
+tag input is whitespace-normalized, deduplicated, and limited to 64 tags of at
+most 1,024 UTF-8 bytes each. The CLI validates and saves them locally as one
+normal V2 item and one durable outbox update. The bookmarklet performs no
+metadata request and does not silently deduplicate a URL. Version 1 bookmarklets
+remain accepted.
+
+The prompt runs in the current page's untrusted JavaScript context. Use it only
+for non-sensitive organizational tags that the open page may observe; add
+private or sensitive tags after capture through the CLI, TUI, or owner app.
 
 Capture does not upload anything. Run `research sync run`, or keep the optional
 foreground `research sync run --every 60` loop active, when you want queued

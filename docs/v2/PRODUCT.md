@@ -72,8 +72,9 @@ feeds; they do not need a ResearchPocket or GitHub account.
   duplicate provider calls, and using Firecrawl is a visible third-party
   disclosure.
 - Capture bounded title, description, and language metadata from the current
-  browser DOM through the installed local protocol handler without requiring a
-  browser extension or always-on backend.
+  browser DOM plus optional non-sensitive prompted tags through the installed
+  local protocol handler without requiring a browser extension or always-on
+  backend.
 - Edit titles, notes, tags, collection membership, favorite state, archive
   state, and lifecycle state through the CLI, TUI, or local web UI.
 - Search locally across saved metadata and user-authored notes.

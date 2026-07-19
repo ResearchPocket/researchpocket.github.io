@@ -1177,7 +1177,7 @@ mod tests {
         assert!(item.favorite);
         assert_eq!(item.language, None);
 
-        let valid_v2 = "researchpocket://capture?version=2&url=https%3A%2F%2Fexample.com%2Fv2&title=Captured%20page&excerpt=Human-first%20research%20%E2%9C%93&language=en-GB";
+        let valid_v2 = "researchpocket://capture?version=2&url=https%3A%2F%2Fexample.com%2Fv2&title=Captured%20page&excerpt=Human-first%20research%20%E2%9C%93&language=en-GB&tag=reading&tag=rust";
         let item = handle(
             directory.path(),
             valid_v2,
@@ -1190,6 +1190,7 @@ mod tests {
         assert_eq!(item.title.as_deref(), Some("Captured page"));
         assert_eq!(item.excerpt.as_deref(), Some("Human-first research ✓"));
         assert_eq!(item.language.as_deref(), Some("en-GB"));
+        assert_eq!(item.tags, ["reading", "rust"]);
 
         let store = V2Store::open(directory.path()).await.expect("open V2");
         let saved = store
@@ -1206,6 +1207,7 @@ mod tests {
             Some("Human-first research ✓")
         );
         assert_eq!(persisted_v2.language.as_deref(), Some("en-GB"));
+        assert_eq!(persisted_v2.tags, ["reading", "rust"]);
         let enrichment = store
             .enrichment_job(&item.id)
             .await
