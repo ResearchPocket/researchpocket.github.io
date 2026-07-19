@@ -155,6 +155,11 @@ class BrowserSyncService {
         async () => {
           const client = new GitHubClient(this.requireToken());
           const repositoryInfo = await client.inspectRepository(owner, repository);
+          this.patch({
+            status: repositoryInfo.empty
+              ? "Preparing the private repository…"
+              : "Repository found — reading its library identity…",
+          });
           const branch = input.branch?.trim() || repositoryInfo.defaultBranch;
           if (repositoryInfo.empty && branch !== repositoryInfo.defaultBranch) {
             throw new GitHubSyncError(
@@ -169,7 +174,10 @@ class BrowserSyncService {
             repository,
             branch,
           );
-          this.patch({ configuration });
+          this.patch({
+            configuration,
+            status: "Repository connected — restoring your library…",
+          });
           await this.runConfigured(client, remote);
         },
         true,
@@ -361,15 +369,22 @@ class BrowserSyncService {
 
   private async runConfigured(client: GitHubClient, remote: GitHubRemote): Promise<void> {
     await client.inspectRepository(remote.owner, remote.repository);
+    this.patch({ status: "Checking remote changes…" });
     let pull = await this.pullRemote(client, remote);
     let uploaded = 0;
     const pendingAtFlushStart = await libraryRepository.pendingSyncBatches();
     const uploads = await buildPendingUploads(pendingAtFlushStart);
+    if (pendingAtFlushStart.length > 0) {
+      this.patch({
+        status: `Uploading ${pendingAtFlushStart.length} queued change${pendingAtFlushStart.length === 1 ? "" : "s"}…`,
+      });
+    }
     for (const pending of uploads) {
       const upload = await this.ensureUploaded(client, remote, pending);
       uploaded += upload.created ? pending.members.length : 0;
       pull = addPullStats(pull, upload.pull);
     }
+    this.patch({ status: "Confirming the synchronized library…" });
     pull = addPullStats(pull, await this.pullRemote(client, remote));
     const pending = (await libraryRepository.pendingSyncBatches()).length;
     const result: SyncCycleResult = {
@@ -396,19 +411,27 @@ class BrowserSyncService {
     const operations = [...tree.blobs.entries()]
       .filter(([path]) => path.startsWith(OPS_PREFIX))
       .sort(([left], [right]) => left.localeCompare(right));
+    const unseen: Array<[string, string]> = [];
+    for (const [path, blobSha] of operations) {
+      const observation = await libraryRepository.remoteObservation(path);
+      if (!observation) {
+        unseen.push([path, blobSha]);
+      } else if (observation.blobSha !== blobSha) {
+        throw new GitHubSyncError(
+          "An immutable remote update changed after it was observed.",
+          "integrity",
+        );
+      }
+    }
     const inputs: RemoteEnvelopeInput[] = [];
     const packs: RemoteOperationPackInput[] = [];
     let downloaded = 0;
-    for (const [path, blobSha] of operations) {
-      const observation = await libraryRepository.remoteObservation(path);
-      if (observation) {
-        if (observation.blobSha !== blobSha) {
-          throw new GitHubSyncError(
-            "An immutable remote update changed after it was observed.",
-            "integrity",
-          );
-        }
-        continue;
+    const progressStep = Math.max(1, Math.ceil(unseen.length / 20));
+    for (const [index, [path, blobSha]] of unseen.entries()) {
+      if (index === 0 || index + 1 === unseen.length || index % progressStep === 0) {
+        this.patch({
+          status: `Downloading remote change ${index + 1} of ${unseen.length}…`,
+        });
       }
       const json = await client.downloadText(remote, blobSha);
       if (path.startsWith(PACKS_PREFIX)) {
@@ -419,6 +442,9 @@ class BrowserSyncService {
         inputs.push({ path, blobSha, envelopeJson: json });
         downloaded += 1;
       }
+    }
+    if (unseen.length > 0) {
+      this.patch({ status: "Applying downloaded remote changes…" });
     }
     const pendingBefore = (await libraryRepository.pendingSyncBatches()).length;
     const applied = await this.applyRemoteUpdates(inputs, packs);
