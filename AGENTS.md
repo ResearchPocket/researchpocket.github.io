@@ -34,7 +34,9 @@ Do not expand V2 into:
 - an AI memory, personal profile, RAG service, or autonomous organizer;
 - a multi-user collaboration or real-time team product;
 - a general notes/wiki application or a store for standalone notes;
-- a webpage archive, file/PDF store, highlighting system, or attachment manager;
+- a general-purpose webpage archive, file/PDF store, highlighting system, or
+  attachment manager beyond the bounded Firecrawl Markdown retained in an
+  item's existing excerpt register;
 - a hosted account service or an application backend that must stay online;
 - a native mobile application;
 - end-to-end encrypted remote storage or encrypted sharing; or

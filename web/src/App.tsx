@@ -1,12 +1,15 @@
 import {
   type SubmitEvent,
   type ReactNode,
+  memo,
   useDeferredValue,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
+import ReactMarkdown, { type Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   type LibraryState,
   type PendingSyncChange,
@@ -42,6 +45,33 @@ type Density = "comfortable" | "compact";
 const DENSITY_STORAGE_KEY = "researchpocket.ui.density";
 
 const LIST_BATCH_SIZE = 100;
+
+const READER_MARKDOWN_COMPONENTS: Components = {
+  a: ({ children, href, title }) => (
+    <a href={href} rel="noreferrer" target="_blank" title={title}>
+      {children}
+    </a>
+  ),
+  img: ({ alt, title }) => (
+    <span className="reader-markdown-image" role="img" aria-label={alt || "Archived image"} title={title}>
+      [Image: {alt || "unlabeled"}]
+    </span>
+  ),
+};
+
+const MarkdownDocument = memo(function MarkdownDocument({ source }: { source: string }) {
+  return (
+    <div className="reader-markdown">
+      <ReactMarkdown
+        components={READER_MARKDOWN_COMPONENTS}
+        remarkPlugins={[remarkGfm]}
+        skipHtml
+      >
+        {source}
+      </ReactMarkdown>
+    </div>
+  );
+});
 
 const EMPTY_LIBRARY_STATE: LibraryState = {
   error: null,
@@ -1472,7 +1502,8 @@ function ReaderView({
   onSelect: (item: LibraryItemView) => void;
 }) {
   const label = item.title?.trim() || item.url;
-  const context = item.excerpt?.trim();
+  const context = item.excerpt;
+  const hasContext = Boolean(context?.trim());
 
   return (
     <div className="reader-view" role="dialog" aria-modal="true" aria-labelledby="reader-title">
@@ -1509,7 +1540,7 @@ function ReaderView({
           {item.tags.length > 0 ? <p className="reader-tags">{item.tags.map((tag) => <span key={tag}>#{tag}</span>)}</p> : null}
           {item.note?.trim() ? <aside className="reader-note"><strong>Your note</strong><p>{item.note}</p></aside> : null}
           <div className="reader-body">
-            {context ? <p>{context}</p> : <p>This save has no extracted preview yet. Open the original to read the full page, or add a private note to keep the context that matters.</p>}
+            {hasContext && context ? <MarkdownDocument source={context} /> : <p>This save has no extracted preview yet. Open the original to read the full page, or add a private note to keep the context that matters.</p>}
             <p className="reader-source">ResearchPocket keeps the URL and your authored context locally. The original page remains at <a href={item.url} rel="noreferrer" target="_blank">{readHostname(item.url)}</a>.</p>
           </div>
         </div>

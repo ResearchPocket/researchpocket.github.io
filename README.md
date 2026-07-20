@@ -164,7 +164,7 @@ custom-scheme decision and alternatives are recorded in
 
 Saving stays URL-first: ResearchPocket commits the item before contacting a
 page or extraction service. A failed request therefore leaves the save intact
-and a bounded local retry job. Fetched metadata fills only title, excerpt, and
+and a bounded local retry job. Fetched data fills only title, excerpt, and
 language fields whose exact missing-field revisions are still current; authored
 values, including a clear, an explicit empty string, or a concurrent edit from
 another client, always win. Short-lived local leases prevent concurrent CLI
@@ -180,7 +180,7 @@ research enrich run
 research enrich status
 ```
 
-Firecrawl is an explicit alternative for pages whose useful metadata needs a
+Firecrawl is an explicit alternative for pages whose useful content needs a
 hosted extractor. The URL is sent to Firecrawl. ResearchPocket calls the small
 REST scrape endpoint with its existing HTTP client; it does not depend on the
 Firecrawl Cargo package. Pass the key through standard input so it never appears
@@ -198,10 +198,14 @@ The optional key file is separate from SQLite, CRDT updates, and the sync
 repository. It is created with owner-only mode on Unix; on Windows it inherits
 the selected data directory's access controls, so keep a custom data directory
 restricted to the owner. `FIRECRAWL_API_KEY` may instead be supplied to the
-current process. Only normalized title, excerpt, and language are retained;
-HTML, Markdown, PDFs, and page files are not archived. The complete contract is
-in [the CLI guide](docs/v2/CLI.md#metadata-enrichment) and
-[ADR 0002](docs/v2/ADR_0002_LINK_ENRICHMENT.md).
+current process. Firecrawl's cleaned Markdown is retained in a missing excerpt
+up to 4 MiB; title and language remain normalized metadata. Raw HTML, PDFs, and
+page files are not archived. The owner Reader renders CommonMark and GitHub
+Flavored Markdown while ignoring raw HTML and remote images. The complete
+contract is in
+[the CLI guide](docs/v2/CLI.md#metadata-enrichment),
+[ADR 0002](docs/v2/ADR_0002_LINK_ENRICHMENT.md), and
+[ADR 0004](docs/v2/ADR_0004_BOUNDED_FIRECRAWL_MARKDOWN.md).
 
 ## Migrate an existing library
 

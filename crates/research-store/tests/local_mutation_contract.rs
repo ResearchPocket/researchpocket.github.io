@@ -5,6 +5,150 @@ use research_store::{
 };
 
 #[tokio::test]
+async fn explicit_reenrichment_replaces_only_an_enrichment_owned_excerpt() {
+    let directory = tempfile::tempdir().expect("library temp directory");
+    let store = V2Store::init(directory.path().join("library"))
+        .await
+        .expect("initialize store");
+    let item = store
+        .create_item_with_enrichment(
+            CreateItemRequest {
+                url: "https://example.com/archive".into(),
+                title: Some("Archive".into()),
+                excerpt: None,
+                favorite: false,
+                language: Some("en".into()),
+                saved_at: Some(1_700_000_000),
+                note: String::new(),
+                tags: Vec::new(),
+            },
+            EnrichmentProvider::Firecrawl,
+        )
+        .await
+        .expect("create queued item");
+    let first_claim = store
+        .claim_item_enrichment(&item.id)
+        .await
+        .expect("claim initial enrichment");
+    let first = store
+        .apply_item_enrichment(
+            &item.id,
+            &first_claim.lease_token,
+            &item.url,
+            &item.state,
+            EnrichmentCandidates {
+                excerpt: Some("Short metadata description".into()),
+                ..EnrichmentCandidates::default()
+            },
+        )
+        .await
+        .expect("apply initial enrichment");
+    assert!(first.applied_excerpt);
+
+    let requeued = store
+        .queue_item_enrichment(&item.id, EnrichmentProvider::Firecrawl)
+        .await
+        .expect("requeue enrichment-owned excerpt");
+    assert!(requeued.target_excerpt);
+    let second_claim = store
+        .claim_item_enrichment(&item.id)
+        .await
+        .expect("claim replacement enrichment");
+    let replaced = store
+        .apply_item_enrichment(
+            &item.id,
+            &second_claim.lease_token,
+            &item.url,
+            &item.state,
+            EnrichmentCandidates {
+                excerpt: Some("# Complete page\n\nPreserved Markdown".into()),
+                ..EnrichmentCandidates::default()
+            },
+        )
+        .await
+        .expect("replace enrichment-owned excerpt");
+    assert_eq!(
+        replaced.item.excerpt.as_deref(),
+        Some("# Complete page\n\nPreserved Markdown")
+    );
+
+    store
+        .edit_item(EditItemRequest {
+            item_id: item.id.clone(),
+            excerpt: Some(OptionalTextUpdate::Set("Authored context".into())),
+            ..EditItemRequest::default()
+        })
+        .await
+        .expect("author excerpt");
+    let protected = store
+        .queue_item_enrichment(&item.id, EnrichmentProvider::Firecrawl)
+        .await
+        .expect("requeue after authored edit");
+    assert!(!protected.target_excerpt);
+    assert_eq!(protected.status, EnrichmentStatus::Skipped);
+
+    let forced = store
+        .queue_item_enrichment_replacing_excerpt(&item.id, EnrichmentProvider::Firecrawl)
+        .await
+        .expect("explicitly queue authored excerpt replacement");
+    assert!(forced.target_excerpt);
+    let stale_claim = store
+        .claim_item_enrichment(&item.id)
+        .await
+        .expect("claim forced replacement");
+    store
+        .edit_item(EditItemRequest {
+            item_id: item.id.clone(),
+            excerpt: Some(OptionalTextUpdate::Set("Newer authored context".into())),
+            ..EditItemRequest::default()
+        })
+        .await
+        .expect("edit while re-parsing");
+    let stale = store
+        .apply_item_enrichment(
+            &item.id,
+            &stale_claim.lease_token,
+            &item.url,
+            &item.state,
+            EnrichmentCandidates {
+                excerpt: Some("Stale parsed page".into()),
+                ..EnrichmentCandidates::default()
+            },
+        )
+        .await
+        .expect("complete stale replacement safely");
+    assert!(!stale.applied_excerpt);
+    assert_eq!(
+        stale.item.excerpt.as_deref(),
+        Some("Newer authored context")
+    );
+
+    store
+        .queue_item_enrichment_replacing_excerpt(&item.id, EnrichmentProvider::Firecrawl)
+        .await
+        .expect("queue replacement of current revision");
+    let replacement_claim = store
+        .claim_item_enrichment(&item.id)
+        .await
+        .expect("claim current replacement");
+    let replacement = store
+        .apply_item_enrichment(
+            &item.id,
+            &replacement_claim.lease_token,
+            &item.url,
+            &item.state,
+            EnrichmentCandidates {
+                excerpt: Some("# Fresh parse".into()),
+                ..EnrichmentCandidates::default()
+            },
+        )
+        .await
+        .expect("replace unchanged authored excerpt explicitly");
+    assert!(replacement.applied_excerpt);
+    assert_eq!(replacement.item.excerpt.as_deref(), Some("# Fresh parse"));
+}
+
+#[tokio::test]
 async fn local_mutations_are_atomic_durable_and_lifecycle_safe() {
     let directory = tempfile::tempdir().expect("library temp directory");
     let library_directory = directory.path().join("library");

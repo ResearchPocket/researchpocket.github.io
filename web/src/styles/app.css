@@ -2513,6 +2513,132 @@ kbd {
   margin: 0;
 }
 
+.reader-markdown {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.reader-markdown > :first-child {
+  margin-top: 0;
+}
+
+.reader-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.reader-markdown h1,
+.reader-markdown h2,
+.reader-markdown h3,
+.reader-markdown h4,
+.reader-markdown h5,
+.reader-markdown h6 {
+  color: var(--color-text);
+  line-height: 1.3;
+  margin: 1.75em 0 0.625em;
+}
+
+.reader-markdown h1 {
+  font-size: 1.5rem;
+}
+
+.reader-markdown h2 {
+  border-bottom: var(--rule) solid var(--color-border);
+  font-size: 1.25rem;
+  padding-bottom: 0.25rem;
+}
+
+.reader-markdown h3 {
+  font-size: 1.0625rem;
+}
+
+.reader-markdown h4,
+.reader-markdown h5,
+.reader-markdown h6 {
+  font-size: 0.9375rem;
+}
+
+.reader-markdown p,
+.reader-markdown blockquote,
+.reader-markdown pre,
+.reader-markdown table,
+.reader-markdown ul,
+.reader-markdown ol {
+  margin: 0 0 1em;
+}
+
+.reader-markdown ul,
+.reader-markdown ol {
+  padding-left: 1.5rem;
+}
+
+.reader-markdown li + li {
+  margin-top: 0.25rem;
+}
+
+.reader-markdown blockquote {
+  border-left: 0.1875rem solid var(--color-border-strong);
+  color: var(--color-text-soft);
+  padding-left: 1rem;
+}
+
+.reader-markdown code {
+  background: var(--color-surface-muted);
+  border: var(--rule) solid var(--color-border);
+  border-radius: var(--radius);
+  font-family: inherit;
+  font-size: 0.875em;
+  padding: 0.1em 0.3em;
+}
+
+.reader-markdown pre {
+  background: var(--color-surface-muted);
+  border: var(--rule) solid var(--color-border);
+  border-radius: var(--radius);
+  overflow-x: auto;
+  padding: 0.875rem;
+  white-space: pre;
+}
+
+.reader-markdown pre code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
+
+.reader-markdown table {
+  border-collapse: collapse;
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  width: max-content;
+}
+
+.reader-markdown th,
+.reader-markdown td {
+  border: var(--rule) solid var(--color-border);
+  padding: 0.375rem 0.625rem;
+  text-align: left;
+}
+
+.reader-markdown th {
+  color: var(--color-text);
+}
+
+.reader-markdown hr {
+  border: 0;
+  border-top: var(--rule) solid var(--color-border);
+  margin: 1.5rem 0;
+}
+
+.reader-markdown a {
+  color: var(--color-accent-strong);
+}
+
+.reader-markdown-image {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
 .reader-source {
   color: var(--color-text-muted);
 }
