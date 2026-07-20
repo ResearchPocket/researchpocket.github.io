@@ -2995,6 +2995,14 @@ kbd {
     display: none;
   }
 
+  .reader-article {
+    height: 100%;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
   .reader-mobile-header {
     align-items: center;
     border-bottom: var(--rule) solid var(--color-border);
