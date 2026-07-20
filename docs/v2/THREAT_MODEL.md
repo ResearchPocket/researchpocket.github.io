@@ -46,7 +46,7 @@ from existing Git history are outside the V2 guarantee.
 | TM-10 | Deletion creates a tombstone. Historical erasure requires repository replacement or an explicit history rewrite. |
 | TM-11 | Native bookmarklet capture uses a per-user `researchpocket://capture` handler with a versioned, append-only field allowlist. The URI never selects a filesystem path, carries a credential, executes a command, or starts synchronization. |
 | TM-12 | The owner application has exclusive use of the `https://researchpocket.github.io` origin. The former `/ResearchPocket/` paths may contain only compatibility redirects built from the same protected source; no unrelated active Pages project may share the origin. |
-| TM-13 | Optional native enrichment starts only after the item and local retry job commit. Direct fetches are public-network-only and SSRF bounded; Firecrawl is explicit, provider-neutral capture URIs carry no key, and only normalized missing metadata is retained. |
+| TM-13 | Optional native enrichment starts only after the item and local retry job commit. Direct fetches are public-network-only and SSRF bounded; Firecrawl is explicit, provider-neutral capture URIs carry no key, and bounded cleaned Markdown may fill only a still-missing excerpt. |
 
 ## Trust boundaries
 
@@ -64,7 +64,7 @@ from existing Git history are outside the V2 guarantee.
 | Firefox bookmarklet | User-triggered but runs in the current page's untrusted browser context. The standard bookmarklet may send only the current page URL, bounded title/description/language values, and optional non-sensitive tags entered into its visibly labeled prompt in a versioned capture URI. The page may observe prompted text. |
 | OS protocol dispatcher | Trusted only to deliver one URI to the installed per-user handler. Browser and operating-system history, diagnostics, or other same-user processes may observe that payload. |
 | Native direct enrichment | Untrusted public HTTP(S) target. It may receive a metadata-only request for its own saved URL, but no owner credential, cookie, referrer, note, tag, browser state, or other library data. |
-| Firecrawl enrichment | Explicitly selected third party. It receives the saved target URL and the Firecrawl API credential, but no ResearchPocket library, note, tag, GitHub credential, or capture URI. Returned page content is discarded. |
+| Firecrawl enrichment | Explicitly selected third party. It receives the saved target URL and the Firecrawl API credential, but no ResearchPocket library, note, tag, GitHub credential, or capture URI. Returned cleaned Markdown may be retained in the private excerpt register up to 4 MiB. |
 | Other third-party pages and networks | Untrusted. They receive no owner data, analytics events, referrers containing secrets, or runtime requests from hosted owner mode. |
 
 The implemented browser-store, static-shell, and private synchronization
@@ -277,10 +277,16 @@ The Firecrawl provider sends the saved URL only after explicit local selection.
 It uses an authorization header against the configured `/v2/scrape` API and
 bounds the response. The request disables Firecrawl cache storage, requires
 target TLS validation, and selects the basic proxy tier to avoid silent enhanced
-proxy escalation. ResearchPocket retains only normalized title, excerpt, and
-language candidates; it discards Markdown, HTML, screenshots, and response
-bodies. Provider error categories are sanitized before entering retry state or
-diagnostics.
+proxy escalation. ResearchPocket retains bounded cleaned Markdown in a missing
+excerpt plus normalized title and language candidates; it discards raw HTML,
+screenshots, and all unselected response fields. Provider error categories are
+sanitized before entering retry state or diagnostics.
+
+The owner Reader treats retained Markdown as untrusted input. It renders parsed
+Markdown through React without raw HTML support, converts image syntax to inert
+text instead of issuing third-party requests, and opens explicit links in a new
+non-referring browsing context. The owner application's content security policy
+continues to deny arbitrary scripts, frames, objects, and remote images.
 
 Custom protocol schemes do not authenticate their caller. Firefox normally asks
 before handing an external link to an application, but a permission remembered

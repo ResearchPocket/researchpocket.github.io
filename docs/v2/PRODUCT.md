@@ -66,11 +66,13 @@ feeds; they do not need a ResearchPocket or GitHub account.
 
 - Save a URL immediately while offline; metadata enrichment may be retried and
   must never block or discard the save.
-- Fill only missing title, excerpt, and language metadata through an explicit
-  local direct fetch or user-configured Firecrawl service. Human-authored values
-  remain canonical across in-flight and concurrent edits, local job leases avoid
-  duplicate provider calls, and using Firecrawl is a visible third-party
-  disclosure.
+- Fill only missing title, excerpt, and language fields through an explicit
+  local direct fetch or user-configured Firecrawl service. Firecrawl enrichment
+  retains its bounded cleaned Markdown in the existing excerpt register for
+  offline reading; direct enrichment remains metadata-only. Human-authored
+  values remain canonical across in-flight and concurrent edits, local job
+  leases avoid duplicate provider calls, and using Firecrawl is a visible
+  third-party disclosure.
 - Capture bounded title, description, and language metadata from the current
   browser DOM plus optional non-sensitive prompted tags through the installed
   local protocol handler without requiring a browser extension or always-on

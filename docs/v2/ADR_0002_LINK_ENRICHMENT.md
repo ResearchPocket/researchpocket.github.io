@@ -3,6 +3,7 @@
 - Status: accepted
 - Date: 2026-07-18
 - Issue: [#65](https://github.com/ResearchPocket/researchpocket.github.io/issues/65)
+- Amended by: [ADR 0004](./ADR_0004_BOUNDED_FIRECRAWL_MARKDOWN.md)
 
 ## Context
 
@@ -14,9 +15,10 @@ allowed to lose the URL the owner chose to keep.
 The existing V2 domain already converges nullable title, excerpt, and language
 scalars. A browser has useful page metadata in its loaded DOM, while a native
 client can sometimes retrieve better metadata from the public page or from an
-explicitly selected extraction service. Full page bodies and files have very
-different size, retention, and synchronization requirements and remain outside
-this decision.
+explicitly selected extraction service. Full page bodies and files originally
+remained outside this decision. ADR 0004 subsequently permits bounded cleaned
+Firecrawl Markdown in the existing excerpt register; binary files and a general
+object archive remain deferred.
 
 ## Decision
 
@@ -76,8 +78,9 @@ calls the small Firecrawl `/v2/scrape` REST surface through its existing HTTP
 client; it does not add the Firecrawl Cargo SDK. The owner must deliberately
 configure Firecrawl and is told that the saved URL is sent to that third party.
 The request disables Firecrawl cache storage, requires target TLS validation,
-uses the predictable basic proxy tier, and bounds the response. Only metadata is
-retained, and the API-required returned Markdown is discarded.
+uses the predictable basic proxy tier, and bounds the response. ADR 0004
+supersedes the original discard behavior: bounded cleaned Markdown is retained
+as the missing excerpt while metadata continues to supply title and language.
 
 The Firecrawl key may come from the current process environment or a separate
 per-library credential file written from standard input. The file is created
@@ -109,13 +112,13 @@ Rejected. ResearchPocket needs one authenticated endpoint and already has an
 HTTP client. The SDK would add a second abstraction and more features than this
 human-directed metadata flow uses.
 
-### Store page Markdown, HTML, PDFs, or attachments with the item
+### Store page HTML, PDFs, or attachments with the item
 
-Deferred. Binary and full-page retention needs a separately negotiated,
+Deferred. Binary and raw-page retention needs a separately negotiated,
 content-addressed object protocol with hashes, quotas, immutable remote paths,
 orphan and garbage-collection rules, lazy restoration, integrity checks, and
-publication exclusions. Large bytes must not be embedded in Loro updates or the
-SQLite projection.
+publication exclusions. Binary objects and raw page bodies must not be embedded
+in Loro updates or the SQLite projection.
 
 ## Consequences
 

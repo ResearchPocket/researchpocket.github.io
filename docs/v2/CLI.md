@@ -127,10 +127,30 @@ parses only public HTML metadata.
 
 Firecrawl is never an automatic fallback. Selecting it means the saved target
 URL is sent to the configured Firecrawl service. ResearchPocket uses the narrow
-`/v2/scrape` REST endpoint through its existing HTTP client and retains only
-normalized metadata; it adds no Firecrawl Cargo dependency. The request disables
-Firecrawl cache storage, requires target TLS validation, uses the basic proxy
-tier, and discards returned Markdown or page content.
+`/v2/scrape` REST endpoint through its existing HTTP client. It retains cleaned
+Markdown in a missing excerpt, plus normalized title and language metadata, and
+adds no Firecrawl Cargo dependency. Markdown is preserved up to 4 MiB inside the
+existing convergent excerpt register; the complete JSON response is limited to
+8 MiB. Larger results fail explicitly and remain retryable without affecting the
+already-saved URL. The request includes the complete page instead of restricting
+extraction to main content, disables Firecrawl cache storage, requires target TLS
+validation, and uses the basic proxy tier.
+
+Passing an item ID and `--provider firecrawl` can upgrade an excerpt created by
+an earlier enrichment run. The replacement is allowed only while the current
+winning excerpt revision is enrichment-owned; authored excerpts and explicit
+clears remain ineligible.
+
+To deliberately re-parse a saved URL and replace any current excerpt, including
+authored content, use the explicit replacement flag:
+
+```sh
+research enrich run <item-id> --provider firecrawl --replace-excerpt
+```
+
+The job records the exact current excerpt revision before network access. If the
+excerpt changes while Firecrawl is running, the fetched Markdown is skipped and
+the newer local or synchronized value wins.
 
 Store the key in a separate per-library file without placing it in process
 arguments or shell history:
@@ -172,10 +192,12 @@ Jobs are local operational state. A short-lived transactional lease ensures two
 local CLI processes cannot contact the provider for the same job concurrently;
 an abandoned lease becomes retryable after it expires. Provider failures use
 bounded retries and a sanitized category; page bodies and credentials are never
-stored in a job. A successful result is one V2 edit/outbox update only when at
-least one eligible field is applied. Full webpage, Markdown, PDF, and attachment
-storage is outside this feature; see
-[ADR 0002](./ADR_0002_LINK_ENRICHMENT.md).
+stored in a job. Successful bounded Firecrawl Markdown is stored only through
+the normal excerpt mutation, not duplicated in the job. A successful result is
+one V2 edit/outbox update only when at least one eligible field is applied. Raw
+HTML, PDF, and attachment storage remains outside this feature; see
+[ADR 0002](./ADR_0002_LINK_ENRICHMENT.md) and
+[ADR 0004](./ADR_0004_BOUNDED_FIRECRAWL_MARKDOWN.md).
 
 ## Firefox bookmarklet capture
 

@@ -23,7 +23,8 @@ const FIRECRAWL_DEFAULT_API: &str = "https://api.firecrawl.dev";
 const MAX_CONFIG_BYTES: u64 = 64 * 1024;
 const MAX_KEY_BYTES: u64 = 16 * 1024;
 const MAX_DIRECT_BODY_BYTES: usize = 2 * 1024 * 1024;
-const MAX_FIRECRAWL_BODY_BYTES: usize = 2 * 1024 * 1024;
+const MAX_FIRECRAWL_BODY_BYTES: usize = 8 * 1024 * 1024;
+const MAX_FIRECRAWL_MARKDOWN_BYTES: usize = 4 * 1024 * 1024;
 const MAX_REDIRECTS: usize = 5;
 const MAX_TITLE_BYTES: usize = 4 * 1024;
 const MAX_EXCERPT_BYTES: usize = 8 * 1024;
@@ -348,7 +349,7 @@ async fn firecrawl_extract(
         .json(&json!({
             "url": target.as_str(),
             "formats": ["markdown"],
-            "onlyMainContent": true,
+            "onlyMainContent": false,
             "skipTlsVerification": false,
             "timeout": 30_000,
             "proxy": "basic",
@@ -378,13 +379,17 @@ async fn firecrawl_extract(
     if !payload.success {
         return Err(EnrichmentError::InvalidResponse);
     }
-    let metadata = payload
-        .data
-        .and_then(|data| data.metadata)
-        .ok_or(EnrichmentError::InvalidResponse)?;
+    firecrawl_candidates(payload)
+}
+
+fn firecrawl_candidates(payload: FirecrawlResponse) -> EnrichmentResult<EnrichmentCandidates> {
+    let data = payload.data.ok_or(EnrichmentError::InvalidResponse)?;
+    let metadata = data.metadata.unwrap_or_default();
+    let excerpt = bounded_markdown_candidate(data.markdown, MAX_FIRECRAWL_MARKDOWN_BYTES)?
+        .or_else(|| normalized_candidate(metadata.description, MAX_EXCERPT_BYTES));
     Ok(EnrichmentCandidates {
         title: normalized_candidate(metadata.title, MAX_TITLE_BYTES),
-        excerpt: normalized_candidate(metadata.description, MAX_EXCERPT_BYTES),
+        excerpt,
         language: normalized_candidate(metadata.language, MAX_LANGUAGE_BYTES),
     })
 }
@@ -397,14 +402,43 @@ struct FirecrawlResponse {
 
 #[derive(Deserialize)]
 struct FirecrawlData {
+    markdown: Option<String>,
     metadata: Option<FirecrawlMetadata>,
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 struct FirecrawlMetadata {
     title: Option<String>,
     description: Option<String>,
     language: Option<String>,
+}
+
+fn bounded_markdown_candidate(
+    value: Option<String>,
+    maximum: usize,
+) -> EnrichmentResult<Option<String>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let normalized_newlines = value.replace("\r\n", "\n").replace('\r', "\n");
+    let sanitized = normalized_newlines
+        .chars()
+        .map(|character| {
+            if character.is_control() && !matches!(character, '\n' | '\t') {
+                ' '
+            } else {
+                character
+            }
+        })
+        .collect::<String>();
+    let markdown = sanitized.trim();
+    if markdown.is_empty() {
+        return Ok(None);
+    }
+    if markdown.len() > maximum {
+        return Err(EnrichmentError::ResponseTooLarge);
+    }
+    Ok(Some(markdown.to_owned()))
 }
 
 async fn read_bounded_body(
@@ -787,6 +821,37 @@ fn key_path(data_dir: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn firecrawl_markdown_is_preserved_and_bounded() {
+        let markdown =
+            "# CSS Stuff\r\n\r\nA catalog with **formatting**.\r\n\t- Grid\r\n\t- Color";
+        let candidates = firecrawl_candidates(FirecrawlResponse {
+            success: true,
+            data: Some(FirecrawlData {
+                markdown: Some(markdown.to_owned()),
+                metadata: Some(FirecrawlMetadata {
+                    title: Some(" CSS Stuff ".to_owned()),
+                    description: Some("Short fallback".to_owned()),
+                    language: Some(" en ".to_owned()),
+                }),
+            }),
+        })
+        .expect("valid Firecrawl response");
+
+        assert_eq!(
+            candidates.excerpt.as_deref(),
+            Some("# CSS Stuff\n\nA catalog with **formatting**.\n\t- Grid\n\t- Color")
+        );
+        assert_eq!(candidates.title.as_deref(), Some("CSS Stuff"));
+        assert_eq!(candidates.language.as_deref(), Some("en"));
+
+        let oversized = "x".repeat(MAX_FIRECRAWL_MARKDOWN_BYTES + 1);
+        assert!(matches!(
+            bounded_markdown_candidate(Some(oversized), MAX_FIRECRAWL_MARKDOWN_BYTES),
+            Err(EnrichmentError::ResponseTooLarge)
+        ));
+    }
 
     #[test]
     fn private_networks_are_rejected_and_credentials_stay_separate() {

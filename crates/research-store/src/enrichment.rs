@@ -23,12 +23,37 @@ impl V2Store {
         item_id: &str,
         provider: EnrichmentProvider,
     ) -> StoreResult<EnrichmentJob> {
+        self.queue_item_enrichment_with_options(item_id, provider, false)
+            .await
+    }
+
+    pub async fn queue_item_enrichment_replacing_excerpt(
+        &self,
+        item_id: &str,
+        provider: EnrichmentProvider,
+    ) -> StoreResult<EnrichmentJob> {
+        self.queue_item_enrichment_with_options(item_id, provider, true)
+            .await
+    }
+
+    async fn queue_item_enrichment_with_options(
+        &self,
+        item_id: &str,
+        provider: EnrichmentProvider,
+        replace_excerpt: bool,
+    ) -> StoreResult<EnrichmentJob> {
         let mut connection = self.pool.acquire().await?;
         sqlx::query("BEGIN IMMEDIATE")
             .execute(&mut *connection)
             .await?;
         let result = async {
-            queue_enrichment_on_connection(&mut connection, item_id, provider).await?;
+            queue_enrichment_on_connection_with_options(
+                &mut connection,
+                item_id,
+                provider,
+                replace_excerpt,
+            )
+            .await?;
             required_enrichment_job(&mut connection, item_id).await
         }
         .await;
@@ -166,12 +191,23 @@ pub(crate) async fn queue_enrichment_on_connection(
     item_id: &str,
     provider: EnrichmentProvider,
 ) -> StoreResult<()> {
+    queue_enrichment_on_connection_with_options(connection, item_id, provider, false).await
+}
+
+async fn queue_enrichment_on_connection_with_options(
+    connection: &mut SqliteConnection,
+    item_id: &str,
+    provider: EnrichmentProvider,
+    replace_excerpt: bool,
+) -> StoreResult<()> {
     let item = canonical_item_from_connection(connection, item_id).await?;
     let targets = EnrichmentTargets {
         title_revision: (item.title.value.is_none() && item.title.revisions.len() == 1)
             .then(|| item.title.winner.clone()),
-        excerpt_revision: (item.excerpt.value.is_none() && item.excerpt.revisions.len() == 1)
-            .then(|| item.excerpt.winner.clone()),
+        excerpt_revision: (replace_excerpt
+            || (item.excerpt.value.is_none() && item.excerpt.revisions.len() == 1)
+            || enrichment_owned_revision(&item.excerpt.winner))
+        .then(|| item.excerpt.winner.clone()),
         language_revision: (item.language.value.is_none()
             && item.language.revisions.len() == 1)
             .then(|| item.language.winner.clone()),
@@ -246,9 +282,8 @@ async fn apply_enrichment_on_connection(
                 == Some(current_item.title.winner.as_str())
     });
     let excerpt = candidate(candidates.excerpt).filter(|_| {
-        current_item.excerpt.value.is_none()
-            && current_job.expected_excerpt_revision.as_deref()
-                == Some(current_item.excerpt.winner.as_str())
+        current_job.expected_excerpt_revision.as_deref()
+            == Some(current_item.excerpt.winner.as_str())
     });
     let language = candidate(candidates.language).filter(|_| {
         current_item.language.value.is_none()
@@ -283,10 +318,7 @@ async fn apply_enrichment_on_connection(
                 )?;
             }
             if let Some(excerpt) = &excerpt {
-                if item.excerpt.value.is_some()
-                    || expected_excerpt_revision.as_deref()
-                        != Some(item.excerpt.winner.as_str())
-                {
+                if expected_excerpt_revision.as_deref() != Some(item.excerpt.winner.as_str()) {
                     return Err(StoreError::StaleEdit);
                 }
                 library.write_excerpt(
@@ -581,6 +613,11 @@ fn enrichment_revision_id(operation_prefix: &str, field: &str) -> String {
     // `!` sorts before every app-generated UUID revision ID. Existing V2 clients therefore
     // deterministically prefer a concurrent human revision without changing the CRDT schema.
     format!("{ENRICHMENT_REVISION_PREFIX}/{operation_prefix}/{field}")
+}
+
+fn enrichment_owned_revision(revision_id: &str) -> bool {
+    revision_id.starts_with(ENRICHMENT_REVISION_PREFIX)
+        && revision_id.as_bytes().get(ENRICHMENT_REVISION_PREFIX.len()) == Some(&b'/')
 }
 
 fn lifecycle_state_name(state: LifecycleState) -> &'static str {

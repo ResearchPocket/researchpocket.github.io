@@ -40,10 +40,10 @@ pub enum Commands {
     /// Initialize a V2 library in the platform data directory
     Init,
 
-    /// Save a URL locally, with optional post-save metadata enrichment
+    /// Save a URL locally, with optional post-save link enrichment
     Add(AddArgs),
 
-    /// Configure and run optional link metadata enrichment
+    /// Configure and run optional link enrichment
     Enrich {
         #[command(subcommand)]
         command: EnrichCommands,
@@ -122,7 +122,7 @@ pub struct AddArgs {
     #[arg(long, value_name = "UNIX_SECONDS")]
     pub saved_at: Option<i64>,
 
-    /// Save first, then fill missing page metadata with this provider
+    /// Save first, then fill missing page data with this provider
     #[arg(long, value_enum, value_name = "PROVIDER")]
     pub enrich: Option<EnrichmentProviderArg>,
 }
@@ -144,7 +144,7 @@ pub enum EnrichCommands {
 
 #[derive(Args)]
 pub struct EnrichConfigureArgs {
-    /// Metadata provider used by queued and automatic enrichment
+    /// Provider used by queued and automatic enrichment
     #[arg(value_enum)]
     pub provider: EnrichmentProviderArg,
 
@@ -169,6 +169,10 @@ pub struct EnrichRunArgs {
     /// Provider for a newly queued item; defaults to local configuration
     #[arg(long, value_enum, value_name = "PROVIDER")]
     pub provider: Option<EnrichmentProviderArg>,
+
+    /// Explicitly replace the current excerpt after re-parsing the saved URL
+    #[arg(long, requires = "item_id")]
+    pub replace_excerpt: bool,
 
     /// Maximum due jobs to process when no item ID is supplied
     #[arg(long, default_value_t = 25, value_parser = parse_enrichment_limit)]
@@ -357,7 +361,7 @@ pub enum OutputFormat {
 pub enum EnrichmentProviderArg {
     /// Fetch public HTML directly from this device
     Direct,
-    /// Send the URL to an explicitly configured Firecrawl API
+    /// Send the URL to Firecrawl and retain bounded Markdown in the excerpt
     Firecrawl,
 }
 

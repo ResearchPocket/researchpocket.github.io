@@ -265,6 +265,7 @@ async fn handle_enrich(
                     data_dir,
                     item_id,
                     run.provider.map(store_provider),
+                    run.replace_excerpt,
                 )
                 .await?
                 {
@@ -291,8 +292,34 @@ async fn explicit_enrichment_job(
     data_dir: &Path,
     item_id: &str,
     requested_provider: Option<EnrichmentProvider>,
+    replace_excerpt: bool,
 ) -> CliResult<Option<EnrichmentClaim>> {
-    match store.enrichment_job(item_id).await? {
+    let existing = store.enrichment_job(item_id).await?;
+    if replace_excerpt {
+        if existing
+            .as_ref()
+            .is_some_and(|job| job.status == StoreEnrichmentStatus::InProgress)
+        {
+            return Err(io::Error::other(
+                "this item is already being enriched; retry after its local lease expires",
+            )
+            .into());
+        }
+        let provider = match requested_provider.or(existing.as_ref().map(|job| job.provider)) {
+            Some(provider) => provider,
+            None => configured_provider(data_dir)?.ok_or_else(|| {
+                io::Error::other(
+                    "no enrichment provider is configured; pass --provider or run enrich configure",
+                )
+            })?,
+        };
+        let queued = store
+            .queue_item_enrichment_replacing_excerpt(item_id, provider)
+            .await?;
+        return claim_queued_enrichment(store, queued).await;
+    }
+
+    match existing {
         Some(job)
             if matches!(
                 job.status,
