@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; base-uri 'none'; connect-src 'self' https://api.github.com; font-src 'self'; form-action 'none'; frame-src 'none'; img-src 'self'; manifest-src 'self'; object-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; worker-src 'self'; upgrade-insecure-requests"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#1a150c" />
+    <meta
+      name="description"
+      content="A concise overview of ResearchPocket, the private, local-first library for useful links."
+    />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://researchpocket.github.io/overview/" />
+    <link rel="icon" href="../favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/src/styles/tokens.css" />
+    <link rel="stylesheet" href="/src/styles/base.css" />
+    <link rel="stylesheet" href="/src/styles/app.css" />
+    <title>Product overview — ResearchPocket</title>
+  </head>
+  <body class="overview-body">
+    <a class="skip-link" href="#overview">Skip to overview</a>
+
+    <header class="overview-header">
+      <a aria-label="ResearchPocket welcome" class="site-brand" href="../">
+        <span aria-hidden="true" class="brand-mark">rp</span>
+        <span>ResearchPocket</span>
+      </a>
+      <nav aria-label="Overview navigation">
+        <a href="https://github.com/ResearchPocket/researchpocket.github.io">Source</a>
+        <a class="overview-open" href="../app/">Open app</a>
+      </nav>
+    </header>
+
+    <main class="overview-main" id="overview" tabindex="-1">
+      <section class="overview-intro" aria-labelledby="overview-heading">
+        <p class="eyebrow">Product overview</p>
+        <h1 id="overview-heading">A private place for the useful parts of the web.</h1>
+        <p>
+          ResearchPocket saves URLs together with the title, note, tags, and
+          favorite state you choose. The library works offline and remains on
+          your device unless you explicitly connect private sync.
+        </p>
+        <div class="overview-actions">
+          <a class="primary-link" href="../app/#new">Start a new library</a>
+          <a class="secondary-link" href="../app/#restore">Restore from sync</a>
+        </div>
+      </section>
+
+      <section class="overview-grid" aria-label="ResearchPocket principles">
+        <article>
+          <span>01</span>
+          <h2>Capture</h2>
+          <p>Save a URL quickly, then add only the context that helps you find it again.</p>
+        </article>
+        <article>
+          <span>02</span>
+          <h2>Curate</h2>
+          <p>Search and refine your own titles, private notes, tags, favorites, and archive.</p>
+        </article>
+        <article>
+          <span>03</span>
+          <h2>Sync</h2>
+          <p>Optionally carry immutable updates through one private GitHub repository.</p>
+        </article>
+      </section>
+
+      <section class="overview-details" aria-labelledby="ownership-heading">
+        <div>
+          <p class="eyebrow">Local-first by design</p>
+          <h2 id="ownership-heading">Your devices build the library.</h2>
+        </div>
+        <div>
+          <p>
+            IndexedDB and SQLite remain local materialized views. Private sync
+            transports immutable CRDT updates, so application state converges
+            without Git deciding which edit wins.
+          </p>
+          <p>
+            There is no ResearchPocket account, hosted application database,
+            advertising profile, analytics script, or AI-generated memory feed.
+          </p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="overview-footer">
+      <p>local-first · private by default · no tracking</p>
+      <a href="../">← Back to welcome</a>
+    </footer>
+  </body>
+</html>

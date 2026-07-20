@@ -1,38 +1,38 @@
 @font-face {
   font-display: swap;
-  font-family: "Berkeley Mono";
+  font-family: "TX-02";
   font-style: normal;
   font-weight: 400;
-  src: url("../assets/fonts/BerkeleyMono-Regular.woff2") format("woff2");
+  src: url("../assets/fonts/TX-02-Regular.woff2") format("woff2");
 }
 
 @font-face {
   font-display: swap;
-  font-family: "Berkeley Mono";
+  font-family: "TX-02";
   font-style: italic;
   font-weight: 400;
-  src: url("../assets/fonts/BerkeleyMono-Italic.woff2") format("woff2");
+  src: url("../assets/fonts/TX-02-Oblique.woff2") format("woff2");
 }
 
 @font-face {
   font-display: swap;
-  font-family: "Berkeley Mono";
+  font-family: "TX-02";
   font-style: normal;
   font-weight: 700;
-  src: url("../assets/fonts/BerkeleyMono-Bold.woff2") format("woff2");
+  src: url("../assets/fonts/TX-02-Bold.woff2") format("woff2");
 }
 
 @font-face {
   font-display: swap;
-  font-family: "Berkeley Mono";
+  font-family: "TX-02";
   font-style: italic;
   font-weight: 700;
-  src: url("../assets/fonts/BerkeleyMono-BoldItalic.woff2") format("woff2");
+  src: url("../assets/fonts/TX-02-BoldOblique.woff2") format("woff2");
 }
 
 :root {
   color-scheme: dark;
-  font-family: "Berkeley Mono", ui-monospace, monospace;
+  font-family: "TX-02", ui-monospace, monospace;
   font-synthesis: none;
 
   --text: #f5f1e9;
@@ -42,16 +42,22 @@
   --accent: #5156ae;
 
   --color-canvas: var(--background);
-  --color-surface: color-mix(in srgb, var(--background) 94%, var(--text));
-  --color-surface-raised: color-mix(in srgb, var(--background) 90%, var(--text));
-  --color-surface-muted: color-mix(in srgb, var(--background) 84%, var(--text));
+  --color-surface: #22201a;
+  --color-surface-raised: #241f16;
+  --color-surface-muted: #28251d;
   --color-text: var(--text);
-  --color-text-muted: color-mix(in srgb, var(--text) 68%, var(--background));
-  --color-border: color-mix(in srgb, var(--primary) 28%, var(--background));
-  --color-border-strong: color-mix(in srgb, var(--primary) 52%, var(--background));
+  --color-text-muted: #8d8574;
+  --color-text-soft: #b3ab9c;
+  --color-text-reader: #ddd6c6;
+  --color-favorite-muted: #5c5544;
+  --color-border: #40382a;
+  --color-border-subtle: #2c261b;
+  --color-border-strong: #6f664f;
   --color-accent: var(--secondary);
   --color-accent-strong: var(--primary);
-  --color-accent-soft: color-mix(in srgb, var(--secondary) 42%, var(--background));
+  --color-accent-soft: #243230;
+  --color-reader-note: #20201a;
+  --color-backdrop: color-mix(in srgb, var(--color-canvas) 52%, transparent);
   --color-danger: color-mix(in srgb, var(--primary) 62%, var(--accent));
   --color-danger-soft: color-mix(in srgb, var(--accent) 28%, var(--background));
   --color-focus: color-mix(in srgb, var(--accent) 62%, var(--text));

@@ -16,6 +16,7 @@ function walk(directory) {
 for (const requiredFile of [
   "index.html",
   "app/index.html",
+  "overview/index.html",
   "sw.js",
   "manifest.webmanifest",
   "asset-manifest.json",
@@ -85,7 +86,7 @@ for (const [name, markers] of [
   }
 }
 
-const documents = ["index.html", "app/index.html"];
+const documents = ["index.html", "app/index.html", "overview/index.html"];
 for (const document of documents) {
   const path = resolve(distRoot, document);
   if (!existsSync(path)) continue;

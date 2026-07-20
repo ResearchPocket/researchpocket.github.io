@@ -36,7 +36,10 @@ type LifecycleFilter = "active" | "deleted" | "all";
 type SearchScope = "all" | "title" | "url" | "context" | "tags";
 type SortMode = "recent" | "oldest" | "title";
 type TagMatchMode = "any" | "all";
-type WorkspaceView = "library" | "sync";
+type WorkspaceView = "library" | "settings" | "sync";
+type Density = "comfortable" | "compact";
+
+const DENSITY_STORAGE_KEY = "researchpocket.ui.density";
 
 const LIST_BATCH_SIZE = 100;
 
@@ -71,14 +74,18 @@ export function App() {
   const [tagSearch, setTagSearch] = useState("");
   const [tagMatchMode, setTagMatchMode] = useState<TagMatchMode>("all");
   const [sortMode, setSortMode] = useState<SortMode>("recent");
+  const [density, setDensity] = useState<Density>(() => readDensityPreference());
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [visibleLimit, setVisibleLimit] = useState(LIST_BATCH_SIZE);
   const [view, setView] = useState<WorkspaceView>(() =>
     window.location.hash === "#restore" ? "sync" : "library",
   );
   const [capturing, setCapturing] = useState(false);
+  const [commandOpen, setCommandOpen] = useState(false);
+  const [readerItem, setReaderItem] = useState<LibraryItemView | null>(null);
   const [editingItem, setEditingItem] = useState<LibraryItemView | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [autoBootstrapAttempted, setAutoBootstrapAttempted] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
   const captureOpenerRef = useRef<HTMLButtonElement | null>(null);
@@ -102,6 +109,48 @@ export function App() {
     };
   }, []);
 
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(DENSITY_STORAGE_KEY, density);
+    } catch {
+      // The preference remains active for this tab when storage is unavailable.
+    }
+  }, [density]);
+
+  useEffect(() => {
+    function handleShortcut(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      const isTyping =
+        target?.matches("input, textarea, select") || target?.isContentEditable;
+
+      if (
+        event.ctrlKey &&
+        event.shiftKey &&
+        !event.altKey &&
+        !event.metaKey &&
+        event.key.toLowerCase() === "p"
+      ) {
+        event.preventDefault();
+        setCommandOpen(true);
+        return;
+      }
+
+      if (event.key === "Escape") {
+        setCommandOpen(false);
+        closeReader();
+        return;
+      }
+
+      if (!isTyping && event.key === "/") {
+        event.preventDefault();
+        document.querySelector<HTMLInputElement>("#library-search")?.focus();
+      }
+    }
+
+    window.addEventListener("keydown", handleShortcut);
+    return () => window.removeEventListener("keydown", handleShortcut);
+  }, []);
+
   const items = libraryState.items as unknown as LibraryItemView[];
   const activeCount = items.filter((item) => !item.deleted).length;
   const deletedCount = items.length - activeCount;
@@ -112,6 +161,30 @@ export function App() {
       ),
     [items],
   );
+  const tagCounts = useMemo(
+    () =>
+      knownTags.map((tag) => ({
+        count: items.filter((item) => !item.deleted && item.tags.includes(tag)).length,
+        tag,
+      })),
+    [items, knownTags],
+  );
+
+  useEffect(() => {
+    function restoreReaderFromHistory() {
+      const match = window.location.hash.match(/^#item=(.+)$/);
+      if (!match) {
+        setReaderItem(null);
+        return;
+      }
+      const itemId = decodeURIComponent(match[1]!);
+      setReaderItem(items.find((item) => item.id === itemId) ?? null);
+    }
+
+    window.addEventListener("popstate", restoreReaderFromHistory);
+    restoreReaderFromHistory();
+    return () => window.removeEventListener("popstate", restoreReaderFromHistory);
+  }, [items]);
   const deferredQuery = useDeferredValue(query);
   const visibleItems = useMemo(
     () =>
@@ -188,6 +261,22 @@ export function App() {
     }
   }
 
+  useEffect(() => {
+    if (
+      libraryState.loading ||
+      libraryState.initialized ||
+      autoBootstrapAttempted ||
+      busyAction !== null
+    ) {
+      return;
+    }
+
+    const target = window.location.hash;
+    if (target !== "#new" && target !== "#restore") return;
+    setAutoBootstrapAttempted(true);
+    void initializeLibrary(target === "#restore" ? "sync" : "library");
+  }, [autoBootstrapAttempted, busyAction, libraryState.initialized, libraryState.loading]);
+
   async function addItem(input: AddInput) {
     const saved = await runAction("Save link", "Saved to your local library.", () =>
       libraryRepository.add(input),
@@ -214,6 +303,18 @@ export function App() {
     }
   }
 
+  async function toggleFavorite(item: LibraryItemView) {
+    await runAction(
+      item.favorite ? "Remove favorite" : "Add favorite",
+      item.favorite ? "Removed from favorites." : "Added to favorites.",
+      () =>
+        libraryRepository.edit(item.id, {
+          favorite: !item.favorite,
+          expectedNote: item.note ?? null,
+        }),
+    );
+  }
+
   async function saveEdit(item: LibraryItemView, input: EditInput) {
     const saved = await runAction("Update link", "Changes saved locally.", () =>
       libraryRepository.edit(item.id, {
@@ -233,6 +334,31 @@ export function App() {
     setEditingItem(item);
   }
 
+  function openReader(item: LibraryItemView, replace = false) {
+    const nextUrl = `${window.location.pathname}${window.location.search}#item=${encodeURIComponent(item.id)}`;
+    const nextState = { ...window.history.state, researchPocketReader: true };
+    if (replace) window.history.replaceState(nextState, "", nextUrl);
+    else window.history.pushState(nextState, "", nextUrl);
+    setReaderItem(item);
+  }
+
+  function closeReader() {
+    if (!window.location.hash.startsWith("#item=")) {
+      setReaderItem(null);
+      return;
+    }
+    if (window.history.state?.researchPocketReader) {
+      window.history.back();
+      return;
+    }
+    window.history.replaceState(
+      window.history.state,
+      "",
+      `${window.location.pathname}${window.location.search}`,
+    );
+    setReaderItem(null);
+  }
+
   function toggleTagFilter(tag: string) {
     const selected = selectedTags.includes(tag);
     setSelectedTags((current) =>
@@ -242,6 +368,7 @@ export function App() {
     );
     setTagSearch("");
     setFiltersOpen(true);
+    setView("library");
     setAnnouncement(
       selected ? `Removed ${tag} tag filter.` : `Filtering by ${tag}.`,
     );
@@ -308,56 +435,126 @@ export function App() {
             <span aria-hidden="true" className="brand-mark">
               rp
             </span>
-            <div>
-              <p className="brand-name">ResearchPocket</p>
-              <p className="brand-context">owner workspace</p>
-            </div>
+            <p className="brand-name">ResearchPocket</p>
+            <p className="brand-context">owner workspace</p>
           </a>
 
-          <div className="local-status" role="status">
-            <span aria-hidden="true" className="status-dot" />
-            <span className="status-label">local</span>
-            <span className="status-copy">
-              {formatHeaderStatus(libraryState.status, libraryState.pendingCount)}
-            </span>
+          <div className="masthead-actions">
+            <div className="local-status" role="status">
+              <span aria-hidden="true" className="status-dot" />
+              <span className="status-label">local</span>
+              <span className="status-copy">
+                {formatHeaderStatus(libraryState.status, libraryState.pendingCount)}
+              </span>
+            </div>
+            <button
+              className="command-trigger"
+              onClick={() => setCommandOpen(true)}
+              type="button"
+            >
+              search or command <kbd>Ctrl Shift P</kbd>
+            </button>
           </div>
         </header>
-
-        <nav aria-label="Workspace views" className="workspace-nav">
-          <button
-            aria-pressed={view === "library"}
-            onClick={() => setView("library")}
-            type="button"
-          >
-            Library <span>{activeCount}</span>
-          </button>
-          <button
-            className="workspace-action"
-            onClick={(event) => openCapture(event.currentTarget)}
-            type="button"
-          >
-            + New save
-          </button>
-          <button
-            aria-pressed={view === "sync"}
-            onClick={() => setView("sync")}
-            type="button"
-          >
-            Sync <span>{libraryState.pendingCount}</span>
-          </button>
-        </nav>
       </div>
 
-      <main id="workspace" tabIndex={-1}>
-        <h1 className="sr-only">ResearchPocket owner library</h1>
+      <div className="workspace-layout">
+        <aside className="tag-rail">
+          <nav aria-label="Library views" className="rail-nav">
+            <button
+              aria-current={view === "library" && filter === "active" && !favoriteOnly ? "page" : undefined}
+              onClick={() => {
+                setView("library");
+                setFilter("active");
+                setFavoriteOnly(false);
+                setSelectedTags([]);
+              }}
+              type="button"
+            >
+              <span>All saves</span><small>{activeCount}</small>
+            </button>
+            <button
+              aria-current={view === "library" && favoriteOnly ? "page" : undefined}
+              onClick={() => {
+                setView("library");
+                setFilter("active");
+                setFavoriteOnly(true);
+                setSelectedTags([]);
+              }}
+              type="button"
+            >
+              <span>★ Favorites</span>
+              <small>{items.filter((item) => !item.deleted && item.favorite).length}</small>
+            </button>
+            <button
+              aria-current={view === "library" && filter === "deleted" ? "page" : undefined}
+              onClick={() => {
+                setView("library");
+                setFilter("deleted");
+                setFavoriteOnly(false);
+                setSelectedTags([]);
+              }}
+              type="button"
+            >
+              <span>Archive</span><small>{deletedCount}</small>
+            </button>
+          </nav>
+
+          <div className="rail-tags">
+            <div className="rail-heading">
+              <p>Tags</p>
+              <button onClick={() => setFiltersOpen(true)} type="button">manage</button>
+            </div>
+            <div className="rail-tag-list">
+              {tagCounts.map(({ count, tag }) => (
+                <button
+                  aria-current={selectedTags.includes(tag) ? "page" : undefined}
+                  key={tag}
+                  onClick={() => toggleTagFilter(tag)}
+                  type="button"
+                >
+                  <span>#{tag}</span><small>{count}</small>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <nav aria-label="Workspace utilities" className="rail-utilities">
+            <button onClick={() => setView("sync")} type="button">
+              <span>Sync</span><small>{libraryState.pendingCount} pending</small>
+            </button>
+            <button
+              aria-current={view === "settings" ? "page" : undefined}
+              onClick={() => setView("settings")}
+              type="button"
+            >
+              <span>Settings</span>
+            </button>
+          </nav>
+        </aside>
+
+        <main id="workspace" tabIndex={-1}>
+          <h1 className="sr-only">ResearchPocket owner library</h1>
 
         <SyncPanel
+          activeItemIds={new Set(items.filter((item) => !item.deleted).map((item) => item.id))}
+          busy={busyAction !== null}
           hidden={view !== "sync"}
+          onDeletePendingItem={(itemId) => {
+            const item = items.find((candidate) => candidate.id === itemId);
+            if (item && !item.deleted) void deleteItem(item);
+          }}
           pendingChanges={libraryState.pendingChanges}
           state={syncState}
         />
 
-        <section
+        <SettingsPanel
+          density={density}
+          hidden={view !== "settings"}
+          onDensityChange={setDensity}
+        />
+
+          <section
           aria-busy={searchPending}
           aria-labelledby="library-heading"
           className="library-section"
@@ -365,14 +562,27 @@ export function App() {
           id="library"
         >
           <div className="library-heading-row">
-            <div>
-              <p className="eyebrow">Library</p>
-              <h2 id="library-heading">Things you chose to keep</h2>
+            <div className="library-title">
+              <h2 id="library-heading">
+                {favoriteOnly ? "Favorites" : filter === "deleted" ? "Archive" : selectedTags.length === 1 ? `#${selectedTags[0]}` : "All saves"}
+              </h2>
+              <p className="library-count">{pluralize(visibleItems.length, "item")}</p>
             </div>
-            <p className="library-count">
-              {pluralize(activeCount, "active save")}
-            </p>
+            <div className="density-controls" aria-label="List density">
+              <button aria-pressed={density === "compact"} onClick={() => setDensity("compact")} type="button">compact</button>
+              <button aria-pressed={density === "comfortable"} onClick={() => setDensity("comfortable")} type="button">comfortable</button>
+            </div>
+            <label className="sort-control">
+              <span className="sr-only">Sort order</span>
+              <select onChange={(event) => setSortMode(event.target.value as SortMode)} value={sortMode}>
+                <option value="recent">newest ↓</option>
+                <option value="oldest">oldest ↑</option>
+                <option value="title">title A–Z</option>
+              </select>
+            </label>
           </div>
+
+          <QuickAdd busy={busyAction !== null} onAdd={addItem} />
 
           <div className="library-tools">
             <div className="search-control" role="search">
@@ -559,7 +769,7 @@ export function App() {
           {visibleItems.length === 0 ? (
             <EmptyLibrary filter={filter} hasQuery={query.trim().length > 0} />
           ) : (
-            <ol className="item-list">
+            <ol className={`item-list item-list-${density}`}>
               {renderedItems.map((item) => (
                 <LibraryItem
                   busy={busyAction !== null}
@@ -567,6 +777,8 @@ export function App() {
                   key={item.id}
                   onDelete={deleteItem}
                   onEdit={openEditor}
+                  onFavorite={toggleFavorite}
+                  onRead={openReader}
                   onRestore={restoreItem}
                   onToggleTagFilter={toggleTagFilter}
                   selectedTags={selectedTags}
@@ -588,13 +800,21 @@ export function App() {
               ? "Updating library results."
               : `Showing ${renderedItems.length.toLocaleString()} of ${pluralize(visibleItems.length, "result")}`}
           </div>
-        </section>
-      </main>
-
-      <footer>
-        <p>local-first / private by default / no tracking</p>
-        <a href="../">About and releases</a>
-      </footer>
+          <footer className="keyboard-footer">
+            <span><b>Ctrl Shift P</b> command</span>
+            <span><b>/</b> search</span>
+            <span><b>⏎</b> reader</span>
+            <span><b>↗</b> open</span>
+            <span className="keyboard-footer-note">local-first · private · no tracking</span>
+          </footer>
+          </section>
+        </main>
+        <nav aria-label="Mobile actions" className="mobile-actions">
+          <button className="primary-button" onClick={(event) => openCapture(event.currentTarget)} type="button">＋ Save a link</button>
+          <button className="secondary-button" onClick={() => setView("sync")} type="button">Sync {libraryState.pendingCount}</button>
+          <button className="secondary-button" onClick={() => setView("settings")} type="button">Settings</button>
+        </nav>
+      </div>
 
       <div aria-atomic="true" aria-live="polite" className="sr-only">
         {announcement}
@@ -632,6 +852,44 @@ export function App() {
           onClose={closeCapture}
         />
       ) : null}
+
+      {commandOpen ? (
+        <CommandPalette
+          items={items.filter((item) => !item.deleted)}
+          onClose={() => setCommandOpen(false)}
+          onFilterTag={(tag) => {
+            setView("library");
+            setSelectedTags([tag]);
+            setCommandOpen(false);
+          }}
+          onNewSave={() => {
+            setCommandOpen(false);
+            setCapturing(true);
+          }}
+          onOpenItem={(item) => {
+            openReader(item);
+            setCommandOpen(false);
+          }}
+          onSync={() => {
+            setView("sync");
+            setCommandOpen(false);
+          }}
+          tags={tagCounts}
+        />
+      ) : null}
+
+      {readerItem ? (
+        <ReaderView
+          busy={busyAction !== null}
+          item={items.find((item) => item.id === readerItem.id) ?? readerItem}
+          items={visibleItems}
+          onBack={closeReader}
+          onDelete={deleteItem}
+          onEdit={openEditor}
+          onFavorite={toggleFavorite}
+          onSelect={(item) => openReader(item, true)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -665,78 +923,117 @@ function Welcome({
         <div aria-hidden="true" className="welcome-monogram">
           rp
         </div>
-        <p className="eyebrow">ResearchPocket / owner app</p>
         <h1 id="welcome-heading">
           {restoreFirst
-            ? "Bring your existing library into this browser."
-            : "Choose how this browser should begin."}
+            ? "Bring your library into this browser."
+            : "Where should this browser start?"}
         </h1>
         <p className="welcome-copy">
-          This device keeps its own private, offline replica. Start with an empty
-          library or restore the library already synchronized by your CLI or
-          another browser.
+          Your library lives on this device. Nothing leaves it until you connect
+          private sync.
         </p>
-
-        <div className="privacy-note">
-          <strong>Local and private by default</strong>
-          <span>
-            Nothing leaves this device until you choose to connect private sync.
-          </span>
-        </div>
 
         {error ? <p role="alert">{error}</p> : null}
 
         <div className="onboarding-options">
-          <section className={restoreFirst ? "onboarding-option onboarding-option-priority" : "onboarding-option"}>
-            <p className="eyebrow">Existing owner</p>
-            <h2>Restore from private sync</h2>
-            <p>
-              Prepare a pristine local replica, then enter the private repository
-              and fine-grained GitHub token used by your other devices.
-            </p>
-            <button
-              className={restoreFirst ? "primary-button" : "secondary-button"}
-              disabled={busy}
-              onClick={() => void onRestore()}
-              type="button"
-            >
-              {busy ? "Preparing browser…" : "Continue to private sync"}
-            </button>
-          </section>
-
-          <section className={!restoreFirst ? "onboarding-option onboarding-option-priority" : "onboarding-option"}>
-            <p className="eyebrow">New library</p>
-            <h2>Start locally</h2>
-            <p>
-              Create an empty offline library in this browser. You can connect a
-              new private synchronization repository later.
-            </p>
-            <button
-              className={!restoreFirst ? "primary-button" : "secondary-button"}
-              disabled={busy}
-              onClick={() => void onInitialize()}
-              type="button"
-            >
-              {busy ? "Creating library…" : "Create a local library"}
-            </button>
-          </section>
+          <button className={!restoreFirst ? "onboarding-choice onboarding-choice-priority" : "onboarding-choice"} disabled={busy} onClick={() => void onInitialize()} type="button">
+            <span aria-hidden="true">&gt;</span>
+            <span><strong>Start a new library</strong><small>Empty, offline, ready now. Connect sync whenever.</small></span>
+            <kbd>↵</kbd>
+          </button>
+          <button className={restoreFirst ? "onboarding-choice onboarding-choice-priority" : "onboarding-choice"} disabled={busy} onClick={() => void onRestore()} type="button">
+            <span aria-hidden="true">&gt;</span>
+            <span><strong>Restore from private sync</strong><small>Pull the library your CLI or another browser already syncs.</small></span>
+            <kbd>R</kbd>
+          </button>
         </div>
 
         <p className="welcome-footnote">
-          Restore before making a new save. Browser storage must remain enabled
-          to keep either local copy. <a href="../">Return to the product overview.</a>
+          Restoring first avoids merges. Keep browser storage enabled. <a href="../">Product overview</a>
         </p>
       </section>
     </main>
   );
 }
 
-function SyncPanel({
+function SettingsPanel({
+  density,
   hidden,
+  onDensityChange,
+}: {
+  density: Density;
+  hidden: boolean;
+  onDensityChange: (density: Density) => void;
+}) {
+  return (
+    <section
+      aria-labelledby="settings-heading"
+      className="settings-section"
+      hidden={hidden}
+      id="settings"
+    >
+      <header className="settings-heading">
+        <p className="eyebrow">Workspace</p>
+        <h2 id="settings-heading">Settings</h2>
+        <p>Preferences stay in this browser and never become library data.</p>
+      </header>
+
+      <div className="settings-group">
+        <div>
+          <h3>Appearance</h3>
+          <p>Adjust how much context appears in the library list.</p>
+        </div>
+        <label className="setting-row" htmlFor="compact-mode">
+          <span>
+            <strong>Compact mode</strong>
+            <small>Fit more saves on screen by hiding previews and tightening rows.</small>
+          </span>
+          <input
+            checked={density === "compact"}
+            id="compact-mode"
+            onChange={(event) =>
+              onDensityChange(event.target.checked ? "compact" : "comfortable")
+            }
+            type="checkbox"
+          />
+        </label>
+      </div>
+
+      <div className="settings-group">
+        <div>
+          <h3>Keyboard</h3>
+          <p>Shortcuts are available outside text fields.</p>
+        </div>
+        <dl className="shortcut-list">
+          <div><dt>Command palette</dt><dd><kbd>Ctrl Shift P</kbd></dd></div>
+          <div><dt>Search library</dt><dd><kbd>/</kbd></dd></div>
+          <div><dt>Close a focused view</dt><dd><kbd>Esc</kbd></dd></div>
+        </dl>
+      </div>
+
+      <div className="settings-group">
+        <div>
+          <h3>Local data</h3>
+          <p>Your library and this preference remain on this device unless you explicitly connect private sync.</p>
+        </div>
+        <p className="settings-status"><span aria-hidden="true" className="status-dot" /> Browser storage enabled</p>
+      </div>
+    </section>
+  );
+}
+
+function SyncPanel({
+  activeItemIds,
+  busy,
+  hidden,
+  onDeletePendingItem,
   pendingChanges,
   state,
 }: {
+  activeItemIds: ReadonlySet<string>;
+  busy: boolean;
   hidden: boolean;
+  onDeletePendingItem: (itemId: string) => void;
   pendingChanges: PendingSyncChange[];
   state: BrowserSyncState;
 }) {
@@ -813,8 +1110,11 @@ function SyncPanel({
 
       <div className="sync-content">
         <PendingSyncChanges
+          activeItemIds={activeItemIds}
           changes={pendingChanges}
           hasSynced={Boolean(remote?.lastSuccessAt)}
+          mutating={busy}
+          onDeleteItem={onDeletePendingItem}
           syncing={state.syncing}
         />
 
@@ -904,12 +1204,18 @@ function SyncPanel({
 }
 
 function PendingSyncChanges({
+  activeItemIds,
   changes,
   hasSynced,
+  mutating,
+  onDeleteItem,
   syncing,
 }: {
+  activeItemIds: ReadonlySet<string>;
   changes: PendingSyncChange[];
   hasSynced: boolean;
+  mutating: boolean;
+  onDeleteItem: (itemId: string) => void;
   syncing: boolean;
 }) {
   return (
@@ -937,6 +1243,17 @@ function PendingSyncChanges({
                 <p>{pendingChangeDetails(change)}</p>
               </div>
               <time dateTime={change.enqueuedAt}>{formatDateTime(change.enqueuedAt)}</time>
+              {change.kind === "create" && change.itemId && activeItemIds.has(change.itemId) ? (
+                <button
+                  aria-label={`Delete pending item ${change.label}`}
+                  className="sync-change-delete"
+                  disabled={syncing || mutating}
+                  onClick={() => onDeleteItem(change.itemId!)}
+                  type="button"
+                >
+                  Delete item
+                </button>
+              ) : null}
             </li>
           ))}
         </ol>
@@ -979,6 +1296,196 @@ function TokenFields() {
         Contents read and write access. Leave the box off to keep it in memory only.
       </p>
     </>
+  );
+}
+
+function QuickAdd({
+  busy,
+  onAdd,
+}: {
+  busy: boolean;
+  onAdd: (input: AddInput) => Promise<boolean>;
+}) {
+  const [value, setValue] = useState("");
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const parts = value.trim().split(/\s+/);
+    const url = parts.find((part) => !part.startsWith("#")) ?? "";
+    const tags = parts
+      .filter((part) => part.startsWith("#") && part.length > 1)
+      .map((part) => part.slice(1));
+    if (!url) return;
+    if (await onAdd({ favorite: false, tags, url } as AddInput)) setValue("");
+  }
+
+  return (
+    <form className="quick-add" onSubmit={(event) => void submit(event)}>
+      <span aria-hidden="true">+</span>
+      <label className="sr-only" htmlFor="quick-add-url">Quickly save a URL</label>
+      <input
+        autoCapitalize="none"
+        autoComplete="url"
+        disabled={busy}
+        id="quick-add-url"
+        inputMode="url"
+        onChange={(event) => setValue(event.target.value)}
+        placeholder="Paste or type a URL — ↵ saves it. Add #tags right here."
+        type="text"
+        value={value}
+      />
+      <span className="quick-add-hint">or ⌘V anywhere</span>
+    </form>
+  );
+}
+
+function CommandPalette({
+  items,
+  onClose,
+  onFilterTag,
+  onNewSave,
+  onOpenItem,
+  onSync,
+  tags,
+}: {
+  items: LibraryItemView[];
+  onClose: () => void;
+  onFilterTag: (tag: string) => void;
+  onNewSave: () => void;
+  onOpenItem: (item: LibraryItemView) => void;
+  onSync: () => void;
+  tags: { count: number; tag: string }[];
+}) {
+  const [query, setQuery] = useState("");
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const normalized = query.trim().toLocaleLowerCase();
+  const matchingTags = tags
+    .filter(({ tag }) => !normalized || tag.toLocaleLowerCase().includes(normalized))
+    .slice(0, 5);
+  const matchingItems = items
+    .filter((item) =>
+      !normalized || [item.title, item.url, ...item.tags]
+        .filter(Boolean)
+        .some((value) => value!.toLocaleLowerCase().includes(normalized)),
+    )
+    .slice(0, 6);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    dialog.showModal();
+    dialog.querySelector<HTMLInputElement>("input")?.focus();
+    return () => {
+      if (dialog.open) dialog.close();
+    };
+  }, []);
+
+  return (
+    <dialog
+      aria-label="Search or run a command"
+      className="command-dialog"
+      onCancel={(event) => {
+        event.preventDefault();
+        onClose();
+      }}
+      ref={dialogRef}
+    >
+      <div className="command-input">
+        <span aria-hidden="true">&gt;</span>
+        <input
+          aria-label="Search saves, tags, and commands"
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Search saves, tags, and commands"
+          value={query}
+        />
+      </div>
+      <div className="command-results">
+        {matchingTags.length > 0 ? <p>Tags</p> : null}
+        {matchingTags.map(({ count, tag }, index) => (
+          <button className={index === 0 ? "command-selected" : undefined} key={tag} onClick={() => onFilterTag(tag)} type="button">
+            <span>#{tag}</span><small>{pluralize(count, "save")}</small><em>↵ filter library</em>
+          </button>
+        ))}
+        {matchingItems.length > 0 ? <p>Saves</p> : null}
+        {matchingItems.map((item) => (
+          <button key={item.id} onClick={() => onOpenItem(item)} type="button">
+            <strong>{item.title?.trim() || item.url}</strong>
+            <small>{readHostname(item.url)}</small>
+            <em>{item.tags.map((tag) => `#${tag}`).join(" ")}</em>
+          </button>
+        ))}
+        <p>Actions</p>
+        <button onClick={onSync} type="button"><span>Sync</span><em>open status</em></button>
+        <button onClick={onNewSave} type="button"><span>Save a URL</span><em>new save</em></button>
+      </div>
+      <footer className="command-footer"><span><b>↑↓</b> navigate</span><span><b>↵</b> select</span><span><b>esc</b> close</span></footer>
+    </dialog>
+  );
+}
+
+function ReaderView({
+  busy,
+  item,
+  items,
+  onBack,
+  onDelete,
+  onEdit,
+  onFavorite,
+  onSelect,
+}: {
+  busy: boolean;
+  item: LibraryItemView;
+  items: LibraryItemView[];
+  onBack: () => void;
+  onDelete: (item: LibraryItemView) => Promise<void>;
+  onEdit: (item: LibraryItemView, opener: HTMLButtonElement) => void;
+  onFavorite: (item: LibraryItemView) => Promise<void>;
+  onSelect: (item: LibraryItemView) => void;
+}) {
+  const label = item.title?.trim() || item.url;
+  const context = item.excerpt?.trim();
+
+  return (
+    <div className="reader-view" role="dialog" aria-modal="true" aria-labelledby="reader-title">
+      <aside className="reader-list">
+        <header><button onClick={onBack} type="button">← All saves</button><span>{items.length}</span></header>
+        <ol>
+          {items.map((candidate) => (
+            <li className={candidate.id === item.id ? "reader-selected" : undefined} key={candidate.id}>
+              <button onClick={() => onSelect(candidate)} type="button">
+                <strong>{candidate.title?.trim() || candidate.url}</strong>
+                <span>{readHostname(candidate.url)} · {formatDate(candidate.savedAt)}</span>
+              </button>
+            </li>
+          ))}
+        </ol>
+        <footer><span><b>j/k</b> next</span><span><b>esc</b> back</span></footer>
+      </aside>
+      <article className="reader-article">
+        <header className="reader-mobile-header">
+          <button aria-label="Back to all saves" onClick={onBack} type="button">←</button>
+          <span>{readHostname(item.url)}</span>
+        </header>
+        <div className="reader-content">
+          <div className="reader-meta">
+            <span>{readHostname(item.url)} · Saved {formatDate(item.savedAt)}</span>
+            <div>
+              <button aria-label={item.favorite ? "Remove favorite" : "Favorite"} disabled={busy} onClick={() => void onFavorite(item)} type="button">★</button>
+              <button aria-haspopup="dialog" aria-label="Edit save" disabled={busy} onClick={(event) => onEdit(item, event.currentTarget)} type="button">✎</button>
+              <a aria-label="Open original" href={item.url} rel="noreferrer" target="_blank">↗</a>
+              <button aria-label="Archive" disabled={busy} onClick={() => void onDelete(item).then(onBack)} type="button">⌫</button>
+            </div>
+          </div>
+          <h1 id="reader-title">{label}</h1>
+          {item.tags.length > 0 ? <p className="reader-tags">{item.tags.map((tag) => <span key={tag}>#{tag}</span>)}</p> : null}
+          {item.note?.trim() ? <aside className="reader-note"><strong>Your note</strong><p>{item.note}</p></aside> : null}
+          <div className="reader-body">
+            {context ? <p>{context}</p> : <p>This save has no extracted preview yet. Open the original to read the full page, or add a private note to keep the context that matters.</p>}
+            <p className="reader-source">ResearchPocket keeps the URL and your authored context locally. The original page remains at <a href={item.url} rel="noreferrer" target="_blank">{readHostname(item.url)}</a>.</p>
+          </div>
+        </div>
+      </article>
+    </div>
   );
 }
 
@@ -1247,6 +1754,8 @@ function LibraryItem({
   item,
   onDelete,
   onEdit,
+  onFavorite,
+  onRead,
   onRestore,
   onToggleTagFilter,
   selectedTags,
@@ -1255,6 +1764,8 @@ function LibraryItem({
   item: LibraryItemView;
   onDelete: (item: LibraryItemView) => Promise<void>;
   onEdit: (item: LibraryItemView, opener: HTMLButtonElement) => void;
+  onFavorite: (item: LibraryItemView) => Promise<void>;
+  onRead: (item: LibraryItemView) => void;
   onRestore: (item: LibraryItemView) => Promise<void>;
   onToggleTagFilter: (tag: string) => void;
   selectedTags: string[];
@@ -1269,14 +1780,24 @@ function LibraryItem({
           item.deleted ? " item-card-deleted" : " item-card-editable"
         }${item.favorite ? " item-card-favorite" : ""}`}
       >
+        <button
+          aria-label={item.favorite ? `Remove ${label} from favorites` : `Add ${label} to favorites`}
+          aria-pressed={item.favorite}
+          className="item-favorite"
+          disabled={busy || item.deleted}
+          onClick={() => void onFavorite(item)}
+          title={item.favorite ? "Remove favorite" : "Favorite"}
+          type="button"
+        >
+          <span aria-hidden="true">{item.favorite ? "★" : "·"}</span>
+        </button>
         {!item.deleted ? (
           <button
-            aria-haspopup="dialog"
-            aria-label={`Edit ${label}${item.favorite ? ", favorite" : ""}`}
+            aria-label={`Read ${label}${item.favorite ? ", favorite" : ""}`}
             className="item-card-edit-trigger"
             disabled={busy}
-            onClick={(event) => onEdit(item, event.currentTarget)}
-            title="Edit save"
+            onClick={() => onRead(item)}
+            title="Open reader"
             type="button"
           />
         ) : null}
@@ -1346,6 +1867,27 @@ function LibraryItem({
             </button>
           ) : (
             <>
+              <button
+                aria-label={`Read ${label}`}
+                className="icon-button"
+                disabled={busy}
+                onClick={() => onRead(item)}
+                title="Reader"
+                type="button"
+              >
+                <span aria-hidden="true">¶</span>
+              </button>
+              <button
+                aria-haspopup="dialog"
+                aria-label={`Edit ${label}`}
+                className="icon-button"
+                disabled={busy}
+                onClick={(event) => onEdit(item, event.currentTarget)}
+                title="Edit"
+                type="button"
+              >
+                <span aria-hidden="true">✎</span>
+              </button>
               <a
                 aria-label={`Open ${label} in a new tab`}
                 className="icon-button"
@@ -1364,7 +1906,7 @@ function LibraryItem({
                 title="Delete"
                 type="button"
               >
-                <span aria-hidden="true">×</span>
+                <span aria-hidden="true">⌫</span>
               </button>
             </>
           )}
@@ -1756,6 +2298,16 @@ function formatDateTime(value: string) {
 
 function pluralize(count: number, noun: string) {
   return `${count.toLocaleString()} ${noun}${count === 1 ? "" : "s"}`;
+}
+
+function readDensityPreference(): Density {
+  try {
+    return window.localStorage.getItem(DENSITY_STORAGE_KEY) === "compact"
+      ? "compact"
+      : "comfortable";
+  } catch {
+    return "comfortable";
+  }
 }
 
 function readError(error: unknown) {
