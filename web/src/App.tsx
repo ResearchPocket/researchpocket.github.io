@@ -429,17 +429,20 @@ export function App() {
 
       <div className="workspace-chrome">
         <header className="masthead">
-          <a
-            aria-label="ResearchPocket product overview"
+          <button
+            aria-label={view === "library" ? "ResearchPocket library" : "Back to library"}
             className="brand-lockup"
-            href="../"
+            onClick={() => setView("library")}
+            type="button"
           >
             <span aria-hidden="true" className="brand-mark">
               rp
             </span>
             <p className="brand-name">ResearchPocket</p>
-            <p className="brand-context">owner workspace</p>
-          </a>
+            <p className="brand-context">
+              {view === "library" ? "owner workspace" : "← library"}
+            </p>
+          </button>
 
           <div className="masthead-actions">
             <div className="local-status" role="status">
