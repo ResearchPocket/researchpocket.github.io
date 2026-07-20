@@ -1,5 +1,5 @@
 import {
-  type FormEvent,
+  type SubmitEvent,
   type ReactNode,
   useDeferredValue,
   useEffect,
@@ -77,9 +77,7 @@ export function App() {
   const [density, setDensity] = useState<Density>(() => readDensityPreference());
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [visibleLimit, setVisibleLimit] = useState(LIST_BATCH_SIZE);
-  const [view, setView] = useState<WorkspaceView>(() =>
-    window.location.hash === "#restore" ? "sync" : "library",
-  );
+  const [view, setView] = useState<WorkspaceView>(() => readWorkspaceView());
   const [capturing, setCapturing] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const [readerItem, setReaderItem] = useState<LibraryItemView | null>(null);
@@ -171,19 +169,21 @@ export function App() {
   );
 
   useEffect(() => {
-    function restoreReaderFromHistory() {
+    function restoreNavigationFromHistory() {
       const match = window.location.hash.match(/^#item=(.+)$/);
       if (!match) {
         setReaderItem(null);
+        setView(readWorkspaceView());
         return;
       }
       const itemId = decodeURIComponent(match[1]!);
       setReaderItem(items.find((item) => item.id === itemId) ?? null);
     }
 
-    window.addEventListener("popstate", restoreReaderFromHistory);
-    restoreReaderFromHistory();
-    return () => window.removeEventListener("popstate", restoreReaderFromHistory);
+    window.addEventListener("popstate", restoreNavigationFromHistory);
+    restoreNavigationFromHistory();
+    return () =>
+      window.removeEventListener("popstate", restoreNavigationFromHistory);
   }, [items]);
   const deferredQuery = useDeferredValue(query);
   const visibleItems = useMemo(
@@ -263,6 +263,16 @@ export function App() {
     }
   }
 
+  function navigateToView(nextView: WorkspaceView) {
+    const hash = nextView === "library" ? "" : `#${nextView}`;
+    const nextUrl = `${window.location.pathname}${window.location.search}${hash}`;
+    const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    if (nextUrl !== currentUrl) {
+      window.history.pushState(window.history.state, "", nextUrl);
+    }
+    setView(nextView);
+  }
+
   useEffect(() => {
     if (
       libraryState.loading ||
@@ -284,7 +294,7 @@ export function App() {
       libraryRepository.add(input),
     );
     if (saved) {
-      setView("library");
+      navigateToView("library");
       closeCapture();
     }
     return saved;
@@ -370,7 +380,7 @@ export function App() {
     );
     setTagSearch("");
     setFiltersOpen(true);
-    setView("library");
+    navigateToView("library");
     setAnnouncement(
       selected ? `Removed ${tag} tag filter.` : `Filtering by ${tag}.`,
     );
@@ -432,7 +442,7 @@ export function App() {
           <button
             aria-label={view === "library" ? "ResearchPocket library" : "Back to library"}
             className="brand-lockup"
-            onClick={() => setView("library")}
+            onClick={() => navigateToView("library")}
             type="button"
           >
             <span aria-hidden="true" className="brand-mark">
@@ -469,7 +479,7 @@ export function App() {
             <button
               aria-current={view === "library" && filter === "active" && !favoriteOnly ? "page" : undefined}
               onClick={() => {
-                setView("library");
+                navigateToView("library");
                 setFilter("active");
                 setFavoriteOnly(false);
                 setSelectedTags([]);
@@ -481,7 +491,7 @@ export function App() {
             <button
               aria-current={view === "library" && favoriteOnly ? "page" : undefined}
               onClick={() => {
-                setView("library");
+                navigateToView("library");
                 setFilter("active");
                 setFavoriteOnly(true);
                 setSelectedTags([]);
@@ -494,7 +504,7 @@ export function App() {
             <button
               aria-current={view === "library" && filter === "deleted" ? "page" : undefined}
               onClick={() => {
-                setView("library");
+                navigateToView("library");
                 setFilter("deleted");
                 setFavoriteOnly(false);
                 setSelectedTags([]);
@@ -535,12 +545,12 @@ export function App() {
           </button>
 
           <nav aria-label="Workspace utilities" className="rail-utilities">
-            <button onClick={() => setView("sync")} type="button">
+            <button onClick={() => navigateToView("sync")} type="button">
               <span>Sync</span><small>{libraryState.pendingCount} pending</small>
             </button>
             <button
               aria-current={view === "settings" ? "page" : undefined}
-              onClick={() => setView("settings")}
+              onClick={() => navigateToView("settings")}
               type="button"
             >
               <span>Settings</span>
@@ -830,8 +840,8 @@ export function App() {
         </main>
         <nav aria-label="Mobile actions" className="mobile-actions">
           <button className="primary-button" onClick={(event) => openCapture(event.currentTarget)} type="button">＋ Save a link</button>
-          <button className="secondary-button" onClick={() => setView("sync")} type="button">Sync {libraryState.pendingCount}</button>
-          <button className="secondary-button" onClick={() => setView("settings")} type="button">Settings</button>
+          <button className="secondary-button" onClick={() => navigateToView("sync")} type="button">Sync {libraryState.pendingCount}</button>
+          <button className="secondary-button" onClick={() => navigateToView("settings")} type="button">Settings</button>
         </nav>
       </div>
 
@@ -877,7 +887,7 @@ export function App() {
           items={items.filter((item) => !item.deleted)}
           onClose={() => setCommandOpen(false)}
           onFilterTag={(tag) => {
-            setView("library");
+            navigateToView("library");
             setSelectedTags([tag]);
             setCommandOpen(false);
           }}
@@ -890,7 +900,7 @@ export function App() {
             setCommandOpen(false);
           }}
           onSync={() => {
-            setView("sync");
+            navigateToView("sync");
             setCommandOpen(false);
           }}
           tags={tagCounts}
@@ -1060,7 +1070,7 @@ function SyncPanel({
   const [branch, setBranch] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
 
-  async function connect(event: FormEvent<HTMLFormElement>) {
+  async function connect(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
     const credential = readSyncCredential(form);
@@ -1075,7 +1085,7 @@ function SyncPanel({
     }
   }
 
-  async function unlock(event: FormEvent<HTMLFormElement>) {
+  async function unlock(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
     const credential = readSyncCredential(form);
@@ -1327,7 +1337,7 @@ function QuickAdd({
 }) {
   const [value, setValue] = useState("");
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     const parts = value.trim().split(/\s+/);
     const url = parts.find((part) => !part.startsWith("#")) ?? "";
@@ -1526,7 +1536,7 @@ function CaptureForm({
   const [note, setNote] = useState("");
   const [favorite, setFavorite] = useState(false);
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     const saved = await onAdd({
       favorite,
@@ -1976,7 +1986,7 @@ function EditDialog({
     };
   }, []);
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     await onSave(item, {
       excerpt: optionalText(excerpt),
@@ -2317,6 +2327,16 @@ function formatDateTime(value: string) {
 
 function pluralize(count: number, noun: string) {
   return `${count.toLocaleString()} ${noun}${count === 1 ? "" : "s"}`;
+}
+
+function readWorkspaceView(): WorkspaceView {
+  if (
+    window.location.hash === "#sync" ||
+    window.location.hash === "#restore"
+  ) {
+    return "sync";
+  }
+  return window.location.hash === "#settings" ? "settings" : "library";
 }
 
 function readDensityPreference(): Density {
