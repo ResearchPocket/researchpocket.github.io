@@ -43,6 +43,7 @@ export default defineConfig(({ command }) => {
         input: {
           app: "app/index.html",
           landing: "index.html",
+          overview: "overview/index.html",
         },
       },
       sourcemap: false,

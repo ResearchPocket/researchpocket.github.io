@@ -1,8 +1,8 @@
-# Berkeley Mono webfonts
+# TX-02 webfonts
 
 The WOFF2 files in this directory are third-party font software and are not
 covered by ResearchPocket's Apache-2.0 license. Deploying or redistributing them
-requires an appropriate Berkeley Mono webfont license from the font's rights
+requires an appropriate TX-02 webfont license from the font's rights
 holder.
 
 Only the browser-oriented WOFF2 files are included. The desktop OTF and TTF

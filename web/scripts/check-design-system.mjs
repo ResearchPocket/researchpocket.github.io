@@ -7,10 +7,10 @@ const stylesRoot = resolve(webRoot, "src/styles");
 const fontsRoot = resolve(webRoot, "src/assets/fonts");
 const requiredFiles = ["tokens.css", "base.css", "app.css"];
 const requiredFonts = [
-  "BerkeleyMono-Regular.woff2",
-  "BerkeleyMono-Italic.woff2",
-  "BerkeleyMono-Bold.woff2",
-  "BerkeleyMono-BoldItalic.woff2",
+  "TX-02-Regular.woff2",
+  "TX-02-Oblique.woff2",
+  "TX-02-Bold.woff2",
+  "TX-02-BoldOblique.woff2",
 ];
 const requiredTokens = [
   "--color-canvas",
@@ -39,6 +39,13 @@ for (const requiredFont of requiredFonts) {
   }
 }
 
+const bundledFonts = readdirSync(fontsRoot).filter((file) => file.endsWith(".woff2"));
+for (const bundledFont of bundledFonts) {
+  if (!requiredFonts.includes(bundledFont)) {
+    failures.push(`Unexpected bundled webfont: ${bundledFont}`);
+  }
+}
+
 const tokenSource = readFileSync(resolve(stylesRoot, "tokens.css"), "utf8");
 for (const token of requiredTokens) {
   if (!tokenSource.includes(`${token}:`)) {
@@ -52,8 +59,8 @@ for (const requiredFont of requiredFonts) {
   }
 }
 
-if (!tokenSource.includes('font-family: "Berkeley Mono", ui-monospace, monospace;')) {
-  failures.push("tokens.css must use Berkeley Mono with local monospace fallbacks");
+if (!tokenSource.includes('font-family: "TX-02", ui-monospace, monospace;')) {
+  failures.push("tokens.css must use TX-02 with local monospace fallbacks");
 }
 
 for (const file of files) {
