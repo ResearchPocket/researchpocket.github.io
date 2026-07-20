@@ -213,11 +213,13 @@ export function App() {
   const renderedItems = visibleItems.slice(0, visibleLimit);
   const tagFilterMatches = useMemo(() => {
     const normalizedSearch = tagSearch.trim().toLocaleLowerCase();
-    if (!normalizedSearch) return [];
     return knownTags
       .filter((tag) => !selectedTags.includes(tag))
-      .filter((tag) => tag.toLocaleLowerCase().includes(normalizedSearch))
-      .slice(0, 8);
+      .filter(
+        (tag) =>
+          !normalizedSearch || tag.toLocaleLowerCase().includes(normalizedSearch),
+      )
+      .slice(0, 50);
   }, [knownTags, selectedTags, tagSearch]);
   const appliedFilterCount =
     Number(filter !== "active") +
@@ -519,6 +521,16 @@ export function App() {
             </div>
           </div>
 
+          <button
+            aria-controls="library-filters"
+            aria-expanded={filtersOpen}
+            className="mobile-tag-filter-trigger"
+            onClick={() => setFiltersOpen(true)}
+            type="button"
+          >
+            Tags{selectedTags.length > 0 ? ` · ${selectedTags.length}` : ""}
+          </button>
+
           <nav aria-label="Workspace utilities" className="rail-utilities">
             <button onClick={() => setView("sync")} type="button">
               <span>Sync</span><small>{libraryState.pendingCount} pending</small>
@@ -626,6 +638,10 @@ export function App() {
           </div>
 
           <div className="library-filters" hidden={!filtersOpen} id="library-filters">
+            <div className="mobile-filter-heading">
+              <strong>Filter library</strong>
+              <button onClick={() => setFiltersOpen(false)} type="button">Done</button>
+            </div>
             <label>
               <select
                 aria-label="Search fields"
