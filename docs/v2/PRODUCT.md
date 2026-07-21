@@ -79,6 +79,9 @@ feeds; they do not need a ResearchPocket or GitHub account.
   backend.
 - Edit titles, notes, tags, collection membership, favorite state, archive
   state, and lifecycle state through the CLI, TUI, or local web UI.
+- Undo the latest browser add, edit, favorite, tag, delete, or restore action as
+  a convergence-safe compensating mutation; deleted items remain recoverable
+  from the archive after the immediate undo affordance is dismissed.
 - Search locally across saved metadata and user-authored notes.
 - Keep concurrently saved copies of the same URL visible for review rather
   than silently deleting one person's intent.

@@ -11,6 +11,15 @@ can initialize a browser library and add, search, edit,
 favorite, tag, delete, and restore saves without a network connection. The UI
 contains no sample library or alternate TypeScript merge rules.
 
+The most recent successful browser item mutation exposes a visible Undo action
+and `Ctrl+Z` or `Cmd+Z`. Undo is a new compensating mutation through the same
+WASM and IndexedDB transaction boundary; it never deletes an outbox row or
+rewrites immutable history. The token records the exact resulting item
+projection and fails stale if any later local or remote item change intervenes.
+Only the latest action is retained in memory. Delete remains recoverable through
+the archive after dismissal or reload. See
+[ADR 0005](./ADR_0005_COMPENSATING_UNDO.md).
+
 First run offers two explicit paths. Starting locally creates an empty browser
 library. Restoring prepares the same empty local shell and opens private sync
 before the owner makes a local mutation, allowing the pristine replica to adopt

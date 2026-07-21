@@ -1304,6 +1304,41 @@ footer {
   grid-row: 1 / span 2;
 }
 
+.undo-notice {
+  align-items: center;
+  background: var(--color-inverse-surface);
+  border: var(--rule) solid var(--color-border-strong);
+  bottom: var(--space-4);
+  color: var(--color-inverse);
+  display: flex;
+  gap: var(--space-3);
+  left: 50%;
+  max-width: min(32rem, calc(100vw - var(--space-6)));
+  padding: var(--space-3) var(--space-4);
+  position: fixed;
+  transform: translateX(-50%);
+  width: max-content;
+  z-index: 70;
+}
+
+.undo-notice span {
+  font-size: var(--font-size-sm);
+}
+
+.undo-notice button {
+  background: transparent;
+  border: var(--rule) solid currentColor;
+  color: inherit;
+  min-height: var(--control-height);
+}
+
+.undo-notice .undo-dismiss {
+  border: 0;
+  font-size: var(--font-size-lg);
+  min-width: var(--control-height);
+  padding: 0;
+}
+
 .capture-dialog,
 .edit-dialog {
   background: var(--color-surface);
@@ -2710,6 +2745,11 @@ kbd {
     min-height: 100dvh;
     overflow: visible;
     padding: 0;
+  }
+
+  .undo-notice {
+    bottom: calc(4.75rem + env(safe-area-inset-bottom));
+    max-width: calc(100vw - 1.5rem);
   }
 
   .workspace-chrome {

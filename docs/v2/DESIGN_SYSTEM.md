@@ -166,6 +166,10 @@ Repository and sync status use a small indicator plus explicit text. Pending
 work always shows whether it is local, queued, or synchronized. Never imply that
 a local commit is remotely backed up.
 
+The latest undoable item mutation uses a fixed status notice with an explicit
+Undo button and dismiss action. It remains above mobile action bars, stays
+keyboard-operable through `Ctrl+Z` or `Cmd+Z`, and is not hidden by a timeout.
+
 ### Library records
 
 Records form one ordered list separated by rules. Source, title, authored
