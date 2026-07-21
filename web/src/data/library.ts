@@ -20,6 +20,13 @@ import {
   type PersistedSyncConfiguration,
   type RemoteObservation,
 } from "./db";
+import {
+  createUndoableChange,
+  matchesUndoExpectation,
+  type UndoableChange,
+} from "./undo.ts";
+
+export type { UndoableChange } from "./undo.ts";
 
 export type LibraryItem = PersistedItem;
 
@@ -231,9 +238,9 @@ class LibraryRepository {
     await this.afterCommit("Offline library ready");
   }
 
-  async add(input: AddItemInput): Promise<void> {
+  async add(input: AddItemInput): Promise<UndoableChange | null> {
     const itemId = uuidV7();
-    await this.commitMutation({
+    return this.commitMutation({
       type: "create",
       item_id: itemId,
       url: input.url,
@@ -247,7 +254,7 @@ class LibraryRepository {
     });
   }
 
-  async edit(itemId: string, input: EditItemInput): Promise<void> {
+  async edit(itemId: string, input: EditItemInput): Promise<UndoableChange | null> {
     const mutation: Record<string, unknown> = { type: "edit", item_id: itemId };
     if (input.url !== undefined) mutation.url = input.url;
     if (input.title !== undefined) mutation.title = textUpdate(input.title);
@@ -258,18 +265,26 @@ class LibraryRepository {
     }
     if (input.favorite !== undefined) mutation.favorite = input.favorite;
     if (input.language !== undefined) mutation.language = textUpdate(input.language);
-    await this.commitMutation(
+    return this.commitMutation(
       mutation,
       input.tags === undefined ? undefined : exactTags(input.tags),
     );
   }
 
-  async remove(itemId: string): Promise<void> {
-    await this.commitMutation({ type: "delete", item_id: itemId });
+  async remove(itemId: string): Promise<UndoableChange | null> {
+    return this.commitMutation({ type: "delete", item_id: itemId });
   }
 
-  async restore(itemId: string): Promise<void> {
-    await this.commitMutation({ type: "restore", item_id: itemId });
+  async restore(itemId: string): Promise<UndoableChange | null> {
+    return this.commitMutation({ type: "restore", item_id: itemId });
+  }
+
+  async undo(change: UndoableChange): Promise<void> {
+    await this.commitMutation(
+      change.mutation,
+      change.targetTags,
+      change.expectedItem,
+    );
   }
 
   async syncIdentity(): Promise<BrowserSyncIdentity> {
@@ -546,12 +561,19 @@ class LibraryRepository {
   private async commitMutation(
     mutation: Record<string, unknown>,
     targetTags?: string[],
-  ): Promise<void> {
+    expectedItem?: PersistedItem,
+  ): Promise<UndoableChange | null> {
     let committed = false;
+    let undoableChange: UndoableChange | null = null;
     await this.write(async (database) => {
       const persisted = await readPersisted(database);
       const itemId = mutationItemId(mutation);
       const beforeItem = await database.get("items", itemId);
+      if (expectedItem && !matchesUndoExpectation(beforeItem, expectedItem)) {
+        throw new Error(
+          "This save changed after that action, so the older undo was not applied.",
+        );
+      }
       const normalizedMutation = normalizeMutation(mutation, beforeItem, targetTags);
       if (!normalizedMutation) return;
       await ensureWasm();
@@ -582,7 +604,11 @@ class LibraryRepository {
       };
       const items = materializeProjection(result.projection);
       const afterItem = items.find((item) => item.id === itemId);
+      if (!afterItem) {
+        throw new Error("The domain core omitted the changed item from its projection.");
+      }
       const summary = summarizeMutation(normalizedMutation, beforeItem, afterItem);
+      undoableChange = createUndoableChange(summary.kind, beforeItem, afterItem);
       const batch = batchRecord(path, result.envelope, identity, "local", now);
       const outbox: PersistedOutbox = {
         path,
@@ -615,6 +641,7 @@ class LibraryRepository {
     if (committed) {
       await this.afterCommit("Saved offline — queued for synchronization");
     }
+    return undoableChange;
   }
 
   private async recordSyncResult(errorKind: string | null): Promise<void> {

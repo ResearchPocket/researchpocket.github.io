@@ -13,6 +13,7 @@ import remarkGfm from "remark-gfm";
 import {
   type LibraryState,
   type PendingSyncChange,
+  type UndoableChange,
   libraryRepository,
 } from "./data/library.ts";
 import {
@@ -41,6 +42,11 @@ type SortMode = "recent" | "oldest" | "title";
 type TagMatchMode = "any" | "all";
 type WorkspaceView = "library" | "settings" | "sync";
 type Density = "comfortable" | "compact";
+
+interface UndoNotice {
+  change: UndoableChange;
+  message: string;
+}
 
 const DENSITY_STORAGE_KEY = "researchpocket.ui.density";
 
@@ -116,6 +122,7 @@ export function App() {
   const [autoBootstrapAttempted, setAutoBootstrapAttempted] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
+  const [undoNotice, setUndoNotice] = useState<UndoNotice | null>(null);
   const captureOpenerRef = useRef<HTMLButtonElement | null>(null);
   const editOpenerRef = useRef<HTMLButtonElement | null>(null);
 
@@ -169,6 +176,20 @@ export function App() {
         return;
       }
 
+      if (
+        !isTyping &&
+        (event.ctrlKey || event.metaKey) &&
+        !event.altKey &&
+        !event.shiftKey &&
+        event.key.toLowerCase() === "z" &&
+        undoNotice &&
+        busyAction === null
+      ) {
+        event.preventDefault();
+        void undoLastChange();
+        return;
+      }
+
       if (!isTyping && event.key === "/") {
         event.preventDefault();
         document.querySelector<HTMLInputElement>("#library-search")?.focus();
@@ -177,7 +198,7 @@ export function App() {
 
     window.addEventListener("keydown", handleShortcut);
     return () => window.removeEventListener("keydown", handleShortcut);
-  }, []);
+  }, [busyAction, undoNotice]);
 
   const items = libraryState.items as unknown as LibraryItemView[];
   const activeCount = items.filter((item) => !item.deleted).length;
@@ -320,10 +341,14 @@ export function App() {
   }, [autoBootstrapAttempted, busyAction, libraryState.initialized, libraryState.loading]);
 
   async function addItem(input: AddInput) {
+    let undo: UndoableChange | null = null;
     const saved = await runAction("Save link", "Saved to your local library.", () =>
-      libraryRepository.add(input),
+      libraryRepository.add(input).then((change) => {
+        undo = change;
+      }),
     );
     if (saved) {
+      offerUndo(undo, "Saved link.");
       navigateToView("library");
       closeCapture();
     }
@@ -331,43 +356,82 @@ export function App() {
   }
 
   async function deleteItem(item: LibraryItemView) {
-    await runAction("Delete link", "Moved to deleted items.", () =>
-      libraryRepository.remove(item.id),
+    let undo: UndoableChange | null = null;
+    const deleted = await runAction("Delete link", "Moved to deleted items.", () =>
+      libraryRepository.remove(item.id).then((change) => {
+        undo = change;
+      }),
     );
+    if (deleted) offerUndo(undo, "Moved link to deleted items.");
   }
 
   async function restoreItem(item: LibraryItemView) {
+    let undo: UndoableChange | null = null;
     const restored = await runAction("Restore link", "Link restored.", () =>
-      libraryRepository.restore(item.id),
+      libraryRepository.restore(item.id).then((change) => {
+        undo = change;
+      }),
     );
     if (restored) {
+      offerUndo(undo, "Restored link.");
       setFilter("active");
     }
   }
 
   async function toggleFavorite(item: LibraryItemView) {
-    await runAction(
+    let undo: UndoableChange | null = null;
+    const saved = await runAction(
       item.favorite ? "Remove favorite" : "Add favorite",
       item.favorite ? "Removed from favorites." : "Added to favorites.",
       () =>
         libraryRepository.edit(item.id, {
           favorite: !item.favorite,
           expectedNote: item.note ?? null,
+        }).then((change) => {
+          undo = change;
         }),
     );
+    if (saved) {
+      offerUndo(
+        undo,
+        item.favorite ? "Removed from favorites." : "Added to favorites.",
+      );
+    }
   }
 
   async function saveEdit(item: LibraryItemView, input: EditInput) {
+    let undo: UndoableChange | null = null;
     const saved = await runAction("Update link", "Changes saved locally.", () =>
       libraryRepository.edit(item.id, {
         ...input,
         expectedNote: item.note ?? null,
+      }).then((change) => {
+        undo = change;
       }),
     );
     if (saved) {
+      offerUndo(undo, "Changes saved.");
       closeEditor();
     }
     return saved;
+  }
+
+  function offerUndo(change: UndoableChange | null, message: string) {
+    if (!change) return;
+    setUndoNotice({ change, message });
+    setAnnouncement(`${message} Undo is available.`);
+  }
+
+  async function undoLastChange() {
+    const notice = undoNotice;
+    if (!notice || busyAction !== null) return;
+    const undone = await runAction("Undo change", "Last change undone.", () =>
+      libraryRepository.undo(notice.change),
+    );
+    if (undone) {
+      setUndoNotice(null);
+      setAnnouncement("Last change undone.");
+    }
   }
 
   function openEditor(item: LibraryItemView, opener: HTMLButtonElement) {
@@ -878,6 +942,28 @@ export function App() {
       <div aria-atomic="true" aria-live="polite" className="sr-only">
         {announcement}
       </div>
+
+      {undoNotice ? (
+        <div className="undo-notice" role="status">
+          <span>{undoNotice.message}</span>
+          <button
+            disabled={busyAction !== null}
+            onClick={() => void undoLastChange()}
+            type="button"
+          >
+            Undo
+          </button>
+          <button
+            aria-label="Dismiss undo"
+            className="undo-dismiss"
+            disabled={busyAction !== null}
+            onClick={() => setUndoNotice(null)}
+            type="button"
+          >
+            ×
+          </button>
+        </div>
+      ) : null}
 
       {displayedError && !editingItem && !capturing ? (
         <div className="error-banner" role="alert">

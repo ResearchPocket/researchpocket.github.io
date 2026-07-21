@@ -288,6 +288,8 @@ generic label when detailed local summaries are unavailable.
 The token stays in JavaScript memory unless the owner explicitly chooses
 tab-only `sessionStorage`, and it never enters IndexedDB, URLs, logs, or the
 service-worker cache.
+The latest browser item mutation offers a visible, convergence-safe Undo action
+and `Ctrl+Z` or `Cmd+Z`; delete also remains recoverable from the archive.
 
 The canonical Pages origin is `https://researchpocket.github.io/`. The former
 `/ResearchPocket/` project paths remain as same-origin compatibility redirects,
