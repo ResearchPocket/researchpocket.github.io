@@ -3775,6 +3775,51 @@ kbd {
   margin-top: 1.5rem;
 }
 
+.overview-showcase {
+  align-items: center;
+  border-bottom: var(--rule) solid var(--color-border-strong);
+  display: grid;
+  gap: clamp(2rem, 6vw, 5rem);
+  grid-template-columns: minmax(14rem, 0.55fr) minmax(0, 1fr);
+  padding: clamp(3.5rem, 7vw, 6rem) 0;
+}
+
+.overview-showcase h2 {
+  font-size: clamp(1.5rem, 3vw, 2.5rem);
+  letter-spacing: -0.04em;
+  line-height: 1.05;
+  margin: 0;
+  max-width: 18ch;
+}
+
+.overview-showcase-copy > p:not(.eyebrow) {
+  color: var(--color-text-soft);
+  font-size: var(--font-size-sm);
+  line-height: 1.6;
+  margin: 1rem 0 0;
+}
+
+.overview-showcase-copy > a {
+  display: inline-block;
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  margin-top: 1rem;
+}
+
+.overview-video {
+  aspect-ratio: 16 / 9;
+  background: var(--color-surface);
+  border: var(--rule) solid var(--color-border-strong);
+  width: 100%;
+}
+
+.overview-video iframe {
+  border: 0;
+  display: block;
+  height: 100%;
+  width: 100%;
+}
+
 .overview-grid {
   border-bottom: var(--rule) solid var(--color-border-strong);
   display: grid;
@@ -3859,6 +3904,7 @@ kbd {
 }
 
 @media (max-width: 48rem) {
+  .overview-showcase,
   .overview-grid,
   .overview-details {
     grid-template-columns: 1fr;
