@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; base-uri 'none'; connect-src 'self' https://api.github.com; font-src 'self'; form-action 'none'; frame-src 'none'; img-src 'self'; manifest-src 'self'; object-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; worker-src 'self'; upgrade-insecure-requests"
+      content="default-src 'none'; base-uri 'none'; connect-src 'self' https://api.github.com; font-src 'self'; form-action 'none'; frame-src https://www.youtube-nocookie.com; img-src 'self'; manifest-src 'self'; object-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; worker-src 'self'; upgrade-insecure-requests"
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark" />
@@ -48,6 +48,28 @@
         <div class="overview-actions">
           <a class="primary-link" href="../app/#new">Start a new library</a>
           <a class="secondary-link" href="../docs/">Read the reference</a>
+        </div>
+      </section>
+
+      <section class="overview-showcase" aria-labelledby="showcase-heading">
+        <div class="overview-showcase-copy">
+          <p class="eyebrow">38-second tour</p>
+          <h2 id="showcase-heading">From one-keystroke capture to private sync.</h2>
+          <p>
+            See the browser and terminal share one local-first library, with no
+            ResearchPocket server or tracking in the owner app.
+          </p>
+          <a href="https://www.youtube.com/watch?v=cZYZyPp90xE">Watch on YouTube</a>
+        </div>
+        <div class="overview-video">
+          <iframe
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            allowfullscreen
+            loading="lazy"
+            referrerpolicy="strict-origin-when-cross-origin"
+            src="https://www.youtube-nocookie.com/embed/cZYZyPp90xE"
+            title="ResearchPocket local-first save-it-later product tour"
+          ></iframe>
         </div>
       </section>
 
