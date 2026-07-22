@@ -21,7 +21,7 @@ for (const requiredFile of [
   "sw.js",
   "manifest.webmanifest",
   "asset-manifest.json",
-  "favicon.svg",
+  "favicon.png",
   "llms.txt",
   "og.png",
   "robots.txt",
@@ -219,7 +219,7 @@ if (existsSync(manifestPath)) {
   if (manifest.id !== "/ResearchPocket/app/") {
     failures.push("The web manifest must preserve the installed application identity");
   }
-  if (manifest.icons?.[0]?.src !== "/favicon.svg") {
+  if (manifest.icons?.[0]?.src !== "/favicon.png") {
     failures.push("The web manifest icon must resolve from the organization root");
   }
 
