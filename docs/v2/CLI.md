@@ -199,12 +199,14 @@ HTML, PDF, and attachment storage remains outside this feature; see
 [ADR 0002](./ADR_0002_LINK_ENRICHMENT.md) and
 [ADR 0004](./ADR_0004_BOUNDED_FIRECRAWL_MARKDOWN.md).
 
-## Firefox bookmarklet capture
+## Browser capture through the URL scheme
 
-The installed CLI can receive a Firefox bookmarklet through a per-user custom
-protocol handler. It invokes the same V2 store mutation as `research add`; there
-is no background server, browser extension, Pocket provider, raw SQLite handoff,
-or network dependency.
+The installed CLI registers a per-user `researchpocket://` URL-scheme handler
+with the operating system. The handler is browser-independent: a browser,
+bookmarklet, or other local integration can dispatch a valid capture URI. It
+invokes the same V2 store mutation as `research add`; there is no background
+server, required browser extension, Pocket provider, raw SQLite handoff, or
+network dependency.
 
 ### Install the native handler
 
@@ -226,7 +228,7 @@ use their normal per-user facilities:
 - macOS installs a per-user application bridge that receives the URL event; and
 - Windows installs a per-user URL-protocol registry association.
 
-A Firefox-launched process does not reliably inherit variables from an open
+A browser-launched process does not reliably inherit variables from an open
 terminal. If this library uses an override, provide it while installing:
 
 ```sh
@@ -239,22 +241,22 @@ URI. Re-run `capture install` after moving the executable or switching the targe
 library. On macOS, the application bridge contains a private copy of the CLI, so
 re-run installation after every CLI upgrade as well.
 
-### Add and use the Firefox bookmarklet
+### Add and use the browser bookmarklet
 
-1. Show Firefox's Bookmarks Toolbar.
-2. Right-click the toolbar and choose **Add Bookmark**.
-3. Set the name to `Save to ResearchPocket`.
-4. Copy the entire one-line [bookmarklet.js](../../bookmarklet.js) into the
+1. Create a bookmark in a browser that permits JavaScript bookmark URLs. In
+   Firefox, show the Bookmarks Toolbar, right-click it, and choose
+   **Add Bookmark**.
+2. Set the name to `Save to ResearchPocket`.
+3. Copy the entire one-line [bookmarklet.js](../../bookmarklet.js) into the
    bookmark's **URL** or **Location** field. It must begin immediately with
    `javascript:`.
-5. Visit an HTTP(S) page and click the bookmarklet. Enter optional
+4. Visit an HTTP(S) page and click the bookmarklet. Enter optional
    comma-separated tags, leave the prompt blank for an untagged save, or choose
    **Cancel** to abort the capture.
-6. The first time Firefox asks about an external application after a completed
-   prompt, choose
+5. When the browser asks about opening an external application, choose
    ResearchPocket and allow the link to open. Remembering the choice is optional
    and may be scoped to the current site or browser profile.
-7. Run `research list` to confirm the local capture.
+6. Run `research list` to confirm the local capture.
 
 The supplied bookmarklet sends version 2 plus the current page `url`, `title`,
 bounded description metadata as `excerpt`, and the document `language`, all read
@@ -262,9 +264,10 @@ from the already-loaded DOM. Each nonblank prompted tag is whitespace-normalized
 deduplicated, and appended as one `tag` field. The prompt accepts at most 64 tags
 of at most 1,024 UTF-8 bytes each; tags cannot contain a comma in this compact
 input format. It does not contain a token, repository name, filesystem path,
-provider name, note, or favorite value. Firefox may ask again in private
-browsing or when site permissions are cleared. Do not disable Firefox's
-external-protocol safety checks globally.
+provider name, note, or favorite value. Browsers may ask again in private
+browsing or when site permissions are cleared. Do not disable external-protocol
+safety checks globally. In Firefox, the handler appears under
+**Settings → General → Applications** as the `researchpocket` action.
 
 Bookmarklet code and its prompt run in the current page's untrusted JavaScript
 context. The open page may observe text entered there. Use the prompt only for
@@ -335,7 +338,7 @@ research capture status
 research capture uninstall
 ```
 
-Uninstalling does not delete the V2 library, its outbox, or the Firefox bookmark.
+Uninstalling does not delete the V2 library, its outbox, or browser bookmarks.
 For a failed launch or a capture that appears to be missing:
 
 1. run `research capture status` and verify the registered executable and bound
@@ -343,8 +346,9 @@ For a failed launch or a capture that appears to be missing:
 2. rerun `research capture install` from the binary's current stable location;
 3. when using an override, run `research --data-dir <DIR> list` against the same
    directory shown by capture status;
-4. check Firefox **Settings → General → Applications** for the
-   `researchpocket` action, then trigger the bookmarklet again; and
+4. check the browser's external-protocol or application settings, then trigger
+   the bookmarklet again; in Firefox, inspect **Settings → General →
+   Applications** for the `researchpocket` action; and
 5. on Linux, verify that `xdg-mime` is installed and available.
 
 The custom protocol is an append-only integration surface. A site for which the

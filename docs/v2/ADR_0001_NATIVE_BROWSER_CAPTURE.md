@@ -15,8 +15,8 @@ capture protocol.
 ## Context
 
 The V2 CLI can save an HTTP(S) URL locally and atomically through
-`research add`, but a Firefox bookmarklet cannot execute an installed binary.
-ResearchPocket needs a fast offline bridge that does not require an
+`research add`, but browser JavaScript cannot directly execute an installed
+binary. ResearchPocket needs a fast offline bridge that does not require an
 internet-facing backend, a continuously running local service, or a Pocket-era
 database path.
 
@@ -29,8 +29,10 @@ an application URL event.
 ## Decision
 
 ResearchPocket uses a new, versioned `researchpocket://capture` URL scheme as an
-invocation transport from a user-installed Firefox bookmarklet to the installed
-V2 CLI.
+invocation transport from a browser bookmarklet or other local integration to the
+installed V2 CLI. The supplied bookmarklet was initially documented for Firefox,
+but the operating-system association and capture URI contract are
+browser-independent.
 
 `research capture install` validates an existing V2 library and registers a
 handler only for the current operating-system user. Installation binds the
@@ -73,7 +75,7 @@ introduces origin/authentication and port-discovery concerns, and makes offline
 capture less predictable. A future local UI API remains a separate product
 surface.
 
-### Firefox extension with native messaging
+### Browser extension with native messaging
 
 Deferred. Native messaging provides a stronger browser-specific integration but
 requires maintaining and installing both an extension and a native-host manifest.
@@ -93,12 +95,12 @@ capture through the installed local library.
   Reinstalling intentionally switches that library.
 - Moving or replacing a handler binary may require `research capture install`
   again; `research capture status` exposes the bound paths.
-- Custom schemes do not authenticate their caller. Firefox's external-protocol
+- Custom schemes do not authenticate their caller. A browser's external-protocol
   prompt is useful but is not the security boundary because a user can remember
   the choice. Strict validation and an append-only action reduce abuse to bounded
   unwanted saves; the handler cannot read, edit, delete, publish, or synchronize.
 - The captured page URL, bounded DOM metadata, and optional prompted tags pass
-  through Firefox, OS dispatch, and process arguments. Because the bookmarklet
+  through the browser, OS dispatch, and process arguments. Because the bookmarklet
   prompt runs in the open page's untrusted JavaScript context, it labels that
   boundary and is suitable only for non-sensitive organizational tags. Private
   tags are added after capture through a trusted ResearchPocket interface. The
