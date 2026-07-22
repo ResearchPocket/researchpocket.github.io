@@ -984,7 +984,7 @@ fn human_enrich_run(value: &Value) {
 }
 
 fn human_capture_install(value: &Value) {
-    println!("Installed Firefox capture handler");
+    println!("Installed browser capture handler");
     print_string(value, "scheme", "Scheme");
     print_string(value, "data_dir", "Library");
     print_string(value, "executable", "Executable");
@@ -996,7 +996,7 @@ fn human_capture_status(value: &Value) {
         .and_then(Value::as_bool)
         .unwrap_or(false);
     println!(
-        "Firefox capture handler: {}",
+        "Browser capture handler: {}",
         if installed {
             "installed"
         } else {
@@ -1009,7 +1009,7 @@ fn human_capture_status(value: &Value) {
 }
 
 fn human_capture_uninstall(value: &Value) {
-    println!("Removed Firefox capture handler");
+    println!("Removed browser capture handler");
     print_string(value, "scheme", "Scheme");
 }
 

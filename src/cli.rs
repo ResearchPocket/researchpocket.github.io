@@ -73,7 +73,7 @@ pub enum Commands {
     /// Manage the local library in a keyboard-first terminal interface
     Tui,
 
-    /// Save Firefox pages through an installed per-user protocol handler
+    /// Save browser pages through an installed per-user URL-scheme handler
     Capture {
         #[command(subcommand)]
         command: CaptureCommands,

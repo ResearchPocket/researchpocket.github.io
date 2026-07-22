@@ -43,13 +43,13 @@ export const referenceSections: ReferenceSection[] = [
 
 export const referenceDocuments: ReferenceDocument[] = [
   {
-    description: "Install, build, capture, curate, synchronize, and understand the current V2 boundary.",
+    description: "Choose an interface, create a library, save your first link, and add optional capture, enrichment, or private sync.",
     id: "overview",
     section: "start",
     source: overviewSource,
     sourcePath: "README.md",
     status: "Current",
-    title: "ResearchPocket overview",
+    title: "Getting started",
   },
   {
     description: "Complete command, option, capture, enrichment, TUI, synchronization, and output reference.",

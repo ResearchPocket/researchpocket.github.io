@@ -11,7 +11,7 @@ Last verified against GitHub, platform, Firecrawl, and CSP documentation:
 ## Scope and security goals
 
 This document covers the local V2 client, optional native metadata providers,
-the Firefox bookmarklet and native protocol bridge, a private GitHub data
+the browser bookmarklet and native protocol bridge, a private GitHub data
 repository, the GitHub API, the public GitHub Pages application shell, browser
 persistence, and a separate public publication repository. It is a prerequisite
 for native capture and enrichment, the sync protocol, hosted owner editor, and
@@ -61,7 +61,7 @@ from existing Git history are outside the V2 guarantee.
 | Private data repository | Complete immutable updates, checkpoints, and private policy. GitHub collaborators and repository administrators can read its history. |
 | GitHub REST API | Trusted transport/authentication boundary. Every returned protocol object is still hash- and schema-verified locally. |
 | Publisher workflow | Trusted, pinned workflow in the private repository. It reads private state and writes only an allowlisted projection using a separate credential. |
-| Firefox bookmarklet | User-triggered but runs in the current page's untrusted browser context. The standard bookmarklet may send only the current page URL, bounded title/description/language values, and optional non-sensitive tags entered into its visibly labeled prompt in a versioned capture URI. The page may observe prompted text. |
+| Browser bookmarklet | User-triggered but runs in the current page's untrusted browser context. The standard bookmarklet may send only the current page URL, bounded title/description/language values, and optional non-sensitive tags entered into its visibly labeled prompt in a versioned capture URI. The page may observe prompted text. The installed OS handler itself is browser-independent. |
 | OS protocol dispatcher | Trusted only to deliver one URI to the installed per-user handler. Browser and operating-system history, diagnostics, or other same-user processes may observe that payload. |
 | Native direct enrichment | Untrusted public HTTP(S) target. It may receive a metadata-only request for its own saved URL, but no owner credential, cookie, referrer, note, tag, browser state, or other library data. |
 | Firecrawl enrichment | Explicitly selected third party. It receives the saved target URL and the Firecrawl API credential, but no ResearchPocket library, note, tag, GitHub credential, or capture URI. Returned cleaned Markdown may be retained in the private excerpt register up to 4 MiB. |
@@ -224,7 +224,7 @@ responses decide only transport success; Loro updates decide application state.
 
 ```mermaid
 flowchart LR
-    O[Owner clicks Firefox bookmarklet] --> T[Optional tag prompt in untrusted page]
+    O[Owner clicks browser bookmarklet] --> T[Optional tag prompt in untrusted page]
     T --> B[Version 2 researchpocket URI]
     B --> P[Per-user OS protocol handler]
     P --> C[Installed V2 CLI]
@@ -288,7 +288,7 @@ text instead of issuing third-party requests, and opens explicit links in a new
 non-referring browsing context. The owner application's content security policy
 continues to deny arbitrary scripts, frames, objects, and remote images.
 
-Custom protocol schemes do not authenticate their caller. Firefox normally asks
+Custom protocol schemes do not authenticate their caller. A browser may ask
 before handing an external link to an application, but a permission remembered
 for an untrusted site can allow that site to trigger further requests. The V2
 handler is therefore deliberately append-only: an attacker can at worst create
@@ -359,7 +359,7 @@ Activating a new shell version removes old caches.
   memory credentials; V2 cannot defend against that device-level compromise.
 - Capture URI payloads are not logged by ResearchPocket, but the current page
   URL, title, bounded description/language, prompted tags, and any advanced
-  authored fields pass through Firefox, OS protocol dispatch, and process
+  authored fields pass through the browser, OS protocol dispatch, and process
   arguments. Prompted tags also exist briefly in the current page's untrusted
   JavaScript context. The bookmarklet therefore labels the prompt for
   non-sensitive tags and includes no note, path, repository identity, provider,
