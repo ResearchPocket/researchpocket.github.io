@@ -2741,9 +2741,9 @@ kbd {
 
 @media (max-width: 48rem) {
   .app-shell {
-    height: auto;
-    min-height: 100dvh;
-    overflow: visible;
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
     padding: 0;
   }
 
@@ -2785,8 +2785,9 @@ kbd {
 
   .workspace-layout {
     display: flex;
-    flex: 1 0 auto;
+    flex: 1 1 auto;
     flex-direction: column;
+    overflow: hidden;
   }
 
   .tag-rail {
@@ -2851,12 +2852,12 @@ kbd {
   }
 
   #workspace {
-    flex: 1 0 auto;
-    overflow: visible;
+    flex: 1 1 auto;
+    overflow: auto;
   }
 
   .library-section {
-    padding: 0.75rem 1rem 5rem;
+    padding: 0.75rem 1rem 1rem;
   }
 
   .library-heading-row,
@@ -3003,11 +3004,12 @@ kbd {
     border-top: var(--rule) solid var(--color-border-strong);
     bottom: 0;
     display: grid;
+    flex: 0 0 auto;
     gap: 0.375rem;
     grid-template-columns: 1fr auto auto;
     left: 0;
     padding: 0.375rem 0.75rem max(0.5rem, env(safe-area-inset-bottom));
-    position: fixed;
+    position: static;
     right: 0;
     z-index: 9;
   }
@@ -3018,7 +3020,7 @@ kbd {
 
   .sync-section {
     grid-template-columns: 1fr;
-    padding: 1.25rem 1rem 5rem;
+    padding: 1.25rem 1rem 1.5rem;
   }
 
   .command-dialog {
@@ -3434,7 +3436,7 @@ kbd {
 
 @media (max-width: 48rem) {
   .settings-section {
-    padding: 1.25rem 1rem 5rem;
+    padding: 1.25rem 1rem 1.5rem;
   }
 
   .settings-group {
