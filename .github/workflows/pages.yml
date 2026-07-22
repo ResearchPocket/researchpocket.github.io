@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build static website
+    name: Build static owner app
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
