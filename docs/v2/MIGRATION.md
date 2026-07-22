@@ -27,18 +27,16 @@ research status
 research list --limit 20
 ```
 
-For the recovered `i-like-to-save-it-save-it` library in this workspace, use:
+To keep the imported V2 library in an explicit directory, use:
 
 ```sh
-export RESEARCHPOCKET_DATA_DIR="$HOME/Developer/pocket/recovered/i-like-to-save-it-save-it-2025-08-30/v2-library"
+export RESEARCHPOCKET_DATA_DIR="$HOME/path/to/new-v2-library"
 research init
-research import v1 \
-  "$HOME/Developer/pocket/recovered/i-like-to-save-it-save-it-2025-08-30/current-db/research.sqlite"
+research import v1 "$HOME/path/to/v1/research.sqlite"
 ```
 
-That recovered source contains 978 saves, 415 tags, and 2,439 item-tag links.
-It contains no notes. Those counts are useful acceptance checks, not values the
-importer hard-codes.
+Use `research status` and representative `research list` or `research search`
+queries to compare the imported library with your private source and backup.
 
 ## Safety and idempotency
 

@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "research-pocket-shell-";
-const CACHE_NAME = `${CACHE_PREFIX}v3-root`;
+const CACHE_NAME = `${CACHE_PREFIX}v4-root`;
 const SITE_ROOT = new URL("../", self.registration.scope);
 const ASSET_MANIFEST = new URL("asset-manifest.json", SITE_ROOT);
 const SHELL_FILES = ["app/", "app/index.html", "manifest.webmanifest", "favicon.svg"];
@@ -27,11 +27,19 @@ async function cacheApplicationShell() {
 
   const manifest = await manifestResponse.clone().json();
   const generatedFiles = new Set();
-  for (const entry of Object.values(manifest)) {
+
+  function collectEntry(entryKey) {
+    const entry = manifest[entryKey];
+    if (!entry) {
+      throw new Error(`The application shell manifest is missing ${entryKey}.`);
+    }
     if (typeof entry.file === "string") generatedFiles.add(entry.file);
     for (const cssFile of entry.css ?? []) generatedFiles.add(cssFile);
     for (const assetFile of entry.assets ?? []) generatedFiles.add(assetFile);
+    for (const importedEntry of entry.imports ?? []) collectEntry(importedEntry);
   }
+
+  collectEntry("app/index.html");
 
   await cache.put(manifestRequest, manifestResponse);
   const shellUrls = [...SHELL_FILES, ...generatedFiles].map(

@@ -16,6 +16,7 @@ function walk(directory) {
 for (const requiredFile of [
   "index.html",
   "app/index.html",
+  "docs/index.html",
   "overview/index.html",
   "sw.js",
   "manifest.webmanifest",
@@ -45,6 +46,7 @@ if (sourceMaps.length > 0) {
 }
 
 const artifacts = files.map((file) => ({ file, bytes: readFileSync(file) }));
+const htmlArtifacts = artifacts.filter(({ file }) => extname(file) === ".html");
 const textExtensions = new Set([
   ".css",
   ".html",
@@ -61,12 +63,22 @@ const text = artifacts
   .join("\n");
 
 for (const [name, pattern] of [
-  ["unsafe-inline CSP source", /unsafe-inline/i],
-  ["development CSP nonce", /nonce-[a-z0-9]+/i],
   ["source map reference", /sourceMappingURL=/i],
 ]) {
   if (pattern.test(text)) {
     failures.push(`Production artifact contains ${name}`);
+  }
+}
+
+for (const [name, pattern] of [
+  ["unsafe-inline CSP source", /unsafe-inline/i],
+  ["development CSP nonce", /nonce-[a-z0-9]+/i],
+]) {
+  const matchingFiles = htmlArtifacts
+    .filter(({ bytes }) => pattern.test(bytes.toString("utf8")))
+    .map(({ file }) => relative(distRoot, file));
+  if (matchingFiles.length > 0) {
+    failures.push(`Production HTML contains ${name}: ${matchingFiles.join(", ")}`);
   }
 }
 
@@ -86,7 +98,7 @@ for (const [name, markers] of [
   }
 }
 
-const documents = ["index.html", "app/index.html", "overview/index.html"];
+const documents = ["index.html", "app/index.html", "docs/index.html", "overview/index.html"];
 for (const document of documents) {
   const path = resolve(distRoot, document);
   if (!existsSync(path)) continue;
@@ -96,6 +108,9 @@ for (const document of documents) {
   }
   if (!html.includes("style-src 'self'")) {
     failures.push(`${document} is missing the expected style CSP`);
+  }
+  if (/unsafe-inline|nonce-[a-z0-9]+/i.test(html)) {
+    failures.push(`${document} contains an unsafe or development-only CSP source`);
   }
 
   const runtimeTags = html.match(/<(?:img|link|script)\b[^>]*>/gi) ?? [];
@@ -110,6 +125,20 @@ for (const document of documents) {
   });
   if (externalRuntimeTag) {
     failures.push(`${document} loads a third-party runtime asset`);
+  }
+}
+
+const docsPath = resolve(distRoot, "docs/index.html");
+if (existsSync(docsPath)) {
+  const docs = readFileSync(docsPath, "utf8");
+  if (!docs.includes('name="robots" content="index, follow"')) {
+    failures.push("The public reference guide is not indexable");
+  }
+  if (!docs.includes('rel="canonical" href="https://researchpocket.github.io/docs/"')) {
+    failures.push("The public reference guide canonical URL is incorrect");
+  }
+  if (docs.includes('rel="manifest"') || docs.includes("research_domain_bg")) {
+    failures.push("The public reference guide is coupled to owner-app resources");
   }
 }
 
@@ -133,11 +162,43 @@ if (existsSync(landingPath)) {
 for (const [file, expected] of [
   ["robots.txt", "Sitemap: https://researchpocket.github.io/sitemap.xml"],
   ["sitemap.xml", "<loc>https://researchpocket.github.io/</loc>"],
+  ["sitemap.xml", "<loc>https://researchpocket.github.io/docs/</loc>"],
   ["llms.txt", "https://researchpocket.github.io/app/"],
+  ["llms.txt", "https://researchpocket.github.io/docs/"],
 ]) {
   const path = resolve(distRoot, file);
   if (existsSync(path) && !readFileSync(path, "utf8").includes(expected)) {
     failures.push(`${file} does not point to the organization site`);
+  }
+}
+
+const assetManifestPath = resolve(distRoot, "asset-manifest.json");
+if (existsSync(assetManifestPath)) {
+  const assetManifest = JSON.parse(readFileSync(assetManifestPath, "utf8"));
+  if (!assetManifest["app/index.html"] || !assetManifest["docs/index.html"]) {
+    failures.push("The Vite manifest is missing the owner or reference entry");
+  } else {
+    const collectEntryFiles = (entryKey, collected = new Set()) => {
+      if (collected.has(entryKey)) return collected;
+      collected.add(entryKey);
+      const entry = assetManifest[entryKey];
+      if (!entry) return collected;
+      if (typeof entry.file === "string") collected.add(entry.file);
+      for (const file of entry.css ?? []) collected.add(file);
+      for (const file of entry.assets ?? []) collected.add(file);
+      for (const importedEntry of entry.imports ?? []) {
+        collectEntryFiles(importedEntry, collected);
+      }
+      return collected;
+    };
+    const appFiles = collectEntryFiles("app/index.html");
+    const docsFiles = collectEntryFiles("docs/index.html");
+    if (appFiles.has(assetManifest["docs/index.html"].file)) {
+      failures.push("The owner application dependency closure contains the docs entry");
+    }
+    if ([...docsFiles].some((file) => file.endsWith(".wasm"))) {
+      failures.push("The public reference dependency closure contains WASM");
+    }
   }
 }
 
@@ -216,6 +277,17 @@ if (existsSync(compatibilityScriptPath)) {
         `The compatibility redirect is missing migration behavior: ${requiredMarker}`,
       );
     }
+  }
+}
+
+const serviceWorkerPath = resolve(distRoot, "sw.js");
+if (existsSync(serviceWorkerPath)) {
+  const serviceWorker = readFileSync(serviceWorkerPath, "utf8");
+  if (!serviceWorker.includes('collectEntry("app/index.html")')) {
+    failures.push("The owner service worker does not scope precaching to the app entry");
+  }
+  if (serviceWorker.includes("Object.values(manifest)")) {
+    failures.push("The owner service worker precaches unrelated website entries");
   }
 }
 

@@ -11,5 +11,7 @@ recovery, and hosted owner editing. Selective public collections, the loopback
 web server, checkpoints, and background scheduling remain planned work.
 
 - [Project source and documentation](https://github.com/ResearchPocket/researchpocket.github.io)
-- [Public product overview](https://researchpocket.github.io/)
+- [Public welcome](https://researchpocket.github.io/)
+- [Product overview](https://researchpocket.github.io/overview/)
+- [Complete reference guide](https://researchpocket.github.io/docs/)
 - [Hosted owner app](https://researchpocket.github.io/app/)

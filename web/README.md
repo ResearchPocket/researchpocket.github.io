@@ -35,8 +35,10 @@ After the locked `npm ci` install, Bun can also run the development script:
 bun dev
 ```
 
-Both commands start the public explainer at `http://localhost:5173/` and the
-owner application at `http://localhost:5173/app/`. The development server
+Both commands start the public welcome at `http://localhost:5173/`, product
+overview at `http://localhost:5173/overview/`, Markdown reference at
+`http://localhost:5173/docs/`, and owner application at
+`http://localhost:5173/app/`. The development server
 creates a fresh CSP nonce at startup for Vite's injected scripts and styles, so
 CSS and hot reload work without allowing arbitrary inline content. Restart the
 server after changing its configuration. Production builds do not contain this
@@ -49,10 +51,10 @@ immutable bytes without a replacement SHA.
 
 `npm run build` first compiles `research-domain` for
 `wasm32-unknown-unknown`, runs the matching `wasm-bindgen` CLI, type-checks the
-app, checks the canonical design-system rules, creates the script-free landing
-page and relative-path owner app in `dist/`, and rejects unsafe deployment
-artifacts. The app-scoped service worker caches only same-origin owner-shell
-resources and bypasses `api.github.com`.
+app, checks the canonical design-system rules, creates the script-free public
+pages, Markdown-backed reference, and relative-path owner app in `dist/`, and
+rejects unsafe deployment artifacts. The app-scoped service worker caches only
+same-origin owner-shell resources and bypasses `api.github.com`.
 
 Production is served from `https://researchpocket.github.io/`, with the owner
 application at `/app/`. The build also emits noindex compatibility redirects

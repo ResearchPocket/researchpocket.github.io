@@ -4,8 +4,10 @@ Status: public product explainer, offline owner editing, and private GitHub brow
 
 ## What works now
 
-The static Pages build in `web/` has two deliberately separate entries. The
-root is an indexable, script-free product explainer. `/app/` is the private owner
+The static Pages build in `web/` has four deliberately separate entries. The
+root is an indexable, script-free welcome, `/overview/` is the script-free
+product explainer, and `/docs/` is an indexable React reference reader built from
+an explicit allowlist of checked-in Markdown. `/app/` is the private owner
 application and uses the same pinned Rust/Loro domain core as the native CLI. It
 can initialize a browser library and add, search, edit,
 favorite, tag, delete, and restore saves without a network connection. The UI
@@ -82,9 +84,11 @@ WASM result cannot be persisted.
 
 The owner application bundles React, IndexedDB helpers, JavaScript, CSS,
 same-origin Berkeley Mono webfonts, and the WASM domain artifact. The public
-root loads only the shared first-party CSS and its bundled font files; it does
-not initialize IndexedDB, JavaScript, or WASM. Neither entry loads a remote
-third-party runtime script, font, image, analytics, or error reporter.
+root and overview load only the shared first-party CSS and bundled font files.
+The reference reader loads React and the reviewed Markdown corpus, but it does
+not initialize IndexedDB, WASM, synchronization, or a service worker. No entry
+loads a remote third-party runtime script, font, image, analytics, or error
+reporter.
 Production builds omit source maps.
 
 The document CSP allows only same-origin application resources and future
@@ -159,8 +163,9 @@ npm run build
 ```
 
 The build compiles `research-domain` to WASM, generates the local JavaScript
-bridge, runs strict TypeScript and policy checking, and emits the root landing
-page plus the relative-path owner app under `web/dist/app/`. The protected
+bridge, runs strict TypeScript and policy checking, and emits the root welcome,
+product overview, Markdown-backed reference guide, and relative-path owner app.
+The protected
 source repository is also the reserved organization Pages repository,
 `ResearchPocket/researchpocket.github.io`; its workflow performs the same build
 and deploys only `web/dist/`. The former repository URL continues through
