@@ -41,12 +41,102 @@ type TagMatchMode = "any" | "all";
 type WorkspaceView = "library" | "settings" | "sync";
 type Density = "comfortable" | "compact";
 
+interface ThemeColors {
+  text: string;
+  background: string;
+  primary: string;
+  secondary: string;
+  accent: string;
+}
+
+interface ThemePreset {
+  id: string;
+  label: string;
+  colors: ThemeColors;
+}
+
 interface UndoNotice {
   change: UndoableChange;
   message: string;
 }
 
 const DENSITY_STORAGE_KEY = "researchpocket.ui.density";
+const THEME_STORAGE_KEY = "researchpocket.ui.theme";
+
+const DEFAULT_THEME: ThemeColors = {
+  text: "#f5f1e9",
+  background: "#1a150c",
+  primary: "#d5c8a4",
+  secondary: "#33656f",
+  accent: "#5156ae",
+};
+
+const THEME_PRESETS: ThemePreset[] = [
+  { id: "researchpocket", label: "ResearchPocket", colors: DEFAULT_THEME },
+  {
+    id: "dracula",
+    label: "Dracula",
+    colors: {
+      text: "#f8f8f2",
+      background: "#282a36",
+      primary: "#bd93f9",
+      secondary: "#8be9fd",
+      accent: "#ff79c6",
+    },
+  },
+  {
+    id: "nord",
+    label: "Nord",
+    colors: {
+      text: "#eceff4",
+      background: "#2e3440",
+      primary: "#88c0d0",
+      secondary: "#81a1c1",
+      accent: "#b48ead",
+    },
+  },
+  {
+    id: "solarized-dark",
+    label: "Solarized Dark",
+    colors: {
+      text: "#eee8d5",
+      background: "#002b36",
+      primary: "#b58900",
+      secondary: "#2aa198",
+      accent: "#268bd2",
+    },
+  },
+  {
+    id: "gruvbox-dark",
+    label: "Gruvbox Dark",
+    colors: {
+      text: "#ebdbb2",
+      background: "#282828",
+      primary: "#fabd2f",
+      secondary: "#8ec07c",
+      accent: "#d3869b",
+    },
+  },
+  {
+    id: "catppuccin-mocha",
+    label: "Catppuccin Mocha",
+    colors: {
+      text: "#cdd6f4",
+      background: "#1e1e2e",
+      primary: "#cba6f7",
+      secondary: "#89b4fa",
+      accent: "#f5c2e7",
+    },
+  },
+];
+
+const THEME_FIELDS: { key: keyof ThemeColors; label: string }[] = [
+  { key: "text", label: "Text" },
+  { key: "background", label: "Background" },
+  { key: "primary", label: "Primary" },
+  { key: "secondary", label: "Secondary" },
+  { key: "accent", label: "Accent" },
+];
 
 const LIST_BATCH_SIZE = 100;
 
@@ -82,6 +172,7 @@ export function App() {
   const [tagMatchMode, setTagMatchMode] = useState<TagMatchMode>("all");
   const [sortMode, setSortMode] = useState<SortMode>("recent");
   const [density, setDensity] = useState<Density>(() => readDensityPreference());
+  const [theme, setTheme] = useState<ThemeColors>(() => readThemePreference());
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [visibleLimit, setVisibleLimit] = useState(LIST_BATCH_SIZE);
   const [view, setView] = useState<WorkspaceView>(() => readWorkspaceView());
@@ -122,6 +213,22 @@ export function App() {
       // The preference remains active for this tab when storage is unavailable.
     }
   }, [density]);
+
+  useEffect(() => {
+    applyThemePreference(theme);
+    try {
+      if (themesEqual(theme, DEFAULT_THEME)) {
+        window.localStorage.removeItem(THEME_STORAGE_KEY);
+      } else {
+        window.localStorage.setItem(
+          THEME_STORAGE_KEY,
+          JSON.stringify({ colors: theme, version: 1 }),
+        );
+      }
+    } catch {
+      // The preference remains active for this tab when storage is unavailable.
+    }
+  }, [theme]);
 
   useEffect(() => {
     function handleShortcut(event: KeyboardEvent) {
@@ -642,6 +749,8 @@ export function App() {
           density={density}
           hidden={view !== "settings"}
           onDensityChange={setDensity}
+          onThemeChange={setTheme}
+          theme={theme}
         />
 
           <section
@@ -1042,11 +1151,11 @@ function Welcome({
         <h1 id="welcome-heading">
           {restoreFirst
             ? "Bring your library into this browser."
-            : "Where should this browser start?"}
+            : "Set up this browser."}
         </h1>
         <p className="welcome-copy">
-          Your library lives on this device. Nothing leaves it until you connect
-          private sync.
+          No library is stored in this browser yet. Create an empty local library
+          or restore one you already use.
         </p>
 
         {error ? <p role="alert">{error}</p> : null}
@@ -1054,12 +1163,12 @@ function Welcome({
         <div className="onboarding-options">
           <button className={!restoreFirst ? "onboarding-choice onboarding-choice-priority" : "onboarding-choice"} disabled={busy} onClick={() => void onInitialize()} type="button">
             <span aria-hidden="true">&gt;</span>
-            <span><strong>Start a new library</strong><small>Empty, offline, ready now. Connect sync whenever.</small></span>
+            <span><strong>Create a local library</strong><small>Start empty in this browser. Connect private sync whenever.</small></span>
             <kbd>↵</kbd>
           </button>
           <button className={restoreFirst ? "onboarding-choice onboarding-choice-priority" : "onboarding-choice"} disabled={busy} onClick={() => void onRestore()} type="button">
             <span aria-hidden="true">&gt;</span>
-            <span><strong>Restore from private sync</strong><small>Pull the library your CLI or another browser already syncs.</small></span>
+            <span><strong>Restore an existing library</strong><small>Pull the library your CLI or another browser already syncs.</small></span>
             <kbd>R</kbd>
           </button>
         </div>
@@ -1076,11 +1185,18 @@ function SettingsPanel({
   density,
   hidden,
   onDensityChange,
+  onThemeChange,
+  theme,
 }: {
   density: Density;
   hidden: boolean;
   onDensityChange: (density: Density) => void;
+  onThemeChange: (theme: ThemeColors) => void;
+  theme: ThemeColors;
 }) {
+  const selectedPreset =
+    THEME_PRESETS.find(({ colors }) => themesEqual(theme, colors))?.id ?? "custom";
+
   return (
     <section
       aria-labelledby="settings-heading"
@@ -1097,22 +1213,75 @@ function SettingsPanel({
       <div className="settings-group">
         <div>
           <h3>Appearance</h3>
-          <p>Adjust how much context appears in the library list.</p>
+          <p>Adjust list density and the colors used by this owner app.</p>
         </div>
-        <label className="setting-row" htmlFor="compact-mode">
-          <span>
-            <strong>Compact mode</strong>
-            <small>Fit more saves on screen by hiding previews and tightening rows.</small>
-          </span>
-          <input
-            checked={density === "compact"}
-            id="compact-mode"
-            onChange={(event) =>
-              onDensityChange(event.target.checked ? "compact" : "comfortable")
-            }
-            type="checkbox"
-          />
-        </label>
+        <div className="appearance-settings">
+          <label className="setting-row" htmlFor="compact-mode">
+            <span>
+              <strong>Compact mode</strong>
+              <small>Fit more saves on screen by hiding previews and tightening rows.</small>
+            </span>
+            <input
+              checked={density === "compact"}
+              id="compact-mode"
+              onChange={(event) =>
+                onDensityChange(event.target.checked ? "compact" : "comfortable")
+              }
+              type="checkbox"
+            />
+          </label>
+          <fieldset className="theme-editor">
+            <legend>Color theme</legend>
+            <p>Choose a preset or customize its core palette. Supporting surfaces and borders adapt automatically.</p>
+            <label className="theme-preset" htmlFor="theme-preset">
+              <span>
+                <strong>Theme preset</strong>
+                <small>Start with a familiar editor palette.</small>
+              </span>
+              <select
+                id="theme-preset"
+                onChange={(event) => {
+                  const preset = THEME_PRESETS.find(
+                    ({ id }) => id === event.target.value,
+                  );
+                  if (preset) onThemeChange({ ...preset.colors });
+                }}
+                value={selectedPreset}
+              >
+                {selectedPreset === "custom" ? (
+                  <option value="custom">Custom</option>
+                ) : null}
+                {THEME_PRESETS.map(({ id, label }) => (
+                  <option key={id} value={id}>{label}</option>
+                ))}
+              </select>
+            </label>
+            <div className="theme-color-grid">
+              {THEME_FIELDS.map(({ key, label }) => (
+                <label htmlFor={`theme-${key}`} key={key}>
+                  <span>{label}</span>
+                  <input
+                    id={`theme-${key}`}
+                    onChange={(event) =>
+                      onThemeChange({ ...theme, [key]: event.target.value })
+                    }
+                    type="color"
+                    value={theme[key]}
+                  />
+                  <code>{theme[key]}</code>
+                </label>
+              ))}
+            </div>
+            <button
+              className="secondary-button theme-reset"
+              disabled={themesEqual(theme, DEFAULT_THEME)}
+              onClick={() => onThemeChange({ ...DEFAULT_THEME })}
+              type="button"
+            >
+              Reset to default theme
+            </button>
+          </fieldset>
+        </div>
       </div>
 
       <div className="settings-group">
@@ -1473,6 +1642,7 @@ function CommandPalette({
   tags: { count: number; tag: string }[];
 }) {
   const [query, setQuery] = useState("");
+  const [activeIndex, setActiveIndex] = useState(0);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const normalized = query.trim().toLocaleLowerCase();
   const matchingTags = tags
@@ -1485,6 +1655,27 @@ function CommandPalette({
         .some((value) => value!.toLocaleLowerCase().includes(normalized)),
     )
     .slice(0, 6);
+  const optionCount = matchingTags.length + matchingItems.length + 2;
+
+  function runOption(index: number) {
+    if (index < matchingTags.length) {
+      onFilterTag(matchingTags[index]!.tag);
+      return;
+    }
+
+    const itemIndex = index - matchingTags.length;
+    if (itemIndex < matchingItems.length) {
+      onOpenItem(matchingItems[itemIndex]!);
+      return;
+    }
+
+    if (itemIndex === matchingItems.length) onSync();
+    else onNewSave();
+  }
+
+  function moveSelection(offset: number) {
+    setActiveIndex((current) => (current + offset + optionCount) % optionCount);
+  }
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -1495,6 +1686,12 @@ function CommandPalette({
       if (dialog.open) dialog.close();
     };
   }, []);
+
+  useEffect(() => {
+    document
+      .getElementById(`command-option-${activeIndex}`)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [activeIndex]);
 
   return (
     <dialog
@@ -1509,32 +1706,60 @@ function CommandPalette({
       <div className="command-input">
         <span aria-hidden="true">&gt;</span>
         <input
+          aria-activedescendant={`command-option-${activeIndex}`}
+          aria-controls="command-results"
+          aria-expanded="true"
           aria-label="Search saves, tags, and commands"
-          onChange={(event) => setQuery(event.target.value)}
+          onChange={(event) => {
+            setQuery(event.target.value);
+            setActiveIndex(0);
+          }}
+          onKeyDown={(event) => {
+            if (
+              (event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey &&
+                event.key.toLocaleLowerCase() === "n") ||
+              event.key === "ArrowDown"
+            ) {
+              event.preventDefault();
+              moveSelection(1);
+            } else if (
+              (event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey &&
+                event.key.toLocaleLowerCase() === "p") ||
+              event.key === "ArrowUp"
+            ) {
+              event.preventDefault();
+              moveSelection(-1);
+            } else if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+              event.preventDefault();
+              runOption(activeIndex);
+            }
+          }}
           placeholder="Search saves, tags, and commands"
+          role="combobox"
           value={query}
         />
       </div>
-      <div className="command-results">
-        {matchingTags.length > 0 ? <p>Tags</p> : null}
+      <div className="command-results" id="command-results" role="listbox">
+        {matchingTags.length > 0 ? <p role="presentation">Tags</p> : null}
         {matchingTags.map(({ count, tag }, index) => (
-          <button className={index === 0 ? "command-selected" : undefined} key={tag} onClick={() => onFilterTag(tag)} type="button">
+          <button aria-selected={activeIndex === index} className={activeIndex === index ? "command-selected" : undefined} id={`command-option-${index}`} key={tag} onClick={() => onFilterTag(tag)} onPointerEnter={() => setActiveIndex(index)} role="option" type="button">
             <span>#{tag}</span><small>{pluralize(count, "save")}</small><em>↵ filter library</em>
           </button>
         ))}
-        {matchingItems.length > 0 ? <p>Saves</p> : null}
-        {matchingItems.map((item) => (
-          <button key={item.id} onClick={() => onOpenItem(item)} type="button">
+        {matchingItems.length > 0 ? <p role="presentation">Saves</p> : null}
+        {matchingItems.map((item, itemIndex) => {
+          const index = matchingTags.length + itemIndex;
+          return <button aria-selected={activeIndex === index} className={activeIndex === index ? "command-selected" : undefined} id={`command-option-${index}`} key={item.id} onClick={() => onOpenItem(item)} onPointerEnter={() => setActiveIndex(index)} role="option" type="button">
             <strong>{item.title?.trim() || item.url}</strong>
             <small>{readHostname(item.url)}</small>
             <em>{item.tags.map((tag) => `#${tag}`).join(" ")}</em>
-          </button>
-        ))}
-        <p>Actions</p>
-        <button onClick={onSync} type="button"><span>Sync</span><em>open status</em></button>
-        <button onClick={onNewSave} type="button"><span>Save a URL</span><em>new save</em></button>
+          </button>;
+        })}
+        <p role="presentation">Actions</p>
+        <button aria-selected={activeIndex === optionCount - 2} className={activeIndex === optionCount - 2 ? "command-selected" : undefined} id={`command-option-${optionCount - 2}`} onClick={onSync} onPointerEnter={() => setActiveIndex(optionCount - 2)} role="option" type="button"><span>Sync</span><em>open status</em></button>
+        <button aria-selected={activeIndex === optionCount - 1} className={activeIndex === optionCount - 1 ? "command-selected" : undefined} id={`command-option-${optionCount - 1}`} onClick={onNewSave} onPointerEnter={() => setActiveIndex(optionCount - 1)} role="option" type="button"><span>Save a URL</span><em>new save</em></button>
       </div>
-      <footer className="command-footer"><span><b>↑↓</b> navigate</span><span><b>↵</b> select</span><span><b>esc</b> close</span></footer>
+      <footer className="command-footer"><span><b>Ctrl P/N · ↑↓</b> navigate</span><span><b>↵</b> select</span><span><b>esc</b> close</span></footer>
     </dialog>
   );
 }
@@ -2435,6 +2660,68 @@ function readDensityPreference(): Density {
   } catch {
     return "comfortable";
   }
+}
+
+function readThemePreference(): ThemeColors {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(THEME_STORAGE_KEY) ?? "null");
+    if (stored?.version === 1 && isThemeColors(stored.colors)) {
+      return stored.colors;
+    }
+  } catch {
+    // Invalid or unavailable storage falls back to the shipped theme.
+  }
+  return { ...DEFAULT_THEME };
+}
+
+function isThemeColors(value: unknown): value is ThemeColors {
+  if (!value || typeof value !== "object") return false;
+  const colors = value as Record<string, unknown>;
+  return THEME_FIELDS.every(
+    ({ key }) => typeof colors[key] === "string" && /^#[0-9a-f]{6}$/i.test(colors[key]),
+  );
+}
+
+function themesEqual(left: ThemeColors, right: ThemeColors) {
+  return THEME_FIELDS.every(({ key }) => left[key] === right[key]);
+}
+
+function applyThemePreference(theme: ThemeColors) {
+  const root = document.documentElement;
+  const derivedProperties = {
+    "--color-surface": "color-mix(in srgb, var(--background) 92%, var(--text))",
+    "--color-surface-raised": "color-mix(in srgb, var(--background) 89%, var(--text))",
+    "--color-surface-muted": "color-mix(in srgb, var(--background) 86%, var(--text))",
+    "--color-text-muted": "color-mix(in srgb, var(--text) 55%, var(--background))",
+    "--color-text-soft": "color-mix(in srgb, var(--text) 72%, var(--background))",
+    "--color-text-reader": "color-mix(in srgb, var(--text) 88%, var(--background))",
+    "--color-favorite-muted": "color-mix(in srgb, var(--text) 34%, var(--background))",
+    "--color-border": "color-mix(in srgb, var(--text) 20%, var(--background))",
+    "--color-border-subtle": "color-mix(in srgb, var(--text) 9%, var(--background))",
+    "--color-border-strong": "color-mix(in srgb, var(--text) 38%, var(--background))",
+    "--color-accent-soft": "color-mix(in srgb, var(--secondary) 28%, var(--background))",
+    "--color-reader-note": "color-mix(in srgb, var(--background) 94%, var(--text))",
+  };
+  const custom = !themesEqual(theme, DEFAULT_THEME);
+
+  for (const { key } of THEME_FIELDS) {
+    if (custom) root.style.setProperty(`--${key}`, theme[key]);
+    else root.style.removeProperty(`--${key}`);
+  }
+  for (const [property, value] of Object.entries(derivedProperties)) {
+    if (custom) root.style.setProperty(property, value);
+    else root.style.removeProperty(property);
+  }
+
+  if (custom) root.style.colorScheme = prefersLightControls(theme.background) ? "light" : "dark";
+  else root.style.removeProperty("color-scheme");
+}
+
+function prefersLightControls(color: string) {
+  const red = Number.parseInt(color.slice(1, 3), 16);
+  const green = Number.parseInt(color.slice(3, 5), 16);
+  const blue = Number.parseInt(color.slice(5, 7), 16);
+  return red * 0.299 + green * 0.587 + blue * 0.114 > 160;
 }
 
 function readError(error: unknown) {
