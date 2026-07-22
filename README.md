@@ -215,13 +215,12 @@ copy after use, preserves supported save fields and exact tag spelling, reports
 malformed fields or records, and records per-row receipts so a repeated import is
 idempotent.
 
-For the recovered library in this workspace:
+To import into a separate V2 data directory:
 
 ```sh
-export RESEARCHPOCKET_DATA_DIR="$HOME/Developer/pocket/recovered/i-like-to-save-it-save-it-2025-08-30/v2-library"
+export RESEARCHPOCKET_DATA_DIR="$HOME/path/to/new-v2-library"
 research init
-research import v1 \
-  "$HOME/Developer/pocket/recovered/i-like-to-save-it-save-it-2025-08-30/current-db/research.sqlite"
+research import v1 "$HOME/path/to/v1/research.sqlite"
 research status
 research list --limit 20
 ```

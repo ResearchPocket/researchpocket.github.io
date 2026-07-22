@@ -1,15 +1,13 @@
 import {
   type SubmitEvent,
   type ReactNode,
-  memo,
   useDeferredValue,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
-import ReactMarkdown, { type Components } from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { MarkdownDocument } from "./components/MarkdownDocument.tsx";
 import {
   type LibraryState,
   type PendingSyncChange,
@@ -51,33 +49,6 @@ interface UndoNotice {
 const DENSITY_STORAGE_KEY = "researchpocket.ui.density";
 
 const LIST_BATCH_SIZE = 100;
-
-const READER_MARKDOWN_COMPONENTS: Components = {
-  a: ({ children, href, title }) => (
-    <a href={href} rel="noreferrer" target="_blank" title={title}>
-      {children}
-    </a>
-  ),
-  img: ({ alt, title }) => (
-    <span className="reader-markdown-image" role="img" aria-label={alt || "Archived image"} title={title}>
-      [Image: {alt || "unlabeled"}]
-    </span>
-  ),
-};
-
-const MarkdownDocument = memo(function MarkdownDocument({ source }: { source: string }) {
-  return (
-    <div className="reader-markdown">
-      <ReactMarkdown
-        components={READER_MARKDOWN_COMPONENTS}
-        remarkPlugins={[remarkGfm]}
-        skipHtml
-      >
-        {source}
-      </ReactMarkdown>
-    </div>
-  );
-});
 
 const EMPTY_LIBRARY_STATE: LibraryState = {
   error: null,

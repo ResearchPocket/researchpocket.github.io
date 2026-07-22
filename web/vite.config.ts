@@ -42,6 +42,7 @@ export default defineConfig(({ command }) => {
       rollupOptions: {
         input: {
           app: "app/index.html",
+          docs: "docs/index.html",
           landing: "index.html",
           overview: "overview/index.html",
         },
@@ -51,5 +52,10 @@ export default defineConfig(({ command }) => {
     },
     html: nonce ? { cspNonce: nonce } : undefined,
     plugins: [react(), ...(nonce ? [developmentCsp(nonce)] : [])],
+    server: {
+      fs: {
+        allow: [".."],
+      },
+    },
   };
 });

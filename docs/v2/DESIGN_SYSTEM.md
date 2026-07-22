@@ -3,7 +3,8 @@
 Status: canonical visual and interaction contract for every V2 web surface
 
 This system applies to the hosted owner application, the future loopback web
-interface, the project landing page, and selective public collection views. A
+interface, the public welcome, product overview, reference guide, and selective
+public collection views. A
 surface may expose different capabilities, but it must not invent another
 visual language or styling toolchain.
 
@@ -67,12 +68,12 @@ The styles load in a fixed order:
    overrides.
 2. `web/src/styles/base.css` establishes element behavior, focus, controls, and
    shared accessibility utilities.
-3. `web/src/styles/app.css` composes landing, onboarding, workspace, and
-   component patterns exclusively from tokens.
+3. `web/src/styles/app.css` composes landing, reference, onboarding, workspace,
+   and component patterns exclusively from tokens.
 
-The script-free landing document links these files directly in that order. The
-owner application imports the same order from its TypeScript entry so Vite can
-extract one shared first-party stylesheet for both production documents.
+The script-free public documents link these files directly in that order. The
+owner application and reference guide import the same order from their
+TypeScript entries so Vite can extract shared first-party styles.
 
 Raw colors may appear only in `tokens.css`. Component styles use semantic token
 names rather than palette names so light, dark, and increased-contrast modes do
@@ -128,10 +129,11 @@ remain content-sized, use compact icon controls for row actions, and never force
 a record past three text lines. The page must work from 320 CSS pixels through
 wide desktop screens without horizontal page overflow.
 
-The public landing page uses a wider editorial reading layout at `/`; the owner
-application lives at `/app/`. Both use the same tokens, typography, controls,
-rules, states, and responsive breakpoints. The root must not load the owner
-JavaScript/WASM bundle or initialize private browser storage.
+The public welcome and overview use wider editorial layouts at `/` and
+`/overview/`. The Markdown-backed reference reader lives at `/docs/`, and the
+owner application lives at `/app/`. Every surface uses the same tokens,
+typography, controls, rules, states, and responsive breakpoints. Public pages
+must not load the owner WASM bundle or initialize private browser storage.
 
 ## Patterns
 
@@ -211,14 +213,14 @@ npm run verify
 
 `npm run verify` runs browser persistence/sync contracts and then the production
 build. The build compiles Rust/WASM, type-checks TypeScript, checks the design
-system, emits the static root and owner app, and checks the final artifact.
+system, emits the public website and owner app, and checks the final artifact.
 GitHub Pages invokes the same command; it does not contain a second build recipe.
 
 The artifact check rejects source maps, source-map references, development CSP
 nonces, `unsafe-inline`, external runtime assets, credential markers, and
 private test sentinels across text and binary artifacts. It also requires an
-indexable root landing document, a noindex owner document, an app-scoped
-manifest, and noindex same-origin redirects for the retired project paths.
+indexable public documents, a noindex owner document, an app-scoped manifest,
+and noindex same-origin redirects for the retired project paths.
 Deployment uploads only `web/dist` and uses no owner credential.
 
 ## Change rule

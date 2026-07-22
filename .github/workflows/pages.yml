@@ -1,4 +1,4 @@
-name: Hosted owner app
+name: ResearchPocket website
 
 on:
   pull_request:
@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build static owner app
+    name: Build static website
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -49,7 +49,7 @@ jobs:
         working-directory: web
         run: npm ci
 
-      - name: Verify and build static owner app
+      - name: Verify and build static website
         working-directory: web
         run: npm run verify
 
@@ -64,7 +64,7 @@ jobs:
           path: web/dist
 
   deploy:
-    name: Deploy static owner app
+    name: Deploy static website
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest

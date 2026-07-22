@@ -97,15 +97,19 @@ for (const file of files) {
   }
 }
 
-const mainEntry = readFileSync(resolve(webRoot, "src/main.tsx"), "utf8");
-const importPositions = requiredFiles.map((file) =>
-  mainEntry.indexOf(`./styles/${file}`),
-);
-if (
-  importPositions.some((position) => position === -1) ||
-  importPositions.some((position, index) => index > 0 && position < importPositions[index - 1])
-) {
-  failures.push("main.tsx must import tokens.css, base.css, then app.css");
+for (const entryFile of ["main.tsx", "docs-main.tsx"]) {
+  const entry = readFileSync(resolve(webRoot, `src/${entryFile}`), "utf8");
+  const importPositions = requiredFiles.map((file) =>
+    entry.indexOf(`./styles/${file}`),
+  );
+  if (
+    importPositions.some((position) => position === -1) ||
+    importPositions.some(
+      (position, index) => index > 0 && position < importPositions[index - 1],
+    )
+  ) {
+    failures.push(`${entryFile} must import tokens.css, base.css, then app.css`);
+  }
 }
 
 if (failures.length > 0) {
