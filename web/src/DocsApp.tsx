@@ -81,7 +81,7 @@ export function DocsApp() {
   }, []);
 
   useEffect(() => {
-    document.title = `${selectedDocument.title} — ResearchPocket reference`;
+    document.title = `${selectedDocument.title}: ResearchPocket reference`;
     const canonical = document.querySelector<HTMLLinkElement>('link[rel="canonical"]');
     const description = document.querySelector<HTMLMetaElement>('meta[name="description"]');
     if (canonical) {
