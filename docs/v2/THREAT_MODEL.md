@@ -52,7 +52,7 @@ from existing Git history are outside the V2 guarantee.
 
 | Component | Trust and permitted data |
 | --- | --- |
-| Native CLI/TUI/local UI | Trusted on the owner's device. May read private state. CLI synchronization reads a PAT only from the process environment; it does not persist the credential. |
+| Native CLI/TUI/local UI | Trusted on the owner's device. May read private state. Native synchronization reads a PAT only from the process environment; it does not persist the credential. |
 | Public source and Pages repository | Public and attacker-readable. Its protected source builds the static application shell and allowlisted public projections. It never contains private updates or owner credentials. |
 | Pages application shell | Trusted only when built from reviewed, locked, first-party source. It may handle private state after owner authentication. |
 | Browser memory | Temporarily trusted for the owner PAT and decrypted-in-use private state. Browser extensions, developer tools, and injected scripts can observe it. |
@@ -135,8 +135,10 @@ Native synchronization reads `RESEARCHPOCKET_GITHUB_TOKEN`, with `GH_TOKEN` as
 a fallback, from the current process environment only. V2 does not integrate an
 OS credential store and does not write a token to an ignored file, SQLite, or
 any other persistent storage. Owners should populate the variable with a silent
-shell prompt immediately before synchronization and unset it afterward. The TUI
-and native capture handler neither read this credential nor start a sync.
+shell prompt immediately before synchronization and unset it afterward. The CLI
+and TUI can start synchronization through the same transport; the TUI accepts
+only repository and branch input and relies on the inherited environment. The
+native capture handler neither reads this credential nor starts a sync.
 
 ## Native enrichment credential lifecycle
 

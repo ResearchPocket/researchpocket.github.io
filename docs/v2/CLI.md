@@ -269,6 +269,13 @@ browsing or when site permissions are cleared. Do not disable external-protocol
 safety checks globally. In Firefox, the handler appears under
 **Settings → General → Applications** as the `researchpocket` action.
 
+Automatic bookmarklet enrichment is a local library policy, not a bookmarklet
+option. Configure it before capture with `research enrich configure direct
+--on-capture`, or configure Firecrawl with the same flag. The capture URI still
+contains no provider or credential. The handler commits the item and durable job
+before attempting the selected provider. If the bookmarklet supplied every
+eligible metadata field, the job is skipped without a provider request.
+
 Bookmarklet code and its prompt run in the current page's untrusted JavaScript
 context. The open page may observe text entered there. Use the prompt only for
 non-sensitive organizational tags; add private or sensitive tags after the local
@@ -439,9 +446,10 @@ research tui
 ```
 
 The TUI requires an interactive terminal and uses the resolved V2 data directory.
-It does not support JSON/NDJSON output, make network requests, read GitHub
-credentials, or start synchronization. Its footer reports active/deleted counts,
-the pending outbox count, and sanitized synchronization state.
+It does not support JSON/NDJSON output. Explicit enrichment and synchronization
+actions may make network requests; all other library actions remain local. Its
+footer reports active/deleted counts, the pending outbox count, and sanitized
+synchronization state.
 
 Main view shortcuts:
 
@@ -452,6 +460,8 @@ Main view shortcuts:
 | `Ctrl+U`/`Ctrl+D` | Scroll long item details |
 | `a` | Capture a URL |
 | `e` or Enter | Edit the selected save |
+| `E` | Enrich the selected active save with the configured provider |
+| `s` | Connect a private GitHub repository, or run one configured sync cycle |
 | `/` | Search URL, title, excerpt, private note, and tags through SQLite FTS |
 | Space | Toggle favorite |
 | `x` | Confirm recoverable deletion |
@@ -463,9 +473,10 @@ Main view shortcuts:
 | `q` in the main view or `Ctrl+C` anywhere | Exit and restore the terminal |
 
 Capture and edit forms use Tab/Shift+Tab to move through URL, title, excerpt,
-private note, exact tags, and favorite state. `Ctrl+N` inserts a note newline,
-`Ctrl+S` commits, and Escape cancels. Pasting multiline text into the note field
-preserves newlines; other fields normalize pasted newlines to spaces.
+private note, exact tags, and favorite state. Capture adds an **Enrich after
+save** option that uses the locally configured provider. `Ctrl+N` inserts a note
+newline, `Ctrl+S` commits, and Escape cancels. Pasting multiline text into the
+note field preserves newlines; other fields normalize pasted newlines to spaces.
 The tags field accepts a convenient comma-separated list for ordinary tags or a
 JSON string array for exact commas and leading/trailing whitespace. Existing
 tags open as JSON, so saving an untouched field is lossless.
@@ -487,6 +498,12 @@ has the same atomic CRDT snapshot, projection, immutable batch, outbox, validati
 and error behavior as the corresponding CLI action. The TUI does not duplicate
 domain or synchronization rules.
 
+`E` and capture-form enrichment use the same durable job, lease, provider,
+precondition, and retry orchestration as `research enrich run`. A provider
+failure cannot roll back a newly captured save. `s` opens a repository/optional
+branch form when sync is not configured and otherwise runs the same one-shot
+pull/push/pull cycle as `research sync run`.
+
 ## Private GitHub synchronization
 
 Create an empty private GitHub repository first. Give a fine-grained PAT with an
@@ -506,6 +523,12 @@ unset RESEARCHPOCKET_GITHUB_TOKEN
 
 Repeat the silent read and export in a new shell before a later sync. Run the
 `unset` command after use even when a sync command reports an error.
+
+The TUI uses the same environment-only credential. Export the token before
+starting `research tui`, press `s` to enter `OWNER/PRIVATE_REPOSITORY` and an
+optional branch, then press `s` later for another one-shot cycle. The TUI never
+stores the PAT; only the validated repository and branch enter local sync
+configuration.
 
 `GH_TOKEN` is accepted as a fallback. ResearchPocket uses the token only in a
 sensitive HTTP authorization header. It never writes the token to SQLite, sync
