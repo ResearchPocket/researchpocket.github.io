@@ -1,87 +1,87 @@
-# Getting started with ResearchPocket
+# ResearchPocket
 
-ResearchPocket is a private, local-first library for useful links. Save a URL
-with the title, note, tags, and context that matter to you; search and curate it
-offline; and optionally synchronize immutable updates through a private GitHub
-repository.
+Research work leaves a trail of links: papers to read, sources to cite, examples
+to study, and ideas you do not want to lose. ResearchPocket gives those links one
+private place on your own device.
 
-Your library belongs to the application, not to Git history. GitHub provides
-private storage and transport, while ResearchPocket resolves concurrent changes
-without asking you to merge or rebase personal data.
+It is useful for a class, a thesis, learning a new field, or working through a
+long and ambitious project. Save a URL, add a note about why it matters, tag it,
+and find it again later. You can use it without an account or an internet
+connection. GitHub sync and page enrichment are optional.
 
-[Open the owner app](https://researchpocket.github.io/app/) ·
-[Read the product overview](https://researchpocket.github.io/overview/) ·
-[Download the CLI](https://github.com/ResearchPocket/researchpocket.github.io/releases) ·
-[Browse the reference](https://researchpocket.github.io/docs/)
+[Open the browser app](https://researchpocket.github.io/app/) |
+[Download the CLI](https://github.com/ResearchPocket/researchpocket.github.io/releases) |
+[Read the reference](https://researchpocket.github.io/docs/)
 
-## Start here
+## Save your first link
 
-Choose the interface that fits where you are working.
+Choose the browser app if you want to begin without installing anything. Choose
+the CLI if you spend most of your time in a terminal. Both create a local
+library, and you can add sync later.
 
-### Use the owner app
+### In a browser
 
-Open [researchpocket.github.io/app/](https://researchpocket.github.io/app/) in a
-modern browser.
+1. Open [the ResearchPocket app](https://researchpocket.github.io/app/).
+2. Choose **Create a local library**.
+3. Paste a URL into the add field and press Enter. On a small screen, choose
+   **Save a link**.
+4. Open the saved item and add a title, note, or tag if that will help your
+   future self.
 
-- Choose **Start a new library** for an empty, device-local library.
-- Choose **Restore from private sync** before creating a save when another
-  ResearchPocket installation already uses your private repository.
-- Capture, search, edit, tag, favorite, archive, restore, and read saved context
-  offline.
-- Connect private sync only when you want this browser to exchange updates with
-  your other installations.
+Use the search box when you want the link again. Open a result to read its saved
+context, change your note, or mark it as a favorite.
 
-The owner app stores its private replica in IndexedDB. It has no ResearchPocket
-account, analytics, hosted application database, or bundled public library.
+The library is stored in this browser profile. There is no ResearchPocket
+account. Do not clear the site's browser storage unless the library is already
+synced or you no longer need it.
 
-### Use the CLI
+If you already use ResearchPocket on another device, choose **Restore an
+existing library** before adding anything on the new device.
+
+### From the terminal
 
 Download the archive for your platform from the
 [release page](https://github.com/ResearchPocket/researchpocket.github.io/releases),
-verify it against `SHA256SUMS`, and place `research` (or `research.exe`) somewhere
-stable on your `PATH`.
+check it against `SHA256SUMS`, and put `research` or `research.exe` somewhere on
+your `PATH`.
 
-Initialize the local library:
+Then create a library and save something:
 
 ```sh
-research --version
 research init
-research status
-```
-
-The release page provides archives for Apple Silicon and Intel macOS, Linux
-amd64, and Windows amd64. The binaries are not code-signed or notarized. Build
-the reviewed source instead of weakening system-wide security when your platform
-does not accept an archive.
-
-To build locally:
-
-```sh
-cargo build --locked --release
-./target/release/research --help
-```
-
-## Save and find your first link
-
-Only the URL is required:
-
-```sh
 research add https://example.com/article
 research list
 research search example
 ```
 
-Add context at capture time when it is already clear why the link matters:
+The release archives are not code-signed or notarized. If your computer does not
+accept one, install [Rust](https://www.rust-lang.org/tools/install) and build the
+matching release tag from source instead of weakening system-wide security:
+
+```sh
+git clone --branch v2.0.0-preview.4 --depth 1 \
+  https://github.com/ResearchPocket/researchpocket.github.io.git
+cd researchpocket.github.io
+cargo build --locked --release
+```
+
+The binary is `target/release/research` on macOS and Linux, or
+`target\release\research.exe` on Windows.
+
+## Add context you will need later
+
+A useful library is more than a list of URLs. A short note can preserve the
+question you were asking when you found a source.
 
 ```sh
 research add https://example.com/article \
-  --title "Worth reading" \
-  --tag reading,rust \
-  --note "Return to the concurrency section" \
+  --title "Concurrency notes" \
+  --tag thesis,rust \
+  --note "Compare the failure model with chapter 3" \
   --favorite
 ```
 
-Use the item ID from `research list` to curate or recover a save:
+Use the item ID shown by `research list` when you want to revise or recover it:
 
 ```sh
 research edit "$ITEM_ID" --title "A clearer title" --add-tag reviewed
@@ -89,78 +89,48 @@ research delete "$ITEM_ID"
 research restore "$ITEM_ID"
 ```
 
-Saving the same URL twice creates two separate items. ResearchPocket never
-silently deduplicates authored saves.
+Saving the same URL twice creates two saves. ResearchPocket does not guess that
+two visits had the same purpose.
 
-## Library location and privacy
-
-The CLI uses the operating system's local application-data directory by default:
-
-- Linux: `${XDG_DATA_HOME:-~/.local/share}/researchpocket`
-- macOS: `~/Library/Application Support/io.github.ResearchPocket.ResearchPocket`
-- Windows: `%LOCALAPPDATA%\ResearchPocket\ResearchPocket\data`
-
-Use a separate directory for another library or a temporary test:
+For a keyboard-first view of the same library, run:
 
 ```sh
-research --data-dir /path/to/private/library init
+research tui
 ```
 
-`RESEARCHPOCKET_DATA_DIR` provides the same override. The local
-`library.sqlite3` contains private state. Do not commit, upload, publish, or copy
-it as a synchronization mechanism.
+Press `?` inside the TUI for its shortcuts. `a` adds a link, `/` searches, `E`
+enriches the selected save, and `s` connects or runs private sync.
 
-## Save from a browser
+## Save the page you are reading
 
-The installed CLI can register a per-user `researchpocket://` handler with the
-operating system. The handler is not tied to Firefox: a browser, bookmarklet, or
-other local integration can dispatch a valid capture URI to the same offline save
-operation as `research add`. It does not require an extension, running server,
-GitHub credential, or network connection.
+The included bookmarklet sends the current page to the installed CLI. It does
+not need a browser extension or a server running in the background.
 
-The supplied bookmarklet works in browsers that allow a JavaScript bookmark to
-hand a custom URL scheme to the operating system. Bookmark and external-protocol
-permission controls vary by browser.
+1. Keep the CLI in a stable location and run `research init`.
+2. Run `research capture install` and then `research capture status`.
+3. Create a bookmark named `Save to ResearchPocket`.
+4. Copy the single line from [bookmarklet.js](bookmarklet.js) into the bookmark's
+   URL field.
+5. Open a page and click the bookmarklet.
 
-1. Put the CLI at its long-term location and run `research init`.
-2. Run `research capture install`, then confirm it with
-   `research capture status`.
-3. Create a browser bookmark named `Save to ResearchPocket` and copy the complete
-   single line from [bookmarklet.js](bookmarklet.js) into its URL field. In
-   Firefox, use **Bookmarks Toolbar → Add Bookmark**.
-4. Open a page, click the bookmarklet, and optionally enter comma-separated
-   tags.
-5. Confirm the local result with `research list`.
+The bookmarklet can include the page title, description, language, and tags you
+enter. Its tag prompt runs inside the open page, so use it only for non-sensitive
+tags. Add private context later in ResearchPocket.
 
-When using a non-default library, bind it during installation:
+Browser captures are saved locally first. If you later turn on automatic
+enrichment, ResearchPocket can fill metadata that the page did not provide. The
+bookmarklet never carries a provider or credential. ResearchPocket skips the
+extra request when all eligible metadata is already present.
 
-```sh
-research --data-dir /absolute/path/to/private/library capture install
-```
+See the [capture guide](docs/v2/CLI.md#browser-capture-through-the-url-scheme)
+for browser and operating-system troubleshooting.
 
-The tag prompt runs in the open page's untrusted JavaScript context. Use it only
-for non-sensitive organizational tags; add private tags later through the CLI,
-TUI, or owner app. Capture remains local until you explicitly run sync.
+## Fill missing page details
 
-Re-run installation after moving or replacing the binary. On macOS, reinstall
-after every CLI upgrade because the per-user application bridge contains its own
-copy. Remove the association without deleting saved data with:
+Enrichment can fill a missing title, excerpt, or language after a link is safely
+stored. It does not replace notes or other values you wrote yourself.
 
-```sh
-research capture uninstall
-```
-
-See the [capture and troubleshooting reference](docs/v2/CLI.md#browser-capture-through-the-url-scheme)
-and [capture privacy boundary](docs/v2/THREAT_MODEL.md#native-bookmarklet-capture).
-
-## Add metadata after capture
-
-Enrichment is optional and always runs after the URL is durable. A failed or
-offline request leaves the save intact and retryable. Fetched data fills only
-eligible title, excerpt, and language fields; authored values and concurrent
-human changes win.
-
-Use the built-in public-HTML extractor:
+Use the built-in direct fetcher for public pages:
 
 ```sh
 research add https://example.com/article --enrich direct
@@ -169,48 +139,28 @@ research enrich run
 research enrich status
 ```
 
-Firecrawl is an explicit alternative for pages that need a hosted extractor.
-Selecting it sends the saved URL to the configured Firecrawl service. Keep the
-credential out of shell history by passing it through standard input:
+Firecrawl is available when a page needs a hosted extractor. Using it sends the
+saved URL to the configured Firecrawl service. Its API key can come from the
+environment or a separate local key file:
 
 ```sh
 printf '%s' "$FIRECRAWL_API_KEY" | \
   research enrich configure firecrawl --api-key-stdin --on-capture
-research enrich run
 ```
 
-The optional key file remains separate from the library and synchronization
-data. Firecrawl Markdown is bounded and stored through the normal excerpt field;
-raw HTML, PDFs, and attachments are not archived. See the
-[enrichment reference](docs/v2/CLI.md#metadata-enrichment) for replacement,
-retry, provider, and privacy details.
+An offline or failed request leaves the save in place and keeps the job
+retryable. The [enrichment reference](docs/v2/CLI.md#metadata-enrichment)
+explains providers, retries, and replacement rules.
 
-## Import an existing library
+## Sync when you need another device
 
-The importer reads a private staging copy of an existing ResearchPocket SQLite
-database. It does not modify the source, import retired credentials, or silently
-discard malformed records. Per-row receipts make repeated imports idempotent.
+You do not need GitHub to use ResearchPocket. Sync exchanges updates and keeps
+one private library current across your own browsers and computers.
 
-```sh
-export RESEARCHPOCKET_DATA_DIR="$HOME/path/to/new-library"
-research init
-research import v1 "$HOME/path/to/previous/research.sqlite"
-research status
-research list --limit 20
-```
+Create an empty private GitHub repository and a fine-grained PAT that can access
+only that repository with `Contents: read/write`. Give the token a short expiry.
 
-Keep the source and a verified backup until you have checked counts and several
-representative saves. See the [migration guide](docs/v2/MIGRATION.md) for field
-preservation and recovery details.
-
-## Synchronize privately
-
-Synchronization is optional. Create an empty private GitHub repository and an
-expiring fine-grained token limited to that repository with
-`Contents: read/write`.
-
-Read the token silently, expose it only while the commands run, and remove it
-from the shell afterward:
+For the native CLI and TUI, read it without showing it in the terminal:
 
 ```sh
 printf 'Fine-grained GitHub token: ' >&2
@@ -222,104 +172,95 @@ research sync run
 unset RESEARCHPOCKET_GITHUB_TOKEN
 ```
 
-For another device, initialize a fresh data directory and connect it to the same
-repository before adding local saves. The device adopts the existing library
-identity, keeps its own device identity, and rebuilds local state from immutable
-updates.
+Native ResearchPocket does not save the GitHub PAT. Set
+`RESEARCHPOCKET_GITHUB_TOKEN` or `GH_TOKEN` before starting `research tui`, then
+press `s` to connect or sync. The browser app keeps its token in memory by
+default and can optionally remember it only for the current tab session.
 
-Run `research sync run --every 60` for an optional foreground polling loop.
-Network, rate-limit, server, and branch-head failures keep exact queued updates
-for retry. Git commits and their order never decide library values.
+On a new device, initialize an empty library and connect it before adding new
+saves:
 
-The owner app exposes the same workflow in its **Sync** view. Its token stays in
-memory unless you explicitly choose tab-only `sessionStorage`; it never enters
-IndexedDB, URLs, logs, or the service-worker cache. See the
-[synchronization workflow](docs/v2/CLI.md#private-github-synchronization),
-[protocol reference](docs/v2/SYNC_PROTOCOL.md), and
-[threat model](docs/v2/THREAT_MODEL.md).
+```sh
+research --data-dir /path/to/new/library init
+research --data-dir /path/to/new/library sync connect OWNER/PRIVATE_REPOSITORY
+```
 
-## Use the terminal interface
+ResearchPocket exchanges immutable updates. It never asks you to merge, rebase,
+or resolve Git conflicts in your library. Read the
+[sync guide](docs/v2/CLI.md#private-github-synchronization) for setup and recovery
+details.
 
-Run `research tui` from an interactive terminal to capture, search, edit,
-favorite, archive, and restore saves using the same local transactions as the
-CLI.
+## Know where your work lives
 
-The primary shortcuts are:
+The CLI stores its library in the normal application-data directory:
 
-| Key | Action |
-| --- | --- |
-| `a` | Capture a URL |
-| `e` or Enter | Edit the selected save |
-| `/` | Search |
-| Space | Toggle favorite |
-| `x` / `r` | Archive / restore |
-| `f` | Toggle favorite-only results |
-| `d` | Cycle active, all, and archived views |
-| `?` | Open complete keyboard help |
-| `q` | Exit from the library view |
+- Linux: `${XDG_DATA_HOME:-~/.local/share}/researchpocket`
+- macOS: `~/Library/Application Support/io.github.ResearchPocket.ResearchPocket`
+- Windows: `%LOCALAPPDATA%\ResearchPocket\ResearchPocket\data`
 
-The TUI is offline. It reports pending synchronization state but does not read a
-GitHub token or start synchronization.
+Choose another directory with `--data-dir` or `RESEARCHPOCKET_DATA_DIR`:
 
-## Use machine-readable output
+```sh
+research --data-dir /path/to/private/library init
+```
 
-Every data command accepts `--format human|json|ndjson`. Global options may
-appear before or after a subcommand:
+`library.sqlite3` contains private working state. Do not commit or upload that
+file, and do not copy it as a sync method. Use ResearchPocket sync when you need
+the library on another device.
+
+Deleting a save is recoverable. Secure erasure from a synced repository requires
+rewriting its history or moving to a new repository. ResearchPocket stores links
+and bounded excerpts; it is not a PDF, attachment, or full-page archive.
+
+## Bring in an older library
+
+The V1 importer reads the old database without changing it:
+
+```sh
+research --data-dir /path/to/new/library init
+research --data-dir /path/to/new/library import v1 /path/to/old/research.sqlite
+research --data-dir /path/to/new/library list --limit 20
+```
+
+Keep the old database and a backup until you have checked several saves. The
+[migration guide](docs/v2/MIGRATION.md) lists what is preserved and how to verify
+the result.
+
+## Use it from scripts
+
+Data commands support human, JSON, and NDJSON output:
 
 ```sh
 research status --format json
 research list --format ndjson --all > saves.ndjson
-research list --tags rust,sqlite --favorite-only
 ```
 
-Machine data goes to stdout. Progress, warnings, and import diagnostics go to
-stderr. Machine output is schema-versioned and never includes credentials, raw
-CRDT state, or transport payloads.
+Machine data goes to standard output. Warnings and progress go to standard
+error. Credentials and raw synchronization updates are not included.
 
-## What is available now
+## Read more
 
-ResearchPocket currently provides:
-
-- offline capture, curation, search, archive, and restore through the CLI;
-- an offline terminal interface built on the same local operations;
-- a hosted owner app with browser-local editing and convergence-safe undo;
-- native browser capture through an installed URL-scheme handler;
-- optional direct or Firecrawl metadata enrichment;
-- idempotent import from the previous SQLite library format;
-- private GitHub synchronization and new-device restoration; and
-- human, JSON, and NDJSON command output.
-
-The following work is not currently shipped:
-
-- background-service installation;
-- synchronization checkpoints and history pruning;
-- the loopback local web server; and
-- selective publication and public collections.
-
-## Reference
-
-- [Complete CLI reference](docs/v2/CLI.md)
+- [Complete CLI and TUI reference](docs/v2/CLI.md)
+- [Hosted browser application](docs/v2/WEB.md)
 - [Migration guide](docs/v2/MIGRATION.md)
-- [Hosted owner application](docs/v2/WEB.md)
-- [Synchronization protocol](docs/v2/SYNC_PROTOCOL.md)
 - [Privacy threat model](docs/v2/THREAT_MODEL.md)
+- [Synchronization protocol](docs/v2/SYNC_PROTOCOL.md)
 - [Product contract](docs/v2/PRODUCT.md)
-- [Design system](docs/v2/DESIGN_SYSTEM.md)
-- [Delivery roadmap](docs/v2/ROADMAP.md)
 - [Contributing guide](CONTRIBUTING.md)
 
 ## Development
 
-Use the pinned Rust toolchain and locked dependencies:
+Use the pinned toolchain and locked dependencies:
 
 ```sh
 cargo fmt --all -- --check
 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 cargo test --locked --workspace --all-targets --all-features
+cargo audit --deny warnings
 cargo build --locked --release
 ```
 
-For the public website and owner app:
+For the website and browser app:
 
 ```sh
 cd web
@@ -328,6 +269,5 @@ npm run verify
 npm run dev
 ```
 
-Tests are intentionally sparse and protect durable persistence, migration,
-convergence, privacy, and deployment boundaries rather than implementation
-details.
+Tests focus on persistence, convergence, migration, privacy, and deployment
+boundaries rather than framework details.
