@@ -266,6 +266,7 @@ async fn handle_enrich(
                     item_id,
                     run.provider.map(store_provider),
                     run.replace_excerpt,
+                    None,
                 )
                 .await?
                 {
@@ -293,6 +294,7 @@ async fn explicit_enrichment_job(
     item_id: &str,
     requested_provider: Option<EnrichmentProvider>,
     replace_excerpt: bool,
+    expected_excerpt_revision: Option<&str>,
 ) -> CliResult<Option<EnrichmentClaim>> {
     let existing = store.enrichment_job(item_id).await?;
     if replace_excerpt {
@@ -313,9 +315,22 @@ async fn explicit_enrichment_job(
                 )
             })?,
         };
-        let queued = store
-            .queue_item_enrichment_replacing_excerpt(item_id, provider)
-            .await?;
+        let queued = match expected_excerpt_revision {
+            Some(expected_excerpt_revision) => {
+                store
+                    .queue_item_enrichment_replacing_excerpt_if_revision(
+                        item_id,
+                        provider,
+                        expected_excerpt_revision,
+                    )
+                    .await?
+            }
+            None => {
+                store
+                    .queue_item_enrichment_replacing_excerpt(item_id, provider)
+                    .await?
+            }
+        };
         return claim_queued_enrichment(store, queued).await;
     }
 
@@ -438,16 +453,19 @@ pub(crate) async fn enrich_item_with_configured_provider(
     store: &V2Store,
     data_dir: &Path,
     item_id: &str,
+    replace_excerpt: bool,
+    expected_excerpt_revision: Option<String>,
 ) -> CliResult<EnrichmentAttemptOutcome> {
     let existing = store.enrichment_job(item_id).await?;
-    let requested_provider = if existing.as_ref().is_some_and(|job| {
-        matches!(
-            job.status,
-            StoreEnrichmentStatus::Pending
-                | StoreEnrichmentStatus::Retry
-                | StoreEnrichmentStatus::InProgress
-        )
-    }) {
+    let requested_provider = if !replace_excerpt
+        && existing.as_ref().is_some_and(|job| {
+            matches!(
+                job.status,
+                StoreEnrichmentStatus::Pending
+                    | StoreEnrichmentStatus::Retry
+                    | StoreEnrichmentStatus::InProgress
+            )
+        }) {
         None
     } else {
         Some(configured_provider(data_dir)?.ok_or_else(|| {
@@ -461,7 +479,8 @@ pub(crate) async fn enrich_item_with_configured_provider(
         data_dir,
         item_id,
         requested_provider,
-        false,
+        replace_excerpt,
+        expected_excerpt_revision.as_deref(),
     )
     .await
     {
@@ -1302,9 +1321,15 @@ mod tests {
         )
         .expect("change configured provider");
 
-        let outcome = enrich_item_with_configured_provider(&store, directory.path(), &item.id)
-            .await
-            .expect("resume recorded provider");
+        let outcome = enrich_item_with_configured_provider(
+            &store,
+            directory.path(),
+            &item.id,
+            false,
+            None,
+        )
+        .await
+        .expect("resume recorded provider");
         assert_eq!(outcome.status(), StoreEnrichmentStatus::Retry);
         assert_eq!(outcome.last_error_kind(), Some("unsafe_target"));
         assert_eq!(store.item(&item.id).await.expect("saved item"), item);
@@ -1342,10 +1367,15 @@ mod tests {
             StoreEnrichmentStatus::Failed
         );
 
-        let reconfigured =
-            enrich_item_with_configured_provider(&store, directory.path(), &item.id)
-                .await
-                .expect("restart failed job with configured provider");
+        let reconfigured = enrich_item_with_configured_provider(
+            &store,
+            directory.path(),
+            &item.id,
+            false,
+            None,
+        )
+        .await
+        .expect("restart failed job with configured provider");
         assert_eq!(reconfigured.status(), StoreEnrichmentStatus::Retry);
         assert_eq!(reconfigured.last_error_kind(), Some("missing_credential"));
         assert_eq!(
@@ -1356,6 +1386,119 @@ mod tests {
                 .expect("reconfigured durable job")
                 .provider,
             EnrichmentProvider::Firecrawl
+        );
+    }
+
+    #[tokio::test]
+    async fn tui_force_enrichment_targets_an_authored_excerpt_without_clearing_it_first() {
+        let directory = tempfile::tempdir().expect("temporary library");
+        let store = V2Store::init(directory.path())
+            .await
+            .expect("initialize library");
+        let item = store
+            .create_item(CreateItemRequest {
+                url: "http://127.0.0.1/private".to_owned(),
+                title: None,
+                excerpt: Some("Authored excerpt".to_owned()),
+                favorite: false,
+                language: None,
+                saved_at: None,
+                note: String::new(),
+                tags: Vec::new(),
+            })
+            .await
+            .expect("create authored save");
+        enrichment::configure(
+            directory.path(),
+            EnrichmentProvider::Direct,
+            false,
+            None,
+            None,
+        )
+        .expect("configure provider");
+
+        let expected_excerpt_revision = store
+            .item_excerpt_revision(&item.id)
+            .await
+            .expect("excerpt revision");
+        let outcome = enrich_item_with_configured_provider(
+            &store,
+            directory.path(),
+            &item.id,
+            true,
+            Some(expected_excerpt_revision),
+        )
+        .await
+        .expect("attempt forced enrichment");
+        assert_eq!(outcome.status(), StoreEnrichmentStatus::Retry);
+        assert_eq!(outcome.last_error_kind(), Some("unsafe_target"));
+        assert_eq!(
+            store.item(&item.id).await.expect("saved item").excerpt,
+            Some("Authored excerpt".to_owned())
+        );
+        let job = store
+            .enrichment_job(&item.id)
+            .await
+            .expect("job lookup")
+            .expect("durable job");
+        assert!(job.target_excerpt);
+        assert_eq!(job.provider, EnrichmentProvider::Direct);
+
+        let changed_item = store
+            .create_item(CreateItemRequest {
+                url: "http://127.0.0.1/changed".to_owned(),
+                title: None,
+                excerpt: Some("Excerpt shown for confirmation".to_owned()),
+                favorite: false,
+                language: None,
+                saved_at: None,
+                note: String::new(),
+                tags: Vec::new(),
+            })
+            .await
+            .expect("create changing save");
+        let stale_revision = store
+            .item_excerpt_revision(&changed_item.id)
+            .await
+            .expect("confirmed excerpt revision");
+        store
+            .edit_item(EditItemRequest {
+                item_id: changed_item.id.clone(),
+                excerpt: Some(OptionalTextUpdate::Set("Concurrent edit".to_owned())),
+                ..EditItemRequest::default()
+            })
+            .await
+            .expect("edit after confirmation");
+
+        let result = enrich_item_with_configured_provider(
+            &store,
+            directory.path(),
+            &changed_item.id,
+            true,
+            Some(stale_revision),
+        )
+        .await;
+        let Err(error) = result else {
+            panic!("stale confirmation must not queue replacement");
+        };
+        assert!(matches!(
+            error.downcast_ref::<StoreError>(),
+            Some(StoreError::StaleEdit)
+        ));
+        assert_eq!(
+            store
+                .item(&changed_item.id)
+                .await
+                .expect("concurrently edited item")
+                .excerpt,
+            Some("Concurrent edit".to_owned())
+        );
+        assert!(
+            store
+                .enrichment_job(&changed_item.id)
+                .await
+                .expect("stale job lookup")
+                .is_none()
         );
     }
 }

@@ -99,7 +99,9 @@ research tui
 ```
 
 Press `?` inside the TUI for its shortcuts. `a` adds a link, `/` searches, `E`
-enriches the selected save, and `s` connects or runs private sync.
+fills missing metadata and can refresh a provider-owned excerpt, `Ctrl+E`
+confirms replacement of any current excerpt, and `s` connects or runs private
+sync.
 
 ## Save the page you are reading
 

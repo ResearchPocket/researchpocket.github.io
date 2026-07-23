@@ -461,6 +461,7 @@ Main view shortcuts:
 | `a` | Capture a URL |
 | `e` or Enter | Edit the selected save |
 | `E` | Enrich the selected active save with the configured provider |
+| `Ctrl+E` | Confirm re-enrichment that replaces the current excerpt |
 | `s` | Connect a private GitHub repository, or run one configured sync cycle |
 | `/` | Search URL, title, excerpt, private note, and tags through SQLite FTS |
 | Space | Toggle favorite |
@@ -475,8 +476,9 @@ Main view shortcuts:
 Capture and edit forms use Tab/Shift+Tab to move through URL, title, excerpt,
 private note, exact tags, and favorite state. Capture adds an **Enrich after
 save** option that uses the locally configured provider. `Ctrl+N` inserts a note
-newline, `Ctrl+S` commits, and Escape cancels. Pasting multiline text into the
-note field preserves newlines; other fields normalize pasted newlines to spaces.
+or excerpt newline, Up/Down move between lines in those multiline fields,
+`Ctrl+S` commits, and Escape cancels. Pasting multiline text into excerpts and
+notes preserves newlines; other fields normalize pasted newlines to spaces.
 The tags field accepts a convenient comma-separated list for ordinary tags or a
 JSON string array for exact commas and leading/trailing whitespace. Existing
 tags open as JSON, so saving an untouched field is lossless.
@@ -499,10 +501,12 @@ and error behavior as the corresponding CLI action. The TUI does not duplicate
 domain or synchronization rules.
 
 `E` and capture-form enrichment use the same durable job, lease, provider,
-precondition, and retry orchestration as `research enrich run`. A provider
-failure cannot roll back a newly captured save. `s` opens a repository/optional
-branch form when sync is not configured and otherwise runs the same one-shot
-pull/push/pull cycle as `research sync run`.
+precondition, and retry orchestration as `research enrich run`. `Ctrl+E` requires
+confirmation and invokes the explicit excerpt-replacement path; it records the
+current excerpt revision before the request and refuses to apply when that
+revision changes. A provider failure cannot roll back a newly captured save. `s`
+opens a repository/optional branch form when sync is not configured and otherwise
+runs the same one-shot pull/push/pull cycle as `research sync run`.
 
 ## Private GitHub synchronization
 
