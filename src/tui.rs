@@ -27,7 +27,7 @@ use research_store::{
 };
 use serde_json::Value;
 use tokio::task::JoinHandle;
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::{sync, v2};
 
@@ -271,6 +271,16 @@ impl App {
                 KeyCode::Esc => self.mode = Mode::Browse,
                 _ => {}
             },
+            Mode::ConfirmForceEnrich(target) => match key.code {
+                KeyCode::Enter | KeyCode::Char('y') if command_key(key) => {
+                    let target = target.clone();
+                    self.mode = Mode::Browse;
+                    self.force_enrich_selected(data_dir, target);
+                }
+                KeyCode::Char('n') if command_key(key) => self.mode = Mode::Browse,
+                KeyCode::Esc => self.mode = Mode::Browse,
+                _ => {}
+            },
             Mode::Help => {
                 if key.code == KeyCode::Esc
                     || command_key(key)
@@ -333,7 +343,8 @@ impl App {
         }
         match &self.mode {
             Mode::Browse => {
-                key.code == KeyCode::Esc && !self.query.is_empty()
+                control_shortcut(key) && key.code == KeyCode::Char('e')
+                    || key.code == KeyCode::Esc && !self.query.is_empty()
                     || command_key(key)
                         && matches!(
                             key.code,
@@ -356,6 +367,11 @@ impl App {
                     || control_shortcut(key) && key.code == KeyCode::Char('s')
             }
             Mode::ConfirmDelete => {
+                key.code == KeyCode::Esc
+                    || command_key(key)
+                        && matches!(key.code, KeyCode::Enter | KeyCode::Char('y' | 'n'))
+            }
+            Mode::ConfirmForceEnrich(_) => {
                 key.code == KeyCode::Esc
                     || command_key(key)
                         && matches!(key.code, KeyCode::Enter | KeyCode::Char('y' | 'n'))
@@ -388,17 +404,19 @@ impl App {
             | Mode::Form(_)
             | Mode::SyncSetup(_)
             | Mode::ConfirmDelete
+            | Mode::ConfirmForceEnrich(_)
             | Mode::Help => {}
         }
     }
 
     async fn handle_browse_key(&mut self, store: &V2Store, data_dir: &Path, key: KeyEvent) {
         if self.operation_blocks_mutations()
-            && command_key(key)
-            && matches!(
-                key.code,
-                KeyCode::Char('a' | 'e' | 'E' | ' ' | 'x' | 'r') | KeyCode::Enter
-            )
+            && (command_key(key)
+                && matches!(
+                    key.code,
+                    KeyCode::Char('a' | 'e' | 'E' | ' ' | 'x' | 'r') | KeyCode::Enter
+                )
+                || control_shortcut(key) && key.code == KeyCode::Char('e'))
         {
             self.notice = Some(Notice::info(
                 "Wait for the initial sync connection to finish before changing this library",
@@ -456,6 +474,27 @@ impl App {
             }
             KeyCode::Char('E') if command_key(key) => {
                 self.enrich_selected(data_dir);
+            }
+            KeyCode::Char('e') if control_shortcut(key) => {
+                if self.operation.is_some() {
+                    self.notice =
+                        Some(Notice::info("Another network operation is still running"));
+                } else if self
+                    .selected_item()
+                    .is_some_and(|item| item.state == "active")
+                {
+                    let item = self.selected_item().cloned().expect("selected active item");
+                    match store.item_excerpt_revision(&item.id).await {
+                        Ok(expected_excerpt_revision) => {
+                            self.mode = Mode::ConfirmForceEnrich(ForceEnrichmentConfirmation {
+                                item_id: item.id,
+                                title: item.title,
+                                expected_excerpt_revision,
+                            });
+                        }
+                        Err(error) => self.notice_error(error),
+                    }
+                }
             }
             KeyCode::Char('s') if command_key(key) => {
                 if self.operation.is_some() {
@@ -557,7 +596,7 @@ impl App {
                 let _ = self.refresh_or_notice(store, Some(&item_id)).await;
                 if enrich {
                     if self.operation.is_none() {
-                        self.start_enrichment(data_dir, item_id, "Captured save");
+                        self.start_enrichment(data_dir, item_id, "Captured save", false, None);
                     } else {
                         self.queued_enrichment.push_back((item_id, "Captured save"));
                     }
@@ -580,7 +619,18 @@ impl App {
             return;
         }
         self.notice = Some(Notice::info("Enriching selected save"));
-        self.start_enrichment(data_dir, item.id, "Enrichment");
+        self.start_enrichment(data_dir, item.id, "Enrichment", false, None);
+    }
+
+    fn force_enrich_selected(&mut self, data_dir: &Path, target: ForceEnrichmentConfirmation) {
+        self.notice = Some(Notice::info("Re-enriching and replacing the excerpt"));
+        self.start_enrichment(
+            data_dir,
+            target.item_id,
+            "Excerpt replacement",
+            true,
+            Some(target.expected_excerpt_revision),
+        );
     }
 
     fn synchronize(&mut self, data_dir: &Path) {
@@ -649,7 +699,14 @@ impl App {
         });
     }
 
-    fn start_enrichment(&mut self, data_dir: &Path, item_id: String, action: &'static str) {
+    fn start_enrichment(
+        &mut self,
+        data_dir: &Path,
+        item_id: String,
+        action: &'static str,
+        replace_excerpt: bool,
+        expected_excerpt_revision: Option<String>,
+    ) {
         let data_dir = data_dir.to_path_buf();
         let preferred_id = item_id.clone();
         self.operation = Some(BackgroundOperation {
@@ -669,7 +726,11 @@ impl App {
                                 })
                         } else {
                             v2::enrich_item_with_configured_provider(
-                                &store, &data_dir, &item_id,
+                                &store,
+                                &data_dir,
+                                &item_id,
+                                replace_excerpt,
+                                expected_excerpt_revision,
                             )
                             .await
                         };
@@ -720,7 +781,7 @@ impl App {
             Err(_) => self.notice_error("The background operation stopped unexpectedly"),
         }
         if let Some((item_id, action)) = self.queued_enrichment.pop_front() {
-            self.start_enrichment(data_dir, item_id, action);
+            self.start_enrichment(data_dir, item_id, action, false, None);
         }
     }
 
@@ -863,6 +924,7 @@ enum Mode {
     Form(Box<ItemForm>),
     SyncSetup(SyncForm),
     ConfirmDelete,
+    ConfirmForceEnrich(ForceEnrichmentConfirmation),
     Help,
 }
 
@@ -874,6 +936,7 @@ impl Mode {
             Self::Form(_) => ModeKind::Form,
             Self::SyncSetup(_) => ModeKind::SyncSetup,
             Self::ConfirmDelete => ModeKind::ConfirmDelete,
+            Self::ConfirmForceEnrich(_) => ModeKind::ConfirmForceEnrich,
             Self::Help => ModeKind::Help,
         }
     }
@@ -886,6 +949,7 @@ enum ModeKind {
     Form,
     SyncSetup,
     ConfirmDelete,
+    ConfirmForceEnrich,
     Help,
 }
 
@@ -921,6 +985,13 @@ struct BackgroundCompletion {
     preferred_id: Option<String>,
 }
 
+#[derive(Clone)]
+struct ForceEnrichmentConfirmation {
+    item_id: String,
+    title: Option<String>,
+    expected_excerpt_revision: String,
+}
+
 struct ItemForm {
     fields: Vec<FormField>,
     active: usize,
@@ -935,7 +1006,7 @@ impl ItemForm {
             fields: vec![
                 FormField::new("URL", "", false),
                 FormField::new("Title", "", false),
-                FormField::new("Excerpt", "", false),
+                FormField::new("Excerpt", "", true),
                 FormField::new("Note", "", true),
                 FormField::new("Tags (comma list or JSON)", "", false),
             ],
@@ -951,11 +1022,7 @@ impl ItemForm {
             fields: vec![
                 FormField::new("URL", &item.url, false),
                 FormField::new("Title", item.title.as_deref().unwrap_or_default(), false),
-                FormField::new(
-                    "Excerpt",
-                    item.excerpt.as_deref().unwrap_or_default(),
-                    false,
-                ),
+                FormField::new("Excerpt", item.excerpt.as_deref().unwrap_or_default(), true),
                 FormField::new("Note", item.note.as_deref().unwrap_or_default(), true),
                 FormField::new("Tags (comma list or JSON)", &format_tags(&item.tags), false),
             ],
@@ -976,10 +1043,26 @@ impl ItemForm {
 
     fn handle_key(&mut self, key: KeyEvent) {
         match key.code {
-            KeyCode::Tab | KeyCode::Down | KeyCode::Enter if command_key(key) => {
+            KeyCode::Tab | KeyCode::Enter if command_key(key) => {
                 self.active = (self.active + 1) % self.focusable_count();
             }
-            KeyCode::BackTab | KeyCode::Up if command_key(key) => {
+            KeyCode::BackTab if command_key(key) => {
+                self.active = self
+                    .active
+                    .checked_sub(1)
+                    .unwrap_or_else(|| self.focusable_count() - 1);
+            }
+            KeyCode::Down | KeyCode::Up
+                if command_key(key)
+                    && self.active < self.fields.len()
+                    && self.fields[self.active].multiline =>
+            {
+                self.fields[self.active].input.handle_key(key, true);
+            }
+            KeyCode::Down if command_key(key) => {
+                self.active = (self.active + 1) % self.focusable_count();
+            }
+            KeyCode::Up if command_key(key) => {
                 self.active = self
                     .active
                     .checked_sub(1)
@@ -1144,13 +1227,18 @@ impl FormField {
 struct TextInput {
     chars: Vec<char>,
     cursor: usize,
+    vertical_column: Option<usize>,
 }
 
 impl TextInput {
     fn new(value: String) -> Self {
         let chars = value.chars().collect::<Vec<_>>();
         let cursor = chars.len();
-        Self { chars, cursor }
+        Self {
+            chars,
+            cursor,
+            vertical_column: None,
+        }
     }
 
     fn value(&self) -> String {
@@ -1218,6 +1306,7 @@ impl TextInput {
         Self {
             chars: self.chars[start..end].to_vec(),
             cursor: self.cursor - start,
+            vertical_column: None,
         }
         .display_value(true, max_width)
     }
@@ -1235,6 +1324,7 @@ impl TextInput {
     }
 
     fn insert_char(&mut self, character: char) {
+        self.vertical_column = None;
         self.chars.insert(self.cursor, character);
         self.cursor += 1;
     }
@@ -1246,6 +1336,11 @@ impl TextInput {
     }
 
     fn handle_key(&mut self, key: KeyEvent, multiline: bool) {
+        if multiline && matches!(key.code, KeyCode::Up | KeyCode::Down) {
+            self.move_vertical(key.code == KeyCode::Down);
+            return;
+        }
+        self.vertical_column = None;
         match key.code {
             KeyCode::Char('a') if control_shortcut(key) => self.cursor = 0,
             KeyCode::Char('e') if control_shortcut(key) => {
@@ -1271,6 +1366,57 @@ impl TextInput {
             }
             KeyCode::Enter if multiline => self.insert_char('\n'),
             _ => {}
+        }
+    }
+
+    fn move_vertical(&mut self, down: bool) {
+        let current_start = self.chars[..self.cursor]
+            .iter()
+            .rposition(|character| *character == '\n')
+            .map_or(0, |position| position + 1);
+        let column = *self.vertical_column.get_or_insert_with(|| {
+            UnicodeWidthStr::width(
+                self.chars[current_start..self.cursor]
+                    .iter()
+                    .collect::<String>()
+                    .as_str(),
+            )
+        });
+        let (target_start, target_end) = if down {
+            let current_end = self.chars[self.cursor..]
+                .iter()
+                .position(|character| *character == '\n')
+                .map_or(self.chars.len(), |position| self.cursor + position);
+            if current_end == self.chars.len() {
+                return;
+            }
+            let target_start = current_end + 1;
+            let target_end = self.chars[target_start..]
+                .iter()
+                .position(|character| *character == '\n')
+                .map_or(self.chars.len(), |position| target_start + position);
+            (target_start, target_end)
+        } else {
+            if current_start == 0 {
+                return;
+            }
+            let target_end = current_start - 1;
+            let target_start = self.chars[..target_end]
+                .iter()
+                .rposition(|character| *character == '\n')
+                .map_or(0, |position| position + 1);
+            (target_start, target_end)
+        };
+        let mut width = 0;
+        self.cursor = target_start;
+        for (offset, character) in self.chars[target_start..target_end].iter().enumerate() {
+            let next_width = width + UnicodeWidthChar::width(*character).unwrap_or(0);
+            if next_width.abs_diff(column) <= width.abs_diff(column) {
+                self.cursor = target_start + offset + 1;
+                width = next_width;
+            } else {
+                break;
+            }
         }
     }
 }
@@ -1308,6 +1454,9 @@ fn render(frame: &mut Frame<'_>, app: &mut App) {
         Mode::Form(form) => render_form(frame, area, form),
         Mode::SyncSetup(form) => render_sync_setup(frame, area, form, app.notice.as_ref()),
         Mode::ConfirmDelete => render_confirmation(frame, area, app.selected_item()),
+        Mode::ConfirmForceEnrich(target) => {
+            render_force_enrichment_confirmation(frame, area, target);
+        }
         Mode::Help => render_help(frame, area),
         Mode::Browse | Mode::Search(_) => {}
     }
@@ -1500,7 +1649,7 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
                     if compact {
                         "a add | E enrich | s sync | ? help | q quit"
                     } else {
-                        "a add | e edit | E enrich | s sync | / search | ? help | q quit"
+                        "a add | e edit | E enrich | Ctrl+E replace | s sync | ? help | q quit"
                     },
                     Style::default().fg(Color::DarkGray),
                 )
@@ -1517,11 +1666,11 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
 }
 
 fn render_form(frame: &mut Frame<'_>, area: Rect, form: &ItemForm) {
-    if area.width < 50 || area.height < 24 {
+    if area.width < 50 || area.height < 30 {
         render_compact_form(frame, area, form);
         return;
     }
-    let popup = centered_rect(area, 90, if form.can_enrich() { 28 } else { 26 });
+    let popup = centered_rect(area, 90, if form.can_enrich() { 36 } else { 34 });
     frame.render_widget(Clear, popup);
     let block = Block::default()
         .title(format!(" {} ", form.title()))
@@ -1531,7 +1680,8 @@ fn render_form(frame: &mut Frame<'_>, area: Rect, form: &ItemForm) {
     frame.render_widget(block, popup);
 
     let mut constraints = vec![Constraint::Length(3); form.fields.len()];
-    constraints[3] = Constraint::Min(4);
+    constraints[2] = Constraint::Fill(2);
+    constraints[3] = Constraint::Fill(1);
     constraints.push(Constraint::Length(2));
     if form.can_enrich() {
         constraints.push(Constraint::Length(2));
@@ -1619,7 +1769,7 @@ fn render_form(frame: &mut Frame<'_>, area: Rect, form: &ItemForm) {
     };
     frame.render_widget(
         Paragraph::new(vec![
-            Line::from("Tab/Shift+Tab fields | Space toggles | Ctrl+N note newline"),
+            Line::from("Tab/Shift+Tab fields | Up/Down multiline | Ctrl+N newline"),
             Line::from("Ctrl+S save | Esc cancel"),
         ])
         .style(Style::default().fg(Color::DarkGray)),
@@ -1632,7 +1782,7 @@ fn render_compact_form(frame: &mut Frame<'_>, area: Rect, form: &ItemForm) {
     frame.render_widget(Clear, popup);
     let text = if let Some(field) = form.fields.get(form.active) {
         format!(
-            "{}\n\n{}\n\nFavorite: {} | Enrich: {}\nTab fields | Ctrl+S save | Esc cancel",
+            "{}\n\n{}\n\nFavorite: {} | Enrich: {}\nUp/Down lines | Tab fields | Ctrl+S save",
             field.label,
             terminal_safe(
                 &field
@@ -1804,6 +1954,33 @@ fn render_confirmation(frame: &mut Frame<'_>, area: Rect, item: Option<&StoredIt
     );
 }
 
+fn render_force_enrichment_confirmation(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    target: &ForceEnrichmentConfirmation,
+) {
+    let popup = centered_rect(area, 68, 9);
+    frame.render_widget(Clear, popup);
+    let title = target
+        .title
+        .as_deref()
+        .filter(|title| !title.is_empty())
+        .unwrap_or("this save");
+    frame.render_widget(
+        Paragraph::new(format!(
+            "Replace the excerpt for {}?\n\nThis re-fetches the page with the configured provider. It applies only if the excerpt does not change while the request runs.\n\nPress y/Enter to confirm or n/Esc to cancel.",
+            terminal_snippet(title, usize::from(popup.width.saturating_sub(18)))
+        ))
+        .block(
+            Block::default()
+                .title(" Confirm excerpt replacement ")
+                .borders(Borders::ALL),
+        )
+        .wrap(Wrap { trim: false }),
+        popup,
+    );
+}
+
 fn render_help(frame: &mut Frame<'_>, area: Rect) {
     if area.width < 78 || area.height < 24 {
         let popup = centered_rect(area, 48, 10);
@@ -1811,7 +1988,8 @@ fn render_help(frame: &mut Frame<'_>, area: Rect) {
         let help = [
             "j/k or arrows move | g/G first/last",
             "a add | e edit | / search",
-            "E enrich | s connect/sync",
+            "E enrich | Ctrl+E replace excerpt",
+            "s connect/sync",
             "Space favorite | x delete | r restore",
             "f favorites | d views | R refresh",
             "Esc cancel/clear | ? close help",
@@ -1840,13 +2018,13 @@ fn render_help(frame: &mut Frame<'_>, area: Rect) {
         "Library",
         "  a add           e/Enter edit        Space toggle favorite",
         "  x delete        r restore           / search",
-        "  E enrich        s connect/sync       R refresh",
+        "  E enrich        Ctrl+E replace       s connect/sync",
         "  f favorites     d lifecycle view    Esc clear search",
         "",
         "Forms",
         "  Tab/Shift+Tab fields                Space toggles options",
-        "  Ctrl+N note newline                 Ctrl+S commits one mutation",
-        "  Esc cancel",
+        "  Up/Down excerpt/note lines          Ctrl+N inserts newline",
+        "  Ctrl+S commits one mutation         Esc cancel",
         "",
         "Enrichment uses the configured local provider. Sync uses a PAT from",
         "RESEARCHPOCKET_GITHUB_TOKEN or GH_TOKEN and never persists it.",
@@ -2042,4 +2220,60 @@ fn text_entry_key(key: KeyEvent) -> bool {
             && !key
                 .modifiers
                 .intersects(KeyModifiers::SUPER | KeyModifiers::HYPER | KeyModifiers::META)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn control_e_latches_only_the_browse_replacement_action() {
+        let directory = tempfile::tempdir().expect("temporary library");
+        let store = V2Store::init(directory.path())
+            .await
+            .expect("initialize library");
+        let mut app = App::load(&store).await.expect("load TUI state");
+        let key = KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL);
+
+        app.mode = Mode::Form(Box::new(ItemForm::create()));
+        assert!(app.accept_key_press(key));
+        assert!(app.accept_key_press(key));
+
+        app.mode = Mode::Browse;
+        assert!(app.accept_key_press(key));
+        assert!(!app.accept_key_press(key));
+    }
+
+    #[test]
+    fn multiline_fields_preserve_text_and_navigate_vertically() {
+        let mut input = TextInput::new("abcd\nx\nwxyz".to_owned());
+        input.cursor = 3;
+
+        input.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE), true);
+        assert_eq!(input.cursor, 6);
+        input.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE), true);
+        assert_eq!(input.cursor, 10);
+        input.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE), true);
+        assert_eq!(input.cursor, 6);
+        input.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE), true);
+        assert_eq!(input.cursor, 3);
+
+        let mut wide_input = TextInput::new("ab界d\n12345".to_owned());
+        wide_input.cursor = 3;
+        wide_input.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE), true);
+        assert_eq!(wide_input.cursor, 9);
+        wide_input.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE), true);
+        assert_eq!(wide_input.cursor, 3);
+        input.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE), true);
+        assert_eq!(input.cursor, 3);
+
+        let mut form = ItemForm::create();
+        form.active = 2;
+        form.insert_text("# Heading\n\nFull Markdown".to_owned());
+        assert_eq!(form.fields[2].input.value(), "# Heading\n\nFull Markdown");
+        form.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+        assert_eq!(form.active, 2);
+        form.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        assert_eq!(form.active, 3);
+    }
 }

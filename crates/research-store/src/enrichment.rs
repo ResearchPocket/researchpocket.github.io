@@ -23,7 +23,7 @@ impl V2Store {
         item_id: &str,
         provider: EnrichmentProvider,
     ) -> StoreResult<EnrichmentJob> {
-        self.queue_item_enrichment_with_options(item_id, provider, false)
+        self.queue_item_enrichment_with_options(item_id, provider, false, None)
             .await
     }
 
@@ -32,8 +32,31 @@ impl V2Store {
         item_id: &str,
         provider: EnrichmentProvider,
     ) -> StoreResult<EnrichmentJob> {
-        self.queue_item_enrichment_with_options(item_id, provider, true)
+        self.queue_item_enrichment_with_options(item_id, provider, true, None)
             .await
+    }
+
+    pub async fn queue_item_enrichment_replacing_excerpt_if_revision(
+        &self,
+        item_id: &str,
+        provider: EnrichmentProvider,
+        expected_excerpt_revision: &str,
+    ) -> StoreResult<EnrichmentJob> {
+        self.queue_item_enrichment_with_options(
+            item_id,
+            provider,
+            true,
+            Some(expected_excerpt_revision),
+        )
+        .await
+    }
+
+    pub async fn item_excerpt_revision(&self, item_id: &str) -> StoreResult<String> {
+        let mut connection = self.pool.acquire().await?;
+        Ok(canonical_item_from_connection(&mut connection, item_id)
+            .await?
+            .excerpt
+            .winner)
     }
 
     async fn queue_item_enrichment_with_options(
@@ -41,12 +64,22 @@ impl V2Store {
         item_id: &str,
         provider: EnrichmentProvider,
         replace_excerpt: bool,
+        expected_excerpt_revision: Option<&str>,
     ) -> StoreResult<EnrichmentJob> {
         let mut connection = self.pool.acquire().await?;
         sqlx::query("BEGIN IMMEDIATE")
             .execute(&mut *connection)
             .await?;
         let result = async {
+            if let Some(expected_excerpt_revision) = expected_excerpt_revision
+                && canonical_item_from_connection(&mut connection, item_id)
+                    .await?
+                    .excerpt
+                    .winner
+                    != expected_excerpt_revision
+            {
+                return Err(StoreError::StaleEdit);
+            }
             queue_enrichment_on_connection_with_options(
                 &mut connection,
                 item_id,
