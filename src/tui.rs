@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use crossterm::cursor::{Hide, Show};
+use crossterm::cursor::{Hide, SetCursorStyle, Show};
 use crossterm::event::{
     self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEvent, KeyEventKind,
     KeyModifiers,
@@ -97,8 +97,20 @@ impl TerminalSession {
     fn new() -> io::Result<Self> {
         enable_raw_mode()?;
         let mut stdout = io::stdout();
-        if let Err(error) = execute!(stdout, EnterAlternateScreen, EnableBracketedPaste, Hide) {
-            let _ = execute!(stdout, Show, DisableBracketedPaste, LeaveAlternateScreen);
+        if let Err(error) = execute!(
+            stdout,
+            EnterAlternateScreen,
+            EnableBracketedPaste,
+            SetCursorStyle::BlinkingBar,
+            Hide
+        ) {
+            let _ = execute!(
+                stdout,
+                Show,
+                SetCursorStyle::DefaultUserShape,
+                DisableBracketedPaste,
+                LeaveAlternateScreen
+            );
             let _ = disable_raw_mode();
             return Err(error);
         }
@@ -106,7 +118,13 @@ impl TerminalSession {
             Ok(terminal) => Ok(Self { terminal }),
             Err(error) => {
                 let mut stdout = io::stdout();
-                let _ = execute!(stdout, Show, DisableBracketedPaste, LeaveAlternateScreen);
+                let _ = execute!(
+                    stdout,
+                    Show,
+                    SetCursorStyle::DefaultUserShape,
+                    DisableBracketedPaste,
+                    LeaveAlternateScreen
+                );
                 let _ = disable_raw_mode();
                 Err(error)
             }
@@ -120,6 +138,7 @@ impl Drop for TerminalSession {
         let _ = execute!(
             self.terminal.backend_mut(),
             Show,
+            SetCursorStyle::DefaultUserShape,
             DisableBracketedPaste,
             LeaveAlternateScreen
         );
@@ -1245,18 +1264,23 @@ impl TextInput {
         self.chars.iter().collect()
     }
 
-    fn display_value(&self, focused: bool, max_width: usize) -> String {
-        let marker = usize::from(focused);
-        let rendered_width = UnicodeWidthStr::width(self.value().as_str()) + marker;
+    fn display_value(&self, focused: bool, max_width: usize) -> (String, u16) {
+        let cursor_space = usize::from(focused);
+        let rendered_width = UnicodeWidthStr::width(self.value().as_str()) + cursor_space;
         if rendered_width <= max_width.max(1) {
-            let mut chars = self.chars.clone();
-            if focused {
-                chars.insert(self.cursor, '|');
-            }
-            return chars.into_iter().collect();
+            return (
+                self.value(),
+                u16::try_from(UnicodeWidthStr::width(
+                    self.chars[..self.cursor]
+                        .iter()
+                        .collect::<String>()
+                        .as_str(),
+                ))
+                .unwrap_or(u16::MAX),
+            );
         }
 
-        let capacity = max_width.saturating_sub(marker + 6).max(1);
+        let capacity = max_width.saturating_sub(cursor_space + 6).max(1);
         let mut start = if focused {
             self.cursor.saturating_sub(capacity / 2)
         } else {
@@ -1274,27 +1298,28 @@ impl TextInput {
                 end -= 1;
             }
         }
-        let mut visible = self.chars[start..end].to_vec();
-        if focused {
-            visible.insert(self.cursor.clamp(start, end) - start, '|');
-        }
-        format!(
-            "{}{}{}",
-            if start > 0 { "..." } else { "" },
-            visible.into_iter().collect::<String>(),
-            if end < self.chars.len() { "..." } else { "" }
+        let cursor = UnicodeWidthStr::width(
+            self.chars[start..self.cursor.clamp(start, end)]
+                .iter()
+                .collect::<String>()
+                .as_str(),
+        ) + if start > 0 { 3 } else { 0 };
+        (
+            format!(
+                "{}{}{}",
+                if start > 0 { "..." } else { "" },
+                self.chars[start..end].iter().collect::<String>(),
+                if end < self.chars.len() { "..." } else { "" }
+            ),
+            u16::try_from(cursor).unwrap_or(u16::MAX),
         )
     }
 
-    fn rendered_value(&self, focused: bool) -> String {
-        let mut chars = self.chars.clone();
-        if focused {
-            chars.insert(self.cursor, '|');
-        }
-        chars.into_iter().collect()
+    fn rendered_value(&self) -> String {
+        self.value()
     }
 
-    fn current_line_value(&self, max_width: usize) -> String {
+    fn current_line_value(&self, max_width: usize) -> (String, u16) {
         let start = self.chars[..self.cursor]
             .iter()
             .rposition(|character| *character == '\n')
@@ -1309,6 +1334,17 @@ impl TextInput {
             vertical_column: None,
         }
         .display_value(true, max_width)
+    }
+
+    fn cursor_position(&self) -> (u16, u16) {
+        let before = self.chars[..self.cursor].iter().collect::<String>();
+        (
+            u16::try_from(before.matches('\n').count()).unwrap_or(u16::MAX),
+            u16::try_from(UnicodeWidthStr::width(
+                before.rsplit('\n').next().unwrap_or_default(),
+            ))
+            .unwrap_or(u16::MAX),
+        )
     }
 
     fn scroll_offset(&self, width: u16, height: u16) -> (u16, u16) {
@@ -1349,6 +1385,17 @@ impl TextInput {
             KeyCode::Char('u') if control_shortcut(key) => {
                 self.chars.drain(..self.cursor);
                 self.cursor = 0;
+            }
+            KeyCode::Char('w') if control_shortcut(key) => {
+                let mut start = self.cursor;
+                while start > 0 && self.chars[start - 1].is_whitespace() {
+                    start -= 1;
+                }
+                while start > 0 && !self.chars[start - 1].is_whitespace() {
+                    start -= 1;
+                }
+                self.chars.drain(start..self.cursor);
+                self.cursor = start;
             }
             KeyCode::Char(character) if text_entry_key(key) => {
                 self.insert_char(character);
@@ -1616,24 +1663,26 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
         status.push_str(operation.label);
     }
     let message = match &app.mode {
-        Mode::Search(input) => Line::from(vec![
-            Span::styled("Search: ", Style::default().fg(Color::Cyan)),
-            Span::raw(terminal_safe(
-                &input.display_value(true, usize::from(area.width.saturating_sub(28))),
-            )),
-            Span::styled(
-                app.notice
-                    .as_ref()
-                    .map_or("  Enter apply | Esc cancel".to_owned(), |notice| {
-                        format!("  error: {}", terminal_safe(&notice.text))
+        Mode::Search(input) => {
+            let (value, _) =
+                input.display_value(true, usize::from(area.width.saturating_sub(28)));
+            Line::from(vec![
+                Span::styled("Search: ", Style::default().fg(Color::Cyan)),
+                Span::raw(terminal_safe(&value)),
+                Span::styled(
+                    app.notice
+                        .as_ref()
+                        .map_or("  Enter apply | Esc cancel".to_owned(), |notice| {
+                            format!("  error: {}", terminal_safe(&notice.text))
+                        }),
+                    Style::default().fg(if app.notice.is_some() {
+                        Color::Red
+                    } else {
+                        Color::DarkGray
                     }),
-                Style::default().fg(if app.notice.is_some() {
-                    Color::Red
-                } else {
-                    Color::DarkGray
-                }),
-            ),
-        ]),
+                ),
+            ])
+        }
         _ => {
             if let Some(notice) = &app.notice {
                 Line::styled(
@@ -1663,6 +1712,15 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
         ]),
         area,
     );
+    if let Mode::Search(input) = &app.mode {
+        let (_, cursor) = input.display_value(true, usize::from(area.width.saturating_sub(28)));
+        frame.set_cursor_position((
+            area.x
+                .saturating_add(UnicodeWidthStr::width("Search: ") as u16)
+                .saturating_add(cursor),
+            area.y.saturating_add(1),
+        ));
+    }
 }
 
 fn render_form(frame: &mut Frame<'_>, area: Rect, form: &ItemForm) {
@@ -1699,7 +1757,7 @@ fn render_form(frame: &mut Frame<'_>, area: Rect, form: &ItemForm) {
         let input_area = rows[index];
         let input_width = input_area.width.saturating_sub(2).max(1);
         let input_height = input_area.height.saturating_sub(2).max(1);
-        let rendered = field.input.rendered_value(active);
+        let rendered = field.input.rendered_value();
         let rendered = if field.multiline {
             terminal_safe_multiline(&rendered)
         } else {
@@ -1720,6 +1778,20 @@ fn render_form(frame: &mut Frame<'_>, area: Rect, form: &ItemForm) {
                 }),
             rows[index],
         );
+        if active {
+            let scroll = field.input.scroll_offset(input_width, input_height);
+            let cursor = field.input.cursor_position();
+            frame.set_cursor_position((
+                input_area
+                    .x
+                    .saturating_add(1)
+                    .saturating_add(cursor.1.saturating_sub(scroll.1)),
+                input_area
+                    .y
+                    .saturating_add(1)
+                    .saturating_add(cursor.0.saturating_sub(scroll.0)),
+            ));
+        }
     }
     let favorite_style = if form.active == form.fields.len() {
         Style::default()
@@ -1770,7 +1842,7 @@ fn render_form(frame: &mut Frame<'_>, area: Rect, form: &ItemForm) {
     frame.render_widget(
         Paragraph::new(vec![
             Line::from("Tab/Shift+Tab fields | Up/Down multiline | Ctrl+N newline"),
-            Line::from("Ctrl+S save | Esc cancel"),
+            Line::from("Ctrl+W delete word | Ctrl+S save | Esc cancel"),
         ])
         .style(Style::default().fg(Color::DarkGray)),
         rows[instructions_index],
@@ -1780,15 +1852,16 @@ fn render_form(frame: &mut Frame<'_>, area: Rect, form: &ItemForm) {
 fn render_compact_form(frame: &mut Frame<'_>, area: Rect, form: &ItemForm) {
     let popup = centered_rect(area, 48, 10);
     frame.render_widget(Clear, popup);
+    let mut cursor = None;
     let text = if let Some(field) = form.fields.get(form.active) {
+        let (value, column) = field
+            .input
+            .current_line_value(usize::from(popup.width.saturating_sub(4)));
+        cursor = Some(column);
         format!(
-            "{}\n\n{}\n\nFavorite: {} | Enrich: {}\nUp/Down lines | Tab fields | Ctrl+S save",
+            "{}\n\n{}\n\nFavorite: {} | Enrich: {}\nCtrl+W word | Tab fields | Ctrl+S save",
             field.label,
-            terminal_safe(
-                &field
-                    .input
-                    .current_line_value(usize::from(popup.width.saturating_sub(4))),
-            ),
+            terminal_safe(&value),
             if form.favorite { "yes" } else { "no" },
             if form.can_enrich() {
                 if form.enrich { "yes" } else { "no" }
@@ -1817,6 +1890,12 @@ fn render_compact_form(frame: &mut Frame<'_>, area: Rect, form: &ItemForm) {
             .wrap(Wrap { trim: false }),
         popup,
     );
+    if let Some(column) = cursor {
+        frame.set_cursor_position((
+            popup.x.saturating_add(1).saturating_add(column),
+            popup.y.saturating_add(3),
+        ));
+    }
 }
 
 fn render_sync_setup(
@@ -1848,12 +1927,11 @@ fn render_sync_setup(
         .split(inner);
     for (index, field) in form.fields.iter().enumerate() {
         let active = index == form.active;
+        let (value, cursor) = field
+            .input
+            .display_value(active, usize::from(rows[index].width.saturating_sub(4)));
         frame.render_widget(
-            Paragraph::new(terminal_safe(&field.input.display_value(
-                active,
-                usize::from(rows[index].width.saturating_sub(4)),
-            )))
-            .block(
+            Paragraph::new(terminal_safe(&value)).block(
                 Block::default()
                     .title(format!(" {} ", field.label))
                     .borders(Borders::ALL)
@@ -1865,10 +1943,16 @@ fn render_sync_setup(
             ),
             rows[index],
         );
+        if active {
+            frame.set_cursor_position((
+                rows[index].x.saturating_add(1).saturating_add(cursor),
+                rows[index].y.saturating_add(1),
+            ));
+        }
     }
     frame.render_widget(
         Paragraph::new(
-            "Uses RESEARCHPOCKET_GITHUB_TOKEN or GH_TOKEN from this process.\nTab fields | Ctrl+S connect and sync | Esc cancel",
+            "Uses RESEARCHPOCKET_GITHUB_TOKEN or GH_TOKEN from this process.\nCtrl+W delete word | Tab fields | Ctrl+S connect and sync",
         )
         .style(Style::default().fg(Color::DarkGray)),
         rows[2],
@@ -1896,14 +1980,13 @@ fn render_compact_sync_setup(
     let popup = centered_rect(area, 48, 10);
     frame.render_widget(Clear, popup);
     let field = &form.fields[form.active];
+    let (value, cursor) = field
+        .input
+        .current_line_value(usize::from(popup.width.saturating_sub(4)));
     let mut lines = vec![
         Line::from(field.label),
         Line::default(),
-        Line::from(terminal_safe(
-            &field
-                .input
-                .current_line_value(usize::from(popup.width.saturating_sub(4))),
-        )),
+        Line::from(terminal_safe(&value)),
         Line::default(),
         Line::styled(
             "Tab fields | Ctrl+S connect | Esc cancel",
@@ -1930,6 +2013,10 @@ fn render_compact_sync_setup(
             .wrap(Wrap { trim: false }),
         popup,
     );
+    frame.set_cursor_position((
+        popup.x.saturating_add(1).saturating_add(cursor),
+        popup.y.saturating_add(3),
+    ));
 }
 
 fn render_confirmation(frame: &mut Frame<'_>, area: Rect, item: Option<&StoredItem>) {
@@ -1982,7 +2069,7 @@ fn render_force_enrichment_confirmation(
 }
 
 fn render_help(frame: &mut Frame<'_>, area: Rect) {
-    if area.width < 78 || area.height < 24 {
+    if area.width < 78 || area.height < 25 {
         let popup = centered_rect(area, 48, 10);
         frame.render_widget(Clear, popup);
         let help = [
@@ -2007,7 +2094,7 @@ fn render_help(frame: &mut Frame<'_>, area: Rect) {
         );
         return;
     }
-    let popup = centered_rect(area, 76, 24);
+    let popup = centered_rect(area, 76, 25);
     frame.render_widget(Clear, popup);
     let help = [
         "Navigation",
@@ -2024,7 +2111,8 @@ fn render_help(frame: &mut Frame<'_>, area: Rect) {
         "Forms",
         "  Tab/Shift+Tab fields                Space toggles options",
         "  Up/Down excerpt/note lines          Ctrl+N inserts newline",
-        "  Ctrl+S commits one mutation         Esc cancel",
+        "  Ctrl+W deletes previous word        Ctrl+S commits mutation",
+        "  Esc cancel",
         "",
         "Enrichment uses the configured local provider. Sync uses a PAT from",
         "RESEARCHPOCKET_GITHUB_TOKEN or GH_TOKEN and never persists it.",
@@ -2275,5 +2363,34 @@ mod tests {
         assert_eq!(form.active, 2);
         form.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
         assert_eq!(form.active, 3);
+    }
+
+    #[test]
+    fn control_w_deletes_the_previous_word_without_moving_trailing_text() {
+        let control_w = KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL);
+        let mut input = TextInput::new("first  second\nthird tail".to_owned());
+        input.cursor = 20;
+
+        input.handle_key(control_w, true);
+        assert_eq!(input.value(), "first  second\ntail");
+        assert_eq!(input.cursor, 14);
+
+        input.handle_key(control_w, true);
+        assert_eq!(input.value(), "first  tail");
+        assert_eq!(input.cursor, 7);
+
+        input.cursor = 0;
+        input.handle_key(control_w, true);
+        assert_eq!(input.value(), "first  tail");
+    }
+
+    #[test]
+    fn text_input_reports_a_real_cursor_without_rendering_a_marker() {
+        let mut input = TextInput::new("alpha beta".to_owned());
+        input.cursor = 5;
+
+        assert_eq!(input.display_value(true, 20), ("alpha beta".to_owned(), 5));
+        assert_eq!(input.rendered_value(), "alpha beta");
+        assert_eq!(input.cursor_position(), (0, 5));
     }
 }
