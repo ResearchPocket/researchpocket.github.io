@@ -1,6 +1,7 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, VecDeque};
 use std::error::Error;
 use std::io::{self, IsTerminal, Stdout};
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -21,11 +22,14 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::{Frame, Terminal};
 use research_store::{
-    CreateItemRequest, EditItemRequest, ListQuery, OptionalTextUpdate, SearchQuery,
-    StoreStatus, StoredItem, V2Store,
+    CreateItemRequest, EditItemRequest, EnrichmentStatus as StoreEnrichmentStatus, ListQuery,
+    OptionalTextUpdate, SearchQuery, StoreStatus, StoredItem, V2Store,
 };
 use serde_json::Value;
+use tokio::task::JoinHandle;
 use unicode_width::UnicodeWidthStr;
+
+use crate::{sync, v2};
 
 type TuiResult<T> = Result<T, Box<dyn Error>>;
 
@@ -34,7 +38,7 @@ const ACTION_LATCH_IDLE: Duration = Duration::from_secs(2);
 const MIN_COMFORTABLE_WIDTH: u16 = 72;
 const MIN_COMFORTABLE_HEIGHT: u16 = 20;
 
-pub async fn run(store: &V2Store) -> TuiResult<()> {
+pub async fn run(store: &V2Store, data_dir: &Path) -> TuiResult<()> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         return Err(io::Error::other("the TUI requires an interactive terminal").into());
     }
@@ -44,6 +48,9 @@ pub async fn run(store: &V2Store) -> TuiResult<()> {
     let mut app = App::load(store).await?;
 
     while !app.should_quit && !shutdown.load(Ordering::Relaxed) {
+        if app.operation_finished() {
+            app.finish_operation(store, data_dir).await;
+        }
         terminal.terminal.draw(|frame| render(frame, &mut app))?;
         if !event::poll(EVENT_POLL_INTERVAL)? {
             app.clear_action_latch();
@@ -51,7 +58,7 @@ pub async fn run(store: &V2Store) -> TuiResult<()> {
         }
         match event::read()? {
             Event::Key(key) if key.kind == KeyEventKind::Press && app.accept_key_press(key) => {
-                app.handle_key(store, key).await;
+                app.handle_key(store, data_dir, key).await;
             }
             Event::Key(key) if key.kind == KeyEventKind::Repeat => {
                 app.note_key_repeat(key);
@@ -133,6 +140,8 @@ struct App {
     detail_scroll: u16,
     should_quit: bool,
     action_latch: Option<(ModeKind, KeyCode, KeyModifiers, Instant)>,
+    operation: Option<BackgroundOperation>,
+    queued_enrichment: VecDeque<(String, &'static str)>,
 }
 
 impl App {
@@ -151,6 +160,8 @@ impl App {
             detail_scroll: 0,
             should_quit: false,
             action_latch: None,
+            operation: None,
+            queued_enrichment: VecDeque::new(),
         };
         app.refresh(store, None).await?;
         Ok(app)
@@ -203,7 +214,7 @@ impl App {
         Ok(())
     }
 
-    async fn handle_key(&mut self, store: &V2Store, key: KeyEvent) {
+    async fn handle_key(&mut self, store: &V2Store, data_dir: &Path, key: KeyEvent) {
         if control_shortcut(key) && key.code == KeyCode::Char('c') {
             self.should_quit = true;
             return;
@@ -211,7 +222,7 @@ impl App {
         self.notice = None;
 
         match &mut self.mode {
-            Mode::Browse => self.handle_browse_key(store, key).await,
+            Mode::Browse => self.handle_browse_key(store, data_dir, key).await,
             Mode::Search(input) => {
                 if key.code == KeyCode::Esc {
                     self.mode = Mode::Browse;
@@ -236,7 +247,18 @@ impl App {
                     return;
                 }
                 if control_shortcut(key) && key.code == KeyCode::Char('s') {
-                    self.submit_form(store).await;
+                    self.submit_form(store, data_dir).await;
+                    return;
+                }
+                form.handle_key(key);
+            }
+            Mode::SyncSetup(form) => {
+                if key.code == KeyCode::Esc {
+                    self.mode = Mode::Browse;
+                    return;
+                }
+                if control_shortcut(key) && key.code == KeyCode::Char('s') {
+                    self.submit_sync_setup(data_dir);
                     return;
                 }
                 form.handle_key(key);
@@ -315,7 +337,7 @@ impl App {
                     || command_key(key)
                         && matches!(
                             key.code,
-                            KeyCode::Char('?' | '/' | 'a' | 'e' | ' ' | 'x' | 'r')
+                            KeyCode::Char('?' | '/' | 'a' | 'e' | 'E' | 's' | ' ' | 'x' | 'r')
                                 | KeyCode::Enter
                         )
             }
@@ -325,9 +347,13 @@ impl App {
             Mode::Form(form) => {
                 key.code == KeyCode::Esc
                     || control_shortcut(key) && key.code == KeyCode::Char('s')
-                    || form.active == form.fields.len()
+                    || form.active >= form.fields.len()
                         && key.code == KeyCode::Char(' ')
                         && command_key(key)
+            }
+            Mode::SyncSetup(_) => {
+                key.code == KeyCode::Esc
+                    || control_shortcut(key) && key.code == KeyCode::Char('s')
             }
             Mode::ConfirmDelete => {
                 key.code == KeyCode::Esc
@@ -358,11 +384,27 @@ impl App {
                 }
                 _ => {}
             },
-            Mode::Search(_) | Mode::Form(_) | Mode::ConfirmDelete | Mode::Help => {}
+            Mode::Search(_)
+            | Mode::Form(_)
+            | Mode::SyncSetup(_)
+            | Mode::ConfirmDelete
+            | Mode::Help => {}
         }
     }
 
-    async fn handle_browse_key(&mut self, store: &V2Store, key: KeyEvent) {
+    async fn handle_browse_key(&mut self, store: &V2Store, data_dir: &Path, key: KeyEvent) {
+        if self.operation_blocks_mutations()
+            && command_key(key)
+            && matches!(
+                key.code,
+                KeyCode::Char('a' | 'e' | 'E' | ' ' | 'x' | 'r') | KeyCode::Enter
+            )
+        {
+            self.notice = Some(Notice::info(
+                "Wait for the initial sync connection to finish before changing this library",
+            ));
+            return;
+        }
         match key.code {
             KeyCode::Char('q') if command_key(key) => self.should_quit = true,
             KeyCode::Char('?') if command_key(key) => self.mode = Mode::Help,
@@ -412,6 +454,19 @@ impl App {
                     self.mode = Mode::Form(Box::new(ItemForm::edit(item)));
                 }
             }
+            KeyCode::Char('E') if command_key(key) => {
+                self.enrich_selected(data_dir);
+            }
+            KeyCode::Char('s') if command_key(key) => {
+                if self.operation.is_some() {
+                    self.notice =
+                        Some(Notice::info("Another network operation is still running"));
+                } else if self.status.sync_remote.is_some() {
+                    self.synchronize(data_dir);
+                } else {
+                    self.mode = Mode::SyncSetup(SyncForm::new());
+                }
+            }
             KeyCode::Char(' ') if command_key(key) => self.toggle_favorite(store).await,
             KeyCode::Char('x') if command_key(key) => {
                 if self
@@ -430,11 +485,12 @@ impl App {
         match &mut self.mode {
             Mode::Search(input) => input.insert_text(&single_line(&text)),
             Mode::Form(form) => form.insert_text(text),
+            Mode::SyncSetup(form) => form.insert_text(text),
             _ => {}
         }
     }
 
-    async fn submit_form(&mut self, store: &V2Store) {
+    async fn submit_form(&mut self, store: &V2Store, data_dir: &Path) {
         let Mode::Form(form) = &self.mode else {
             return;
         };
@@ -445,12 +501,43 @@ impl App {
                 return;
             }
         };
-        let result = match submission {
-            FormSubmission::Create(request) => store.create_item(request).await,
-            FormSubmission::Edit(request) => store.edit_item(request).await,
+        let result: TuiResult<(StoredItem, bool)> = match submission {
+            FormSubmission::Create { request, enrich } => {
+                if enrich {
+                    let provider = match v2::configured_provider(data_dir) {
+                        Ok(Some(provider)) => provider,
+                        Ok(None) => {
+                            self.notice_error(
+                                "No enrichment provider is configured. Run `research enrich configure direct` or configure Firecrawl.",
+                            );
+                            return;
+                        }
+                        Err(error) => {
+                            self.notice_error(error);
+                            return;
+                        }
+                    };
+                    store
+                        .create_item_with_enrichment(request, provider)
+                        .await
+                        .map(|item| (item, true))
+                        .map_err(Into::into)
+                } else {
+                    store
+                        .create_item(request)
+                        .await
+                        .map(|item| (item, false))
+                        .map_err(Into::into)
+                }
+            }
+            FormSubmission::Edit(request) => store
+                .edit_item(request)
+                .await
+                .map(|item| (item, false))
+                .map_err(Into::into),
         };
         match result {
-            Ok(item) => {
+            Ok((item, enrich)) => {
                 let item_id = item.id.clone();
                 let action = if form.original.is_some() {
                     "Saved changes"
@@ -458,10 +545,182 @@ impl App {
                     "Captured save"
                 };
                 self.mode = Mode::Browse;
-                self.notice = Some(Notice::info(action));
+                self.notice = if enrich && self.operation.is_some() {
+                    Some(Notice::info(
+                        "Captured save; enrichment will run after the active network operation",
+                    ))
+                } else if enrich {
+                    Some(Notice::info("Captured save; enriching metadata"))
+                } else {
+                    Some(Notice::info(action))
+                };
                 let _ = self.refresh_or_notice(store, Some(&item_id)).await;
+                if enrich {
+                    if self.operation.is_none() {
+                        self.start_enrichment(data_dir, item_id, "Captured save");
+                    } else {
+                        self.queued_enrichment.push_back((item_id, "Captured save"));
+                    }
+                }
             }
             Err(error) => self.notice_error(error),
+        }
+    }
+
+    fn enrich_selected(&mut self, data_dir: &Path) {
+        if self.operation.is_some() {
+            self.notice = Some(Notice::info("Another network operation is still running"));
+            return;
+        }
+        let Some(item) = self.selected_item().cloned() else {
+            return;
+        };
+        if item.state != "active" {
+            self.notice = Some(Notice::info("Restore the save before enriching it"));
+            return;
+        }
+        self.notice = Some(Notice::info("Enriching selected save"));
+        self.start_enrichment(data_dir, item.id, "Enrichment");
+    }
+
+    fn synchronize(&mut self, data_dir: &Path) {
+        let data_dir = data_dir.to_path_buf();
+        self.notice = Some(Notice::info("Synchronizing with GitHub"));
+        self.operation = Some(BackgroundOperation {
+            label: "syncing",
+            blocks_mutations: false,
+            handle: tokio::spawn(async move {
+                let completion = match V2Store::open(&data_dir).await {
+                    Ok(store) => match sync::run_once(&store).await {
+                        Ok(result) => Notice::info(format!(
+                            "Sync complete: {} downloaded, {} uploaded, {} pending",
+                            result.downloaded, result.uploaded, result.pending
+                        )),
+                        Err(error) => Notice::error(error.to_string()),
+                    },
+                    Err(error) => Notice::error(error.to_string()),
+                };
+                BackgroundCompletion {
+                    notice: completion,
+                    preferred_id: None,
+                }
+            }),
+        });
+    }
+
+    fn submit_sync_setup(&mut self, data_dir: &Path) {
+        let Mode::SyncSetup(form) = &self.mode else {
+            return;
+        };
+        let (repository, branch) = match form.submission() {
+            Ok(submission) => submission,
+            Err(error) => {
+                self.notice_error(error);
+                return;
+            }
+        };
+        let data_dir = data_dir.to_path_buf();
+        self.mode = Mode::Browse;
+        self.notice = Some(Notice::info("Connecting private GitHub sync"));
+        self.operation = Some(BackgroundOperation {
+            label: "connecting sync",
+            blocks_mutations: true,
+            handle: tokio::spawn(async move {
+                let completion = match V2Store::open(&data_dir).await {
+                    Ok(store) => {
+                        match sync::connect(&store, &repository, branch.as_deref()).await {
+                            Ok(result) => Notice::info(format!(
+                                "Connected and synced {}/{}: {} downloaded, {} uploaded",
+                                result.remote.owner,
+                                result.remote.repository,
+                                result.cycle.downloaded,
+                                result.cycle.uploaded
+                            )),
+                            Err(error) => Notice::error(error.to_string()),
+                        }
+                    }
+                    Err(error) => Notice::error(error.to_string()),
+                };
+                BackgroundCompletion {
+                    notice: completion,
+                    preferred_id: None,
+                }
+            }),
+        });
+    }
+
+    fn start_enrichment(&mut self, data_dir: &Path, item_id: String, action: &'static str) {
+        let data_dir = data_dir.to_path_buf();
+        let preferred_id = item_id.clone();
+        self.operation = Some(BackgroundOperation {
+            label: "enriching",
+            blocks_mutations: false,
+            handle: tokio::spawn(async move {
+                let notice = match V2Store::open(&data_dir).await {
+                    Ok(store) => {
+                        let result = if action == "Captured save" {
+                            v2::attempt_queued_enrichment(&store, &data_dir, &item_id)
+                                .await
+                                .and_then(|outcome| {
+                                    outcome.ok_or_else(|| {
+                                        io::Error::other("the enrichment job disappeared")
+                                            .into()
+                                    })
+                                })
+                        } else {
+                            v2::enrich_item_with_configured_provider(
+                                &store, &data_dir, &item_id,
+                            )
+                            .await
+                        };
+                        match result {
+                            Ok(outcome) => enrichment_notice(action, &outcome),
+                            Err(error) if action == "Captured save" => Notice::info(format!(
+                                "Captured save; metadata enrichment remains queued ({error})"
+                            )),
+                            Err(error) => Notice::error(error.to_string()),
+                        }
+                    }
+                    Err(error) if action == "Captured save" => Notice::info(format!(
+                        "Captured save; metadata enrichment remains queued ({error})"
+                    )),
+                    Err(error) => Notice::error(error.to_string()),
+                };
+                BackgroundCompletion {
+                    notice,
+                    preferred_id: Some(preferred_id),
+                }
+            }),
+        });
+    }
+
+    fn operation_finished(&self) -> bool {
+        self.operation
+            .as_ref()
+            .is_some_and(|operation| operation.handle.is_finished())
+    }
+
+    fn operation_blocks_mutations(&self) -> bool {
+        self.operation
+            .as_ref()
+            .is_some_and(|operation| operation.blocks_mutations)
+    }
+
+    async fn finish_operation(&mut self, store: &V2Store, data_dir: &Path) {
+        let Some(operation) = self.operation.take() else {
+            return;
+        };
+        match operation.handle.await {
+            Ok(completion) => {
+                self.notice = Some(completion.notice);
+                let _ = self
+                    .refresh_or_notice(store, completion.preferred_id.as_deref())
+                    .await;
+            }
+            Err(_) => self.notice_error("The background operation stopped unexpectedly"),
+        }
+        if let Some((item_id, action)) = self.queued_enrichment.pop_front() {
+            self.start_enrichment(data_dir, item_id, action);
         }
     }
 
@@ -602,6 +861,7 @@ enum Mode {
     Browse,
     Search(TextInput),
     Form(Box<ItemForm>),
+    SyncSetup(SyncForm),
     ConfirmDelete,
     Help,
 }
@@ -612,6 +872,7 @@ impl Mode {
             Self::Browse => ModeKind::Browse,
             Self::Search(_) => ModeKind::Search,
             Self::Form(_) => ModeKind::Form,
+            Self::SyncSetup(_) => ModeKind::SyncSetup,
             Self::ConfirmDelete => ModeKind::ConfirmDelete,
             Self::Help => ModeKind::Help,
         }
@@ -623,6 +884,7 @@ enum ModeKind {
     Browse,
     Search,
     Form,
+    SyncSetup,
     ConfirmDelete,
     Help,
 }
@@ -648,10 +910,22 @@ impl Notice {
     }
 }
 
+struct BackgroundOperation {
+    label: &'static str,
+    blocks_mutations: bool,
+    handle: JoinHandle<BackgroundCompletion>,
+}
+
+struct BackgroundCompletion {
+    notice: Notice,
+    preferred_id: Option<String>,
+}
+
 struct ItemForm {
     fields: Vec<FormField>,
     active: usize,
     favorite: bool,
+    enrich: bool,
     original: Option<StoredItem>,
 }
 
@@ -667,6 +941,7 @@ impl ItemForm {
             ],
             active: 0,
             favorite: false,
+            enrich: false,
             original: None,
         }
     }
@@ -686,6 +961,7 @@ impl ItemForm {
             ],
             active: 0,
             favorite: item.favorite,
+            enrich: false,
             original: Some(item),
         }
     }
@@ -701,13 +977,23 @@ impl ItemForm {
     fn handle_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Tab | KeyCode::Down | KeyCode::Enter if command_key(key) => {
-                self.active = (self.active + 1) % (self.fields.len() + 1);
+                self.active = (self.active + 1) % self.focusable_count();
             }
             KeyCode::BackTab | KeyCode::Up if command_key(key) => {
-                self.active = self.active.checked_sub(1).unwrap_or(self.fields.len());
+                self.active = self
+                    .active
+                    .checked_sub(1)
+                    .unwrap_or_else(|| self.focusable_count() - 1);
             }
             KeyCode::Char(' ') if self.active == self.fields.len() && command_key(key) => {
                 self.favorite = !self.favorite;
+            }
+            KeyCode::Char(' ')
+                if self.can_enrich()
+                    && self.active == self.fields.len() + 1
+                    && command_key(key) =>
+            {
+                self.enrich = !self.enrich;
             }
             KeyCode::Char('j' | 'n')
                 if control_shortcut(key)
@@ -722,6 +1008,14 @@ impl ItemForm {
             }
             _ => {}
         }
+    }
+
+    fn can_enrich(&self) -> bool {
+        self.original.is_none()
+    }
+
+    fn focusable_count(&self) -> usize {
+        self.fields.len() + 1 + usize::from(self.can_enrich())
     }
 
     fn insert_text(&mut self, text: String) {
@@ -744,16 +1038,19 @@ impl ItemForm {
         let tags = parse_tags(&self.fields[4].input.value())?;
 
         let Some(original) = &self.original else {
-            return Ok(FormSubmission::Create(CreateItemRequest {
-                url,
-                title: nonempty(title),
-                excerpt: nonempty(excerpt),
-                favorite: self.favorite,
-                language: None,
-                saved_at: None,
-                note,
-                tags,
-            }));
+            return Ok(FormSubmission::Create {
+                request: CreateItemRequest {
+                    url,
+                    title: nonempty(title),
+                    excerpt: nonempty(excerpt),
+                    favorite: self.favorite,
+                    language: None,
+                    saved_at: None,
+                    note,
+                    tags,
+                },
+                enrich: self.enrich,
+            });
         };
 
         let old_tags = original.tags.iter().cloned().collect::<BTreeSet<_>>();
@@ -777,8 +1074,55 @@ impl ItemForm {
 }
 
 enum FormSubmission {
-    Create(CreateItemRequest),
+    Create {
+        request: CreateItemRequest,
+        enrich: bool,
+    },
     Edit(EditItemRequest),
+}
+
+struct SyncForm {
+    fields: Vec<FormField>,
+    active: usize,
+}
+
+impl SyncForm {
+    fn new() -> Self {
+        Self {
+            fields: vec![
+                FormField::new("Private repository (OWNER/NAME)", "", false),
+                FormField::new("Branch (optional)", "", false),
+            ],
+            active: 0,
+        }
+    }
+
+    fn handle_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Tab | KeyCode::Down | KeyCode::Enter if command_key(key) => {
+                self.active = (self.active + 1) % self.fields.len();
+            }
+            KeyCode::BackTab | KeyCode::Up if command_key(key) => {
+                self.active = self.active.checked_sub(1).unwrap_or(self.fields.len() - 1);
+            }
+            _ => self.fields[self.active].input.handle_key(key, false),
+        }
+    }
+
+    fn insert_text(&mut self, text: String) {
+        self.fields[self.active]
+            .input
+            .insert_text(&single_line(&text));
+    }
+
+    fn submission(&self) -> Result<(String, Option<String>), String> {
+        let repository = self.fields[0].input.value().trim().to_owned();
+        if repository.is_empty() {
+            return Err("Enter a private GitHub repository as OWNER/NAME".to_owned());
+        }
+        let branch = self.fields[1].input.value().trim().to_owned();
+        Ok((repository, (!branch.is_empty()).then_some(branch)))
+    }
 }
 
 struct FormField {
@@ -962,6 +1306,7 @@ fn render(frame: &mut Frame<'_>, app: &mut App) {
 
     match &app.mode {
         Mode::Form(form) => render_form(frame, area, form),
+        Mode::SyncSetup(form) => render_sync_setup(frame, area, form, app.notice.as_ref()),
         Mode::ConfirmDelete => render_confirmation(frame, area, app.selected_item()),
         Mode::Help => render_help(frame, area),
         Mode::Browse | Mode::Search(_) => {}
@@ -1103,7 +1448,7 @@ fn render_detail(frame: &mut Frame<'_>, area: Rect, item: Option<&StoredItem>, s
 
 fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
     let compact = area.width < 78;
-    let status = if compact {
+    let mut status = if compact {
         format!(
             "{} active | {} deleted | {} pending",
             app.status.active_items, app.status.deleted_items, app.status.pending_updates
@@ -1117,6 +1462,10 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
             app.status.sync_state
         )
     };
+    if let Some(operation) = &app.operation {
+        status.push_str(" | ");
+        status.push_str(operation.label);
+    }
     let message = match &app.mode {
         Mode::Search(input) => Line::from(vec![
             Span::styled("Search: ", Style::default().fg(Color::Cyan)),
@@ -1149,9 +1498,9 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
             } else {
                 Line::styled(
                     if compact {
-                        "a add | / search | ? help | q quit"
+                        "a add | E enrich | s sync | ? help | q quit"
                     } else {
-                        "a add | e edit | / search | f favorites | d lifecycle | ? help | q quit"
+                        "a add | e edit | E enrich | s sync | / search | ? help | q quit"
                     },
                     Style::default().fg(Color::DarkGray),
                 )
@@ -1172,7 +1521,7 @@ fn render_form(frame: &mut Frame<'_>, area: Rect, form: &ItemForm) {
         render_compact_form(frame, area, form);
         return;
     }
-    let popup = centered_rect(area, 90, 26);
+    let popup = centered_rect(area, 90, if form.can_enrich() { 28 } else { 26 });
     frame.render_widget(Clear, popup);
     let block = Block::default()
         .title(format!(" {} ", form.title()))
@@ -1184,6 +1533,9 @@ fn render_form(frame: &mut Frame<'_>, area: Rect, form: &ItemForm) {
     let mut constraints = vec![Constraint::Length(3); form.fields.len()];
     constraints[3] = Constraint::Min(4);
     constraints.push(Constraint::Length(2));
+    if form.can_enrich() {
+        constraints.push(Constraint::Length(2));
+    }
     constraints.push(Constraint::Length(2));
     let rows = Layout::default()
         .direction(Direction::Vertical)
@@ -1239,13 +1591,39 @@ fn render_form(frame: &mut Frame<'_>, area: Rect, form: &ItemForm) {
         .style(favorite_style),
         rows[form.fields.len()],
     );
+    let instructions_index = if form.can_enrich() {
+        let enrich_index = form.fields.len() + 1;
+        let enrich_style = if form.active == enrich_index {
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+        };
+        frame.render_widget(
+            Paragraph::new(format!(
+                "{}{} Enrich after save",
+                if form.active == enrich_index {
+                    "> "
+                } else {
+                    "  "
+                },
+                if form.enrich { "[x]" } else { "[ ]" }
+            ))
+            .style(enrich_style),
+            rows[enrich_index],
+        );
+        enrich_index + 1
+    } else {
+        form.fields.len() + 1
+    };
     frame.render_widget(
         Paragraph::new(vec![
-            Line::from("Tab/Shift+Tab fields | Space favorite | Ctrl+N note newline"),
+            Line::from("Tab/Shift+Tab fields | Space toggles | Ctrl+N note newline"),
             Line::from("Ctrl+S save | Esc cancel"),
         ])
         .style(Style::default().fg(Color::DarkGray)),
-        rows[form.fields.len() + 1],
+        rows[instructions_index],
     );
 }
 
@@ -1254,19 +1632,29 @@ fn render_compact_form(frame: &mut Frame<'_>, area: Rect, form: &ItemForm) {
     frame.render_widget(Clear, popup);
     let text = if let Some(field) = form.fields.get(form.active) {
         format!(
-            "{}\n\n{}\n\nFavorite: {}\nTab fields | Ctrl+S save | Esc cancel",
+            "{}\n\n{}\n\nFavorite: {} | Enrich: {}\nTab fields | Ctrl+S save | Esc cancel",
             field.label,
             terminal_safe(
                 &field
                     .input
                     .current_line_value(usize::from(popup.width.saturating_sub(4))),
             ),
+            if form.favorite { "yes" } else { "no" },
+            if form.can_enrich() {
+                if form.enrich { "yes" } else { "no" }
+            } else {
+                "n/a"
+            }
+        )
+    } else if form.active == form.fields.len() {
+        format!(
+            "Favorite: {}\n\nSpace toggles\nTab fields | Ctrl+S save | Esc cancel",
             if form.favorite { "yes" } else { "no" }
         )
     } else {
         format!(
-            "Favorite: {}\n\nSpace toggles\nTab fields | Ctrl+S save | Esc cancel",
-            if form.favorite { "yes" } else { "no" }
+            "Enrich after save: {}\n\nUses the configured provider\nSpace toggles | Ctrl+S save | Esc cancel",
+            if form.enrich { "yes" } else { "no" }
         )
     };
     frame.render_widget(
@@ -1274,6 +1662,119 @@ fn render_compact_form(frame: &mut Frame<'_>, area: Rect, form: &ItemForm) {
             .block(
                 Block::default()
                     .title(format!(" {} ", form.title()))
+                    .borders(Borders::ALL),
+            )
+            .wrap(Wrap { trim: false }),
+        popup,
+    );
+}
+
+fn render_sync_setup(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    form: &SyncForm,
+    notice: Option<&Notice>,
+) {
+    if area.width < 50 || area.height < 15 {
+        render_compact_sync_setup(frame, area, form, notice);
+        return;
+    }
+    let popup = centered_rect(area, 74, 15);
+    frame.render_widget(Clear, popup);
+    let block = Block::default()
+        .title(" Connect GitHub sync ")
+        .borders(Borders::ALL)
+        .style(Style::default().bg(Color::Black));
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Min(2),
+        ])
+        .split(inner);
+    for (index, field) in form.fields.iter().enumerate() {
+        let active = index == form.active;
+        frame.render_widget(
+            Paragraph::new(terminal_safe(&field.input.display_value(
+                active,
+                usize::from(rows[index].width.saturating_sub(4)),
+            )))
+            .block(
+                Block::default()
+                    .title(format!(" {} ", field.label))
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(if active {
+                        Color::Cyan
+                    } else {
+                        Color::DarkGray
+                    })),
+            ),
+            rows[index],
+        );
+    }
+    frame.render_widget(
+        Paragraph::new(
+            "Uses RESEARCHPOCKET_GITHUB_TOKEN or GH_TOKEN from this process.\nTab fields | Ctrl+S connect and sync | Esc cancel",
+        )
+        .style(Style::default().fg(Color::DarkGray)),
+        rows[2],
+    );
+    if let Some(notice) = notice {
+        frame.render_widget(
+            Paragraph::new(terminal_safe(&notice.text))
+                .style(Style::default().fg(if notice.error {
+                    Color::Red
+                } else {
+                    Color::Green
+                }))
+                .wrap(Wrap { trim: false }),
+            rows[3],
+        );
+    }
+}
+
+fn render_compact_sync_setup(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    form: &SyncForm,
+    notice: Option<&Notice>,
+) {
+    let popup = centered_rect(area, 48, 10);
+    frame.render_widget(Clear, popup);
+    let field = &form.fields[form.active];
+    let mut lines = vec![
+        Line::from(field.label),
+        Line::default(),
+        Line::from(terminal_safe(
+            &field
+                .input
+                .current_line_value(usize::from(popup.width.saturating_sub(4))),
+        )),
+        Line::default(),
+        Line::styled(
+            "Tab fields | Ctrl+S connect | Esc cancel",
+            Style::default().fg(Color::DarkGray),
+        ),
+    ];
+    if let Some(notice) = notice {
+        lines.push(Line::styled(
+            terminal_safe(&notice.text),
+            Style::default().fg(if notice.error {
+                Color::Red
+            } else {
+                Color::Green
+            }),
+        ));
+    }
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(
+                Block::default()
+                    .title(" Connect GitHub sync ")
                     .borders(Borders::ALL),
             )
             .wrap(Wrap { trim: false }),
@@ -1310,6 +1811,7 @@ fn render_help(frame: &mut Frame<'_>, area: Rect) {
         let help = [
             "j/k or arrows move | g/G first/last",
             "a add | e edit | / search",
+            "E enrich | s connect/sync",
             "Space favorite | x delete | r restore",
             "f favorites | d views | R refresh",
             "Esc cancel/clear | ? close help",
@@ -1338,15 +1840,16 @@ fn render_help(frame: &mut Frame<'_>, area: Rect) {
         "Library",
         "  a add           e/Enter edit        Space toggle favorite",
         "  x delete        r restore           / search",
+        "  E enrich        s connect/sync       R refresh",
         "  f favorites     d lifecycle view    Esc clear search",
         "",
         "Forms",
-        "  Tab/Shift+Tab fields                Space toggles favorite",
+        "  Tab/Shift+Tab fields                Space toggles options",
         "  Ctrl+N note newline                 Ctrl+S commits one mutation",
         "  Esc cancel",
         "",
-        "The TUI is offline. It uses the same local V2 transactions as the CLI and",
-        "does not read a GitHub token or start synchronization.",
+        "Enrichment uses the configured local provider. Sync uses a PAT from",
+        "RESEARCHPOCKET_GITHUB_TOKEN or GH_TOKEN and never persists it.",
         "",
         "Press ?, Enter, or Esc to close help.",
     ];
@@ -1390,6 +1893,32 @@ fn detail_line<'a>(label: &'static str, value: impl Into<String>) -> Line<'a> {
         ),
         Span::raw(terminal_safe(&value.into())),
     ])
+}
+
+fn enrichment_notice(action: &str, outcome: &v2::EnrichmentAttemptOutcome) -> Notice {
+    match outcome.status() {
+        StoreEnrichmentStatus::Succeeded => {
+            let fields = outcome.applied_fields().join(", ");
+            Notice::info(format!("{action}; enriched {fields}"))
+        }
+        StoreEnrichmentStatus::Skipped => {
+            Notice::info(format!("{action}; no eligible metadata was missing"))
+        }
+        StoreEnrichmentStatus::Retry => Notice::info(format!(
+            "{action}; enrichment queued for retry ({})",
+            outcome.last_error_kind().unwrap_or("provider_error")
+        )),
+        StoreEnrichmentStatus::Failed => Notice::error(format!(
+            "{action}; enrichment retries exhausted ({})",
+            outcome.last_error_kind().unwrap_or("provider_error")
+        )),
+        StoreEnrichmentStatus::InProgress => {
+            Notice::info(format!("{action}; enrichment is already in progress"))
+        }
+        StoreEnrichmentStatus::Pending => {
+            Notice::info(format!("{action}; enrichment remains queued"))
+        }
+    }
 }
 
 fn optional_text_change(original: Option<&str>, value: &str) -> Option<OptionalTextUpdate> {

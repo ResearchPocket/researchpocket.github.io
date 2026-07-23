@@ -136,7 +136,7 @@ pub async fn handle(args: &CliArgs) -> CliResult<()> {
                 return Err(io::Error::other("the TUI supports only human output").into());
             }
             let store = V2Store::open(&data_dir).await?;
-            tui::run(&store).await
+            tui::run(&store, &data_dir).await
         }
         Commands::Capture { command } => handle_capture(&data_dir, args.format, command).await,
         Commands::Sync { command } => handle_sync(&data_dir, args.format, command).await,
@@ -391,30 +391,8 @@ async fn finish_post_save_enrichment(
     data_dir: &Path,
     saved: StoredItem,
 ) -> StoredItem {
-    let claim = match store.enrichment_job(&saved.id).await {
-        Ok(Some(job))
-            if matches!(
-                job.status,
-                StoreEnrichmentStatus::Pending | StoreEnrichmentStatus::Retry
-            ) =>
-        {
-            match store.claim_item_enrichment(&saved.id).await {
-                Ok(claim) => claim,
-                Err(StoreError::EnrichmentJobNotPending(_)) => return saved,
-                Err(_) => {
-                    eprintln!("Saved locally; metadata enrichment remains queued");
-                    return saved;
-                }
-            }
-        }
-        Ok(_) => return saved,
-        Err(_) => {
-            eprintln!("Saved locally; metadata enrichment remains queued");
-            return saved;
-        }
-    };
-    match attempt_enrichment(store, data_dir, claim).await {
-        Ok(outcome) => {
+    match attempt_queued_enrichment(store, data_dir, &saved.id).await {
+        Ok(Some(outcome)) => {
             if let Some(kind) = outcome.summary.last_error_kind.as_deref() {
                 if outcome.summary.status == StoreEnrichmentStatus::Retry {
                     eprintln!("Saved locally; metadata enrichment will retry: {kind}");
@@ -424,10 +402,75 @@ async fn finish_post_save_enrichment(
             }
             outcome.item
         }
+        Ok(None) => saved,
         Err(_) => {
             eprintln!("Saved locally; metadata enrichment remains queued");
             saved
         }
+    }
+}
+
+pub(crate) async fn attempt_queued_enrichment(
+    store: &V2Store,
+    data_dir: &Path,
+    item_id: &str,
+) -> CliResult<Option<EnrichmentAttemptOutcome>> {
+    let Some(job) = store.enrichment_job(item_id).await? else {
+        return Ok(None);
+    };
+    if matches!(
+        job.status,
+        StoreEnrichmentStatus::Pending | StoreEnrichmentStatus::Retry
+    ) {
+        let claim = match store.claim_item_enrichment(item_id).await {
+            Ok(claim) => claim,
+            Err(StoreError::EnrichmentJobNotPending(_)) => {
+                return Ok(Some(current_enrichment_outcome(store, item_id).await?));
+            }
+            Err(error) => return Err(error.into()),
+        };
+        return Ok(Some(attempt_enrichment(store, data_dir, claim).await?));
+    }
+    Ok(Some(current_enrichment_outcome(store, item_id).await?))
+}
+
+pub(crate) async fn enrich_item_with_configured_provider(
+    store: &V2Store,
+    data_dir: &Path,
+    item_id: &str,
+) -> CliResult<EnrichmentAttemptOutcome> {
+    let existing = store.enrichment_job(item_id).await?;
+    let requested_provider = if existing.as_ref().is_some_and(|job| {
+        matches!(
+            job.status,
+            StoreEnrichmentStatus::Pending
+                | StoreEnrichmentStatus::Retry
+                | StoreEnrichmentStatus::InProgress
+        )
+    }) {
+        None
+    } else {
+        Some(configured_provider(data_dir)?.ok_or_else(|| {
+            io::Error::other(
+                "no enrichment provider is configured; run `research enrich configure direct` or configure Firecrawl",
+            )
+        })?)
+    };
+    let claim = match explicit_enrichment_job(
+        store,
+        data_dir,
+        item_id,
+        requested_provider,
+        false,
+    )
+    .await
+    {
+        Ok(claim) => claim,
+        Err(error) => return Err(error),
+    };
+    match claim {
+        Some(claim) => attempt_enrichment(store, data_dir, claim).await,
+        None => current_enrichment_outcome(store, item_id).await,
     }
 }
 
@@ -552,7 +595,7 @@ async fn current_enrichment_outcome(
     })
 }
 
-fn configured_provider(
+pub(crate) fn configured_provider(
     data_dir: &Path,
 ) -> enrichment::EnrichmentResult<Option<EnrichmentProvider>> {
     let status = enrichment::status(data_dir)?;
@@ -625,9 +668,23 @@ impl EnrichmentRunResult {
     }
 }
 
-struct EnrichmentAttemptOutcome {
+pub(crate) struct EnrichmentAttemptOutcome {
     item: StoredItem,
     summary: EnrichmentAttemptSummary,
+}
+
+impl EnrichmentAttemptOutcome {
+    pub(crate) fn status(&self) -> StoreEnrichmentStatus {
+        self.summary.status
+    }
+
+    pub(crate) fn applied_fields(&self) -> &[&'static str] {
+        &self.summary.applied_fields
+    }
+
+    pub(crate) fn last_error_kind(&self) -> Option<&str> {
+        self.summary.last_error_kind.as_deref()
+    }
 }
 
 #[derive(Serialize)]
@@ -1206,5 +1263,99 @@ fn print_bool(value: &Value, field: &str, label: &str) {
 fn print_indented_string(value: &Value, field: &str, label: &str) {
     if let Some(text) = value.get(field).and_then(Value::as_str) {
         println!("  {label}: {text}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn tui_enrichment_resumes_active_jobs_and_reconfigures_failed_jobs() {
+        let directory = tempfile::tempdir().expect("temporary library");
+        let store = V2Store::init(directory.path())
+            .await
+            .expect("initialize library");
+        let item = store
+            .create_item_with_enrichment(
+                CreateItemRequest {
+                    url: "http://127.0.0.1/private".to_owned(),
+                    title: None,
+                    excerpt: None,
+                    favorite: false,
+                    language: None,
+                    saved_at: None,
+                    note: String::new(),
+                    tags: Vec::new(),
+                },
+                EnrichmentProvider::Direct,
+            )
+            .await
+            .expect("create queued save");
+
+        enrichment::configure(
+            directory.path(),
+            EnrichmentProvider::Firecrawl,
+            false,
+            None,
+            None,
+        )
+        .expect("change configured provider");
+
+        let outcome = enrich_item_with_configured_provider(&store, directory.path(), &item.id)
+            .await
+            .expect("resume recorded provider");
+        assert_eq!(outcome.status(), StoreEnrichmentStatus::Retry);
+        assert_eq!(outcome.last_error_kind(), Some("unsafe_target"));
+        assert_eq!(store.item(&item.id).await.expect("saved item"), item);
+        assert_eq!(
+            store.status().await.expect("store status").pending_updates,
+            1
+        );
+        assert_eq!(
+            store
+                .enrichment_job(&item.id)
+                .await
+                .expect("job lookup")
+                .expect("durable job")
+                .provider,
+            EnrichmentProvider::Direct
+        );
+
+        for _ in 1..5 {
+            let claim = store
+                .claim_item_enrichment(&item.id)
+                .await
+                .expect("claim retry");
+            store
+                .record_enrichment_failure(&item.id, &claim.lease_token, "unsafe_target")
+                .await
+                .expect("record retry failure");
+        }
+        assert_eq!(
+            store
+                .enrichment_job(&item.id)
+                .await
+                .expect("failed job lookup")
+                .expect("failed durable job")
+                .status,
+            StoreEnrichmentStatus::Failed
+        );
+
+        let reconfigured =
+            enrich_item_with_configured_provider(&store, directory.path(), &item.id)
+                .await
+                .expect("restart failed job with configured provider");
+        assert_eq!(reconfigured.status(), StoreEnrichmentStatus::Retry);
+        assert_eq!(reconfigured.last_error_kind(), Some("missing_credential"));
+        assert_eq!(
+            store
+                .enrichment_job(&item.id)
+                .await
+                .expect("reconfigured job lookup")
+                .expect("reconfigured durable job")
+                .provider,
+            EnrichmentProvider::Firecrawl
+        );
     }
 }
