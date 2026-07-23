@@ -477,8 +477,10 @@ Capture and edit forms use Tab/Shift+Tab to move through URL, title, excerpt,
 private note, exact tags, and favorite state. Capture adds an **Enrich after
 save** option that uses the locally configured provider. `Ctrl+N` inserts a note
 or excerpt newline, Up/Down move between lines in those multiline fields,
-`Ctrl+S` commits, and Escape cancels. Pasting multiline text into excerpts and
-notes preserves newlines; other fields normalize pasted newlines to spaces.
+`Ctrl+W` deletes the previous word, `Ctrl+S` commits, and Escape cancels. Text
+inputs use the terminal's insert-mode bar cursor rather than inserting a cursor
+glyph into their values. Pasting multiline text into excerpts and notes preserves
+newlines; other fields normalize pasted newlines to spaces.
 The tags field accepts a convenient comma-separated list for ordinary tags or a
 JSON string array for exact commas and leading/trailing whitespace. Existing
 tags open as JSON, so saving an untouched field is lossless.
