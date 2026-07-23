@@ -43,7 +43,7 @@ export const referenceSections: ReferenceSection[] = [
 
 export const referenceDocuments: ReferenceDocument[] = [
   {
-    description: "Choose an interface, create a library, save your first link, and add optional capture, enrichment, or private sync.",
+    description: "Create a local library, save the sources you need, add context, and find them again.",
     id: "overview",
     section: "start",
     source: overviewSource,
