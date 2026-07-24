@@ -6,7 +6,7 @@ import initWasm, {
 } from "../generated/research_domain";
 
 import {
-  browserDatabase,
+  openBrowserDatabase,
   type BrowserDatabase,
   type PersistedBatch,
   type PersistedChangeField,
@@ -25,8 +25,16 @@ import {
   matchesUndoExpectation,
   type UndoableChange,
 } from "./undo.ts";
+import {
+  activeProfile,
+  profileStorageNames,
+  setActiveProfile,
+  type LibraryProfile,
+  type ProfileStorageNames,
+} from "./profiles.ts";
 
 export type { UndoableChange } from "./undo.ts";
+export type { LibraryProfile } from "./profiles.ts";
 
 export type LibraryItem = PersistedItem;
 
@@ -152,8 +160,6 @@ type TextUpdate =
   | { type: "set"; value: string }
   | { type: "clear" };
 
-const WRITE_LOCK = "researchpocket-v2-writer";
-const CHANNEL_NAME = "researchpocket-v2-state";
 const U64_MAX = 18_446_744_073_709_551_615n;
 
 let wasmPromise: Promise<unknown> | undefined;
@@ -175,19 +181,59 @@ class LibraryRepository {
   };
 
   private readonly listeners = new Set<(state: LibraryState) => void>();
-  private readonly channel = new BroadcastChannel(CHANNEL_NAME);
+  private readonly names: ProfileStorageNames;
+  private readonly channel: BroadcastChannel;
+  private readonly pending = new Set<Promise<unknown>>();
+  private databasePromise: Promise<BrowserDatabase> | undefined;
+  private closed = false;
 
-  constructor() {
+  constructor(names: ProfileStorageNames) {
+    this.names = names;
+    this.channel = new BroadcastChannel(names.stateChannel);
     this.channel.addEventListener("message", () => {
       void this.load();
     });
-    window.addEventListener("researchpocket:database-blocked", () => {
-      this.patchState({
-        error: "Another tab is finishing a library upgrade. Close older tabs and retry.",
-        status: "Library upgrade blocked",
-      });
-    });
+    window.addEventListener("researchpocket:database-blocked", this.onDatabaseBlocked);
     void this.load();
+  }
+
+  private readonly onDatabaseBlocked = (): void => {
+    this.patchState({
+      error: "Another tab is finishing a library upgrade. Close older tabs and retry.",
+      status: "Library upgrade blocked",
+    });
+  };
+
+  private database(): Promise<BrowserDatabase> {
+    this.databasePromise ??= openBrowserDatabase(this.names.database);
+    return this.databasePromise;
+  }
+
+  /**
+   * Waits for every write already in flight, then releases this profile's
+   * database, channel, and listeners. A switch must not leave a transaction
+   * running against the library the user just left.
+   */
+  async close(): Promise<void> {
+    this.closed = true;
+    while (this.pending.size > 0) {
+      await Promise.allSettled([...this.pending]);
+    }
+    window.removeEventListener("researchpocket:database-blocked", this.onDatabaseBlocked);
+    this.channel.close();
+    this.listeners.clear();
+    if (this.databasePromise) {
+      const database = await this.databasePromise.catch(() => null);
+      database?.close();
+    }
+  }
+
+  private track<T>(work: Promise<T>): Promise<T> {
+    const entry: Promise<T> = work.finally(() => {
+      this.pending.delete(entry);
+    });
+    this.pending.add(entry);
+    return entry;
   }
 
   getState(): LibraryState {
@@ -288,7 +334,7 @@ class LibraryRepository {
   }
 
   async syncIdentity(): Promise<BrowserSyncIdentity> {
-    const database = await browserDatabase();
+    const database = await this.database();
     const meta = await database.get("meta", "library");
     if (!meta) throw new Error("Create the browser library before connecting sync.");
     return {
@@ -299,7 +345,7 @@ class LibraryRepository {
   }
 
   async syncConfiguration(): Promise<SyncConfiguration | null> {
-    return (await (await browserDatabase()).get("syncConfig", "github")) ?? null;
+    return (await (await this.database()).get("syncConfig", "github")) ?? null;
   }
 
   async configureSync(
@@ -381,7 +427,7 @@ class LibraryRepository {
   }
 
   async pendingSyncBatches(): Promise<PendingSyncBatch[]> {
-    const database = await browserDatabase();
+    const database = await this.database();
     const outbox = await database.getAll("outbox");
     const pending = await Promise.all(
       outbox.map(async (entry) => {
@@ -400,7 +446,7 @@ class LibraryRepository {
   }
 
   async remoteObservation(path: string): Promise<RemoteObservation | null> {
-    return (await (await browserDatabase()).get("remoteObservations", path)) ?? null;
+    return (await (await this.database()).get("remoteObservations", path)) ?? null;
   }
 
   async recordRemoteObservation(path: string, blobSha: string): Promise<void> {
@@ -447,7 +493,7 @@ class LibraryRepository {
   }
 
   async deferredSyncCount(): Promise<number> {
-    return (await browserDatabase()).count("deferred");
+    return (await this.database()).count("deferred");
   }
 
   async recordSyncSuccess(): Promise<void> {
@@ -660,7 +706,7 @@ class LibraryRepository {
 
   private async load(): Promise<void> {
     try {
-      const database = await browserDatabase();
+      const database = await this.database();
       const meta = await database.get("meta", "library");
       if (!meta) {
         this.state = {
@@ -702,14 +748,17 @@ class LibraryRepository {
   }
 
   private async write(operation: (database: BrowserDatabase) => Promise<void>): Promise<void> {
-    const execute = async () => operation(await browserDatabase());
+    const execute = async () => operation(await this.database());
     try {
+      if (this.closed) {
+        throw new Error("This library was closed. Reopen it before saving changes.");
+      }
       if (!navigator.locks) {
         throw new Error(
           "Safe library writes require a browser with cross-tab Web Locks support.",
         );
       }
-      await navigator.locks.request(WRITE_LOCK, execute);
+      await this.track(navigator.locks.request(this.names.writeLock, execute));
     } catch (error) {
       this.patchState({ error: safeError(error), status: "Change was not saved" });
       throw error;
@@ -1183,4 +1232,224 @@ function safeError(error: unknown): string {
   return error instanceof Error ? error.message : "An unexpected browser storage error occurred.";
 }
 
-export const libraryRepository = new LibraryRepository();
+/**
+ * Hooks the sync service uses to stand down across a profile switch. They are
+ * registered rather than imported so the library layer keeps no dependency on
+ * the sync layer.
+ */
+export interface SyncBridge {
+  /** Resolves once no sync cycle is running and none can start. */
+  quiesce(): Promise<void>;
+}
+
+const OPENING_STATE: LibraryState = {
+  initialized: false,
+  loading: true,
+  items: [],
+  pendingChanges: [],
+  pendingCount: 0,
+  status: "Opening your private library…",
+  error: null,
+};
+
+/**
+ * Owns whichever profile is currently open and forwards the repository API to
+ * it. Every consumer holds this one stable object, so a switch replaces the
+ * underlying replica without any component re-wiring its imports.
+ */
+class LibraryWorkspace {
+  private state: LibraryState = OPENING_STATE;
+  private readonly listeners = new Set<(state: LibraryState) => void>();
+  private readonly profileListeners = new Set<(profile: LibraryProfile) => void>();
+  private active: LibraryRepository | null = null;
+  private profile: LibraryProfile | null = null;
+  private detach: (() => void) | null = null;
+  private bridge: SyncBridge | null = null;
+  private ready: Promise<void>;
+
+  constructor() {
+    this.ready = this.open();
+  }
+
+  private async open(): Promise<void> {
+    try {
+      this.attach(await activeProfile());
+    } catch (error) {
+      this.patchState({
+        loading: false,
+        error: safeError(error),
+        status: "Could not open the browser library",
+      });
+    }
+  }
+
+  private attach(profile: LibraryProfile): void {
+    const repository = new LibraryRepository(profileStorageNames(profile.namespace));
+    this.active = repository;
+    this.profile = profile;
+    // Emissions from a replaced instance are dropped, so a late resolution
+    // from the previous profile can never repaint the new one.
+    this.detach = repository.subscribe((next) => {
+      if (this.active !== repository) return;
+      this.state = next;
+      this.emit();
+    });
+    for (const listener of this.profileListeners) listener(profile);
+  }
+
+  private async instance(): Promise<LibraryRepository> {
+    await this.ready;
+    if (!this.active) throw new Error("The browser library is not open.");
+    return this.active;
+  }
+
+  registerSyncBridge(bridge: SyncBridge): void {
+    this.bridge = bridge;
+  }
+
+  activeProfile(): LibraryProfile | null {
+    return this.profile;
+  }
+
+  subscribeProfile(listener: (profile: LibraryProfile) => void): () => void {
+    this.profileListeners.add(listener);
+    if (this.profile) listener(this.profile);
+    return () => this.profileListeners.delete(listener);
+  }
+
+  /**
+   * Closes the current profile and opens another. Sync stands down first so no
+   * in-flight cycle can apply one profile's updates to the next one.
+   */
+  async switchProfile(profileId: string): Promise<LibraryProfile> {
+    await this.ready;
+    if (this.profile?.id === profileId) return this.profile;
+
+    const switching = (async () => {
+      const previous = this.active;
+      this.active = null;
+      this.detach?.();
+      this.detach = null;
+      this.state = OPENING_STATE;
+      this.emit();
+
+      await this.bridge?.quiesce();
+      await previous?.close();
+
+      // attach() notifies profile subscribers, which is how sync rebinds.
+      const profile = await setActiveProfile(profileId);
+      this.attach(profile);
+      return profile;
+    })();
+
+    this.ready = switching.then(
+      () => undefined,
+      () => undefined,
+    );
+    return switching;
+  }
+
+  getState(): LibraryState {
+    return this.state;
+  }
+
+  subscribe(listener: (state: LibraryState) => void): () => void {
+    this.listeners.add(listener);
+    listener(this.state);
+    return () => this.listeners.delete(listener);
+  }
+
+  private patchState(patch: Partial<LibraryState>): void {
+    this.state = { ...this.state, ...patch };
+    this.emit();
+  }
+
+  private emit(): void {
+    for (const listener of this.listeners) listener(this.state);
+  }
+
+  async initialize(): Promise<void> {
+    return (await this.instance()).initialize();
+  }
+
+  async add(input: AddItemInput): Promise<UndoableChange | null> {
+    return (await this.instance()).add(input);
+  }
+
+  async edit(itemId: string, input: EditItemInput): Promise<UndoableChange | null> {
+    return (await this.instance()).edit(itemId, input);
+  }
+
+  async remove(itemId: string): Promise<UndoableChange | null> {
+    return (await this.instance()).remove(itemId);
+  }
+
+  async restore(itemId: string): Promise<UndoableChange | null> {
+    return (await this.instance()).restore(itemId);
+  }
+
+  async undo(change: UndoableChange): Promise<void> {
+    return (await this.instance()).undo(change);
+  }
+
+  async syncIdentity(): Promise<BrowserSyncIdentity> {
+    return (await this.instance()).syncIdentity();
+  }
+
+  async syncConfiguration(): Promise<SyncConfiguration | null> {
+    return (await this.instance()).syncConfiguration();
+  }
+
+  async configureSync(
+    owner: string,
+    repository: string,
+    branch: string,
+  ): Promise<SyncConfiguration> {
+    return (await this.instance()).configureSync(owner, repository, branch);
+  }
+
+  async adoptRemoteLibraryIfPristine(libraryId: string): Promise<boolean> {
+    return (await this.instance()).adoptRemoteLibraryIfPristine(libraryId);
+  }
+
+  async pendingSyncBatches(): Promise<PendingSyncBatch[]> {
+    return (await this.instance()).pendingSyncBatches();
+  }
+
+  async remoteObservation(path: string): Promise<RemoteObservation | null> {
+    return (await this.instance()).remoteObservation(path);
+  }
+
+  async recordRemoteObservation(path: string, blobSha: string): Promise<void> {
+    return (await this.instance()).recordRemoteObservation(path, blobSha);
+  }
+
+  async recordOutboxAttempt(path: string, errorKind: string | null): Promise<void> {
+    return (await this.instance()).recordOutboxAttempt(path, errorKind);
+  }
+
+  async recordOutboxAttempts(paths: string[], errorKind: string | null): Promise<void> {
+    return (await this.instance()).recordOutboxAttempts(paths, errorKind);
+  }
+
+  async deferredSyncCount(): Promise<number> {
+    return (await this.instance()).deferredSyncCount();
+  }
+
+  async recordSyncSuccess(): Promise<void> {
+    return (await this.instance()).recordSyncSuccess();
+  }
+
+  async recordSyncFailure(kind: string): Promise<void> {
+    return (await this.instance()).recordSyncFailure(kind);
+  }
+
+  async applyRemote(
+    inputs: RemoteEnvelopeInput[],
+    packs: RemoteOperationPackInput[] = [],
+  ): Promise<number> {
+    return (await this.instance()).applyRemote(inputs, packs);
+  }
+}
+
+export const libraryRepository = new LibraryWorkspace();

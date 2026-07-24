@@ -18,6 +18,19 @@ import {
   browserSync,
   type BrowserSyncState,
 } from "./data/sync.ts";
+import {
+  createProfile,
+  deleteProfile,
+  listProfiles,
+  renameProfile,
+  type LibraryProfile,
+} from "./data/profiles.ts";
+
+/** Sentinel value for the create action inside the library switcher. */
+const NEW_LIBRARY_OPTION = "__new-library__";
+
+/** Tags shown in the rail before the rest move behind the manage action. */
+const RAIL_TAG_LIMIT = 8;
 
 type AddInput = Parameters<typeof libraryRepository.add>[0];
 type EditInput = Parameters<typeof libraryRepository.edit>[1];
@@ -185,6 +198,8 @@ export function App() {
   const [announcement, setAnnouncement] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
   const [undoNotice, setUndoNotice] = useState<UndoNotice | null>(null);
+  const [profiles, setProfiles] = useState<LibraryProfile[]>([]);
+  const [activeProfileId, setActiveProfileId] = useState<string | null>(null);
   const captureOpenerRef = useRef<HTMLButtonElement | null>(null);
   const editOpenerRef = useRef<HTMLButtonElement | null>(null);
 
@@ -198,11 +213,19 @@ export function App() {
     const unsubscribeSync = browserSync.subscribe((nextState) => {
       if (active) setSyncState(nextState);
     });
+    const unsubscribeProfile = libraryRepository.subscribeProfile((profile) => {
+      if (!active) return;
+      setActiveProfileId(profile.id);
+      void listProfiles().then((next) => {
+        if (active) setProfiles(next);
+      });
+    });
 
     return () => {
       active = false;
       unsubscribe();
       unsubscribeSync();
+      unsubscribeProfile();
     };
   }, []);
 
@@ -296,6 +319,21 @@ export function App() {
       })),
     [items, knownTags],
   );
+
+  // The rail shows the busiest tags plus anything already filtered on; the
+  // rest stay behind the manage action so the rail cannot grow unbounded.
+  const railTags = useMemo(() => {
+    const ranked = [...tagCounts].sort(
+      (left, right) => right.count - left.count || left.tag.localeCompare(right.tag),
+    );
+    const shown = ranked.slice(0, RAIL_TAG_LIMIT);
+    const shownTags = new Set(shown.map(({ tag }) => tag));
+    const pinned = ranked.filter(
+      ({ tag }) => selectedTags.includes(tag) && !shownTags.has(tag),
+    );
+    return [...shown, ...pinned];
+  }, [selectedTags, tagCounts]);
+  const hiddenTagCount = tagCounts.length - railTags.length;
 
   useEffect(() => {
     function restoreNavigationFromHistory() {
@@ -400,6 +438,37 @@ export function App() {
       window.history.pushState(window.history.state, "", nextUrl);
     }
     setView(nextView);
+  }
+
+  async function refreshProfiles() {
+    setProfiles(await listProfiles());
+  }
+
+  async function switchLibrary(profileId: string) {
+    if (profileId === activeProfileId) return;
+    setLocalError(null);
+    try {
+      const profile = await libraryRepository.switchProfile(profileId);
+      await refreshProfiles();
+      setAutoBootstrapAttempted(false);
+      navigateToView("library");
+      setAnnouncement(`Opened ${profile.name}`);
+    } catch (error) {
+      setLocalError(readError(error));
+    }
+  }
+
+  async function createLibrary() {
+    const name = window.prompt("Name the new library");
+    if (name === null) return;
+    setLocalError(null);
+    try {
+      const created = await createProfile(name);
+      await refreshProfiles();
+      await switchLibrary(created.id);
+    } catch (error) {
+      setLocalError(readError(error));
+    }
   }
 
   useEffect(() => {
@@ -621,12 +690,35 @@ export function App() {
               rp
             </span>
             <p className="brand-name">ResearchPocket</p>
-            <p className="brand-context">
-              {view === "library" ? "owner workspace" : "← library"}
-            </p>
+            {view === "library" ? null : (
+              <p className="brand-context">← library</p>
+            )}
           </button>
 
           <div className="masthead-actions">
+            {profiles.length > 1 ? (
+              <div className="library-switcher">
+                <select
+                  aria-label="Active library"
+                  onChange={(event) => {
+                    if (event.target.value === NEW_LIBRARY_OPTION) {
+                      event.target.value = activeProfileId ?? "";
+                      void createLibrary();
+                      return;
+                    }
+                    void switchLibrary(event.target.value);
+                  }}
+                  value={activeProfileId ?? ""}
+                >
+                  {profiles.map((profile) => (
+                    <option key={profile.id} value={profile.id}>
+                      {profile.name}
+                    </option>
+                  ))}
+                  <option value={NEW_LIBRARY_OPTION}>＋ New library…</option>
+                </select>
+              </div>
+            ) : null}
             <div className="local-status" role="status">
               <span aria-hidden="true" className="status-dot" />
               <span className="status-label">local</span>
@@ -639,7 +731,7 @@ export function App() {
               onClick={() => setCommandOpen(true)}
               type="button"
             >
-              search or command <kbd>Ctrl Shift P</kbd>
+              search <kbd>Ctrl Shift P</kbd>
             </button>
           </div>
         </header>
@@ -690,10 +782,12 @@ export function App() {
           <div className="rail-tags">
             <div className="rail-heading">
               <p>Tags</p>
-              <button onClick={() => setFiltersOpen(true)} type="button">manage</button>
+              <button onClick={() => setFiltersOpen(true)} type="button">
+                {hiddenTagCount > 0 ? `+${hiddenTagCount} more` : "manage"}
+              </button>
             </div>
             <div className="rail-tag-list">
-              {tagCounts.map(({ count, tag }) => (
+              {railTags.map(({ count, tag }) => (
                 <button
                   aria-current={selectedTags.includes(tag) ? "page" : undefined}
                   key={tag}
@@ -746,10 +840,14 @@ export function App() {
         />
 
         <SettingsPanel
+          activeProfileId={activeProfileId}
           density={density}
           hidden={view !== "settings"}
           onDensityChange={setDensity}
+          onProfilesChanged={refreshProfiles}
+          onSwitchLibrary={switchLibrary}
           onThemeChange={setTheme}
+          profiles={profiles}
           theme={theme}
         />
 
@@ -1080,11 +1178,16 @@ export function App() {
       {commandOpen ? (
         <CommandPalette
           items={items.filter((item) => !item.deleted)}
+          libraries={profiles.filter((profile) => profile.id !== activeProfileId)}
           onClose={() => setCommandOpen(false)}
           onFilterTag={(tag) => {
             navigateToView("library");
             setSelectedTags([tag]);
             setCommandOpen(false);
+          }}
+          onNewLibrary={() => {
+            setCommandOpen(false);
+            void createLibrary();
           }}
           onNewSave={() => {
             setCommandOpen(false);
@@ -1093,6 +1196,10 @@ export function App() {
           onOpenItem={(item) => {
             openReader(item);
             setCommandOpen(false);
+          }}
+          onSwitchLibrary={(profileId) => {
+            setCommandOpen(false);
+            void switchLibrary(profileId);
           }}
           onSync={() => {
             navigateToView("sync");
@@ -1180,17 +1287,159 @@ function Welcome({
   );
 }
 
+function LibrarySettings({
+  activeProfileId,
+  onProfilesChanged,
+  onSwitchLibrary,
+  profiles,
+}: {
+  activeProfileId: string | null;
+  onProfilesChanged: () => Promise<void>;
+  onSwitchLibrary: (profileId: string) => Promise<void>;
+  profiles: LibraryProfile[];
+}) {
+  const [newName, setNewName] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function run(work: () => Promise<unknown>) {
+    setBusy(true);
+    setError(null);
+    try {
+      await work();
+      await onProfilesChanged();
+    } catch (caught) {
+      setError(readError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="settings-group">
+      <div>
+        <h3>Libraries</h3>
+        <p>
+          Each library keeps its own saves, queue, and repository on this device.
+          Nothing is shared between them.
+        </p>
+      </div>
+
+      <div className="library-settings">
+        <ul className="library-list">
+          {profiles.map((profile) => {
+            const current = profile.id === activeProfileId;
+            return (
+              <li className="library-row" key={profile.id}>
+                <div className="library-row-copy">
+                  <p>
+                    {profile.name}
+                    {current ? <span className="status-label"> open</span> : null}
+                  </p>
+                  <p>
+                    {profile.lastOpenedAt
+                      ? `Last opened ${formatDateTime(profile.lastOpenedAt)}`
+                      : "Not opened yet"}
+                  </p>
+                </div>
+                <div className="library-row-actions">
+                  {current ? null : (
+                    <button
+                      disabled={busy}
+                      onClick={() => void onSwitchLibrary(profile.id)}
+                      type="button"
+                    >
+                      Open
+                    </button>
+                  )}
+                  <button
+                    disabled={busy}
+                    onClick={() =>
+                      void run(async () => {
+                        const name = window.prompt("Rename library", profile.name);
+                        if (name === null) return;
+                        await renameProfile(profile.id, name);
+                      })
+                    }
+                    type="button"
+                  >
+                    Rename
+                  </button>
+                  <button
+                    disabled={busy || profiles.length === 1}
+                    onClick={() =>
+                      void run(async () => {
+                        const confirmed = window.confirm(
+                          `Delete the local copy of "${profile.name}"? Its GitHub repository is not touched, so you can reconnect to restore it.`,
+                        );
+                        if (!confirmed) return;
+                        const next = await deleteProfile(profile.id);
+                        if (profile.id === activeProfileId) await onSwitchLibrary(next.id);
+                      })
+                    }
+                    type="button"
+                  >
+                    Delete local copy
+                  </button>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+
+        <form
+          className="library-create"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void run(async () => {
+              const created = await createProfile(newName);
+              setNewName("");
+              await onSwitchLibrary(created.id);
+            });
+          }}
+        >
+          <label className="field">
+            <span>New library</span>
+            <input
+              autoCapitalize="none"
+              autoComplete="off"
+              name="library-name"
+              onChange={(event) => setNewName(event.target.value)}
+              placeholder="Team research"
+              required
+              value={newName}
+            />
+          </label>
+          <button className="secondary-button" disabled={busy} type="submit">
+            Create and open
+          </button>
+        </form>
+
+        {error ? <p className="sync-error" role="alert">{error}</p> : null}
+      </div>
+    </div>
+  );
+}
+
 function SettingsPanel({
+  activeProfileId,
   density,
   hidden,
   onDensityChange,
+  onProfilesChanged,
+  onSwitchLibrary,
   onThemeChange,
+  profiles,
   theme,
 }: {
+  activeProfileId: string | null;
   density: Density;
   hidden: boolean;
   onDensityChange: (density: Density) => void;
+  onProfilesChanged: () => Promise<void>;
+  onSwitchLibrary: (profileId: string) => Promise<void>;
   onThemeChange: (theme: ThemeColors) => void;
+  profiles: LibraryProfile[];
   theme: ThemeColors;
 }) {
   const selectedPreset =
@@ -1208,6 +1457,13 @@ function SettingsPanel({
         <h2 id="settings-heading">Settings</h2>
         <p>Preferences stay in this browser and never become library data.</p>
       </header>
+
+      <LibrarySettings
+        activeProfileId={activeProfileId}
+        onProfilesChanged={onProfilesChanged}
+        onSwitchLibrary={onSwitchLibrary}
+        profiles={profiles}
+      />
 
       <div className="settings-group">
         <div>
@@ -1373,24 +1629,43 @@ function SyncPanel({
       className="sync-section"
       hidden={hidden}
     >
-      <div className="sync-copy">
+      <header className="sync-header">
         <p className="eyebrow">Remote</p>
         <h2 id="sync-heading">Private sync</h2>
-        <p>
-          Exchange immutable updates through one private GitHub repository. Git
-          does not resolve library state.
-        </p>
-        <div className="sync-state" role="status">
-          <span aria-hidden="true" className="status-dot" />
-          <span>{state.status}</span>
-        </div>
-        {remote ? (
-          <p className="sync-remote">
-            <strong>{remote.owner}/{remote.repository}</strong>
-            <span>Branch {remote.branch}</span>
-          </p>
-        ) : null}
+        <p>Exchange updates through one private GitHub repository.</p>
+      </header>
+
+      <div className="sync-state" role="status">
+        <span aria-hidden="true" className="status-dot" />
+        <span>{state.status}</span>
       </div>
+
+      {remote ? (
+        <dl className="sync-facts">
+          <div>
+            <dt>Repository</dt>
+            <dd>{remote.owner}/{remote.repository}</dd>
+          </div>
+          <div>
+            <dt>Branch</dt>
+            <dd>{remote.branch}</dd>
+          </div>
+          <div>
+            <dt>Last sync</dt>
+            <dd>
+              {remote.lastSuccessAt ? formatDateTime(remote.lastSuccessAt) : "Never"}
+            </dd>
+          </div>
+          {state.lastCycle ? (
+            <div>
+              <dt>Last cycle</dt>
+              <dd>
+                {state.lastCycle.downloaded} down · {state.lastCycle.uploaded} up
+              </dd>
+            </div>
+          ) : null}
+        </dl>
+      ) : null}
 
       <div className="sync-content">
         <PendingSyncChanges
@@ -1440,8 +1715,8 @@ function SyncPanel({
         ) : !state.credentialAvailable ? (
           <form className="sync-form" onSubmit={(event) => void unlock(event)}>
             <p>
-              Repository details stay on this device, but the credential does not.
-              Enter it again to pull and push queued changes.
+              The repository is remembered on this device; the token is not. Enter
+              it again to pull and push queued changes.
             </p>
             <TokenFields />
             {error ? <p className="sync-error" role="alert">{error}</p> : null}
@@ -1452,15 +1727,9 @@ function SyncPanel({
         ) : (
           <div className="sync-controls">
             <p>
-              Your credential is active only in this browser context and never enters
-              the library, an API URL, or the service-worker cache.
+              The token stays in this browser context only. It never enters the
+              library, a URL, or the service-worker cache.
             </p>
-            {state.lastCycle ? (
-              <dl className="sync-counts">
-                <div><dt>Downloaded</dt><dd>{state.lastCycle.downloaded}</dd></div>
-                <div><dt>Uploaded</dt><dd>{state.lastCycle.uploaded}</dd></div>
-              </dl>
-            ) : null}
             {error ? <p className="sync-error" role="alert">{error}</p> : null}
             <div className="sync-actions">
               <button
@@ -1513,8 +1782,7 @@ function PendingSyncChanges({
         <span>{pluralize(changes.length, "change")}</span>
       </div>
       <p className="sync-pending-help">
-        Outgoing changes stay on this device until GitHub confirms them. Incoming
-        changes are discovered during sync.
+        Outgoing changes stay on this device until GitHub confirms them.
       </p>
 
       {changes.length > 0 ? (
@@ -1576,8 +1844,8 @@ function TokenFields() {
         <span>Keep the token only for this tab session</span>
       </label>
       <p className="sync-help">
-        Use an expiring fine-grained token limited to this private repository with
-        Contents read and write access. Leave the box off to keep it in memory only.
+        Use an expiring fine-grained token limited to this repository, with
+        Contents read and write. Leave the box off to keep it in memory only.
       </p>
     </>
   );
@@ -1625,18 +1893,24 @@ function QuickAdd({
 
 function CommandPalette({
   items,
+  libraries,
   onClose,
   onFilterTag,
+  onNewLibrary,
   onNewSave,
   onOpenItem,
+  onSwitchLibrary,
   onSync,
   tags,
 }: {
   items: LibraryItemView[];
+  libraries: LibraryProfile[];
   onClose: () => void;
   onFilterTag: (tag: string) => void;
   onNewSave: () => void;
+  onNewLibrary: () => void;
   onOpenItem: (item: LibraryItemView) => void;
+  onSwitchLibrary: (profileId: string) => void;
   onSync: () => void;
   tags: { count: number; tag: string }[];
 }) {
@@ -1654,7 +1928,11 @@ function CommandPalette({
         .some((value) => value!.toLocaleLowerCase().includes(normalized)),
     )
     .slice(0, 6);
-  const optionCount = matchingTags.length + matchingItems.length + 2;
+  const matchingLibraries = libraries
+    .filter((profile) => !normalized || profile.name.toLocaleLowerCase().includes(normalized))
+    .slice(0, 4);
+  const optionCount =
+    matchingTags.length + matchingItems.length + matchingLibraries.length + 3;
 
   function runOption(index: number) {
     if (index < matchingTags.length) {
@@ -1668,8 +1946,15 @@ function CommandPalette({
       return;
     }
 
-    if (itemIndex === matchingItems.length) onSync();
-    else onNewSave();
+    const libraryIndex = itemIndex - matchingItems.length;
+    if (libraryIndex < matchingLibraries.length) {
+      onSwitchLibrary(matchingLibraries[libraryIndex]!.id);
+      return;
+    }
+
+    if (libraryIndex === matchingLibraries.length) onSync();
+    else if (libraryIndex === matchingLibraries.length + 1) onNewSave();
+    else onNewLibrary();
   }
 
   function moveSelection(offset: number) {
@@ -1754,9 +2039,17 @@ function CommandPalette({
             <em>{item.tags.map((tag) => `#${tag}`).join(" ")}</em>
           </button>;
         })}
+        {matchingLibraries.length > 0 ? <p role="presentation">Libraries</p> : null}
+        {matchingLibraries.map((profile, libraryIndex) => {
+          const index = matchingTags.length + matchingItems.length + libraryIndex;
+          return <button aria-selected={activeIndex === index} className={activeIndex === index ? "command-selected" : undefined} id={`command-option-${index}`} key={profile.id} onClick={() => onSwitchLibrary(profile.id)} onPointerEnter={() => setActiveIndex(index)} role="option" type="button">
+            <span>{profile.name}</span><em>↵ open library</em>
+          </button>;
+        })}
         <p role="presentation">Actions</p>
-        <button aria-selected={activeIndex === optionCount - 2} className={activeIndex === optionCount - 2 ? "command-selected" : undefined} id={`command-option-${optionCount - 2}`} onClick={onSync} onPointerEnter={() => setActiveIndex(optionCount - 2)} role="option" type="button"><span>Sync</span><em>open status</em></button>
-        <button aria-selected={activeIndex === optionCount - 1} className={activeIndex === optionCount - 1 ? "command-selected" : undefined} id={`command-option-${optionCount - 1}`} onClick={onNewSave} onPointerEnter={() => setActiveIndex(optionCount - 1)} role="option" type="button"><span>Save a URL</span><em>new save</em></button>
+        <button aria-selected={activeIndex === optionCount - 3} className={activeIndex === optionCount - 3 ? "command-selected" : undefined} id={`command-option-${optionCount - 3}`} onClick={onSync} onPointerEnter={() => setActiveIndex(optionCount - 3)} role="option" type="button"><span>Sync</span><em>open status</em></button>
+        <button aria-selected={activeIndex === optionCount - 2} className={activeIndex === optionCount - 2 ? "command-selected" : undefined} id={`command-option-${optionCount - 2}`} onClick={onNewSave} onPointerEnter={() => setActiveIndex(optionCount - 2)} role="option" type="button"><span>Save a URL</span><em>new save</em></button>
+        <button aria-selected={activeIndex === optionCount - 1} className={activeIndex === optionCount - 1 ? "command-selected" : undefined} id={`command-option-${optionCount - 1}`} onClick={onNewLibrary} onPointerEnter={() => setActiveIndex(optionCount - 1)} role="option" type="button"><span>New library</span><em>create and open</em></button>
       </div>
       <footer className="command-footer"><span><b>Ctrl P/N · ↑↓</b> navigate</span><span><b>↵</b> select</span><span><b>esc</b> close</span></footer>
     </dialog>

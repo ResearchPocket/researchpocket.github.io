@@ -23,6 +23,11 @@ import {
   type RemoteOperationPackInput,
   type SyncConfiguration,
 } from "./library.ts";
+import {
+  profileStorageNames,
+  type LibraryProfile,
+  type ProfileStorageNames,
+} from "./profiles.ts";
 
 export interface BrowserSyncState {
   configuration: SyncConfiguration | null;
@@ -74,9 +79,6 @@ interface PendingUpload {
   packed: boolean;
 }
 
-const SYNC_LOCK = "researchpocket-v2-github-sync";
-const LIBRARY_CHANNEL = "researchpocket-v2-state";
-const SESSION_TOKEN_KEY = "researchpocket-v2-github-token";
 const MAX_UPLOAD_ATTEMPTS = 4;
 const PERIODIC_SYNC_MS = 60_000;
 const LOCAL_CHANGE_SYNC_DELAY_MS = 5_000;
@@ -101,19 +103,22 @@ class BrowserSyncService {
     lastCycle: null,
   };
 
-  #token: string | null = readSessionToken();
+  #token: string | null = null;
+  #names: ProfileStorageNames | null = null;
   private retryNotBefore = 0;
   private running: Promise<void> | null = null;
   private localChangeTimer: number | null = null;
   private rerunAfterCurrentSync = false;
   private readonly listeners = new Set<(state: BrowserSyncState) => void>();
-  private readonly channel = new BroadcastChannel(LIBRARY_CHANNEL);
+  private channel: BroadcastChannel | null = null;
 
   constructor() {
-    this.channel.addEventListener("message", () => {
-      if (this.#token && this.state.configuration && document.visibilityState === "visible") {
-        this.scheduleLocalChangeSync();
-      }
+    // Sync follows whichever profile is open. Binding happens on the profile
+    // notification rather than at construction so the credential, lock, and
+    // channel always belong to the library currently on screen.
+    libraryRepository.registerSyncBridge({ quiesce: () => this.quiesce() });
+    libraryRepository.subscribeProfile((profile) => {
+      void this.bind(profile);
     });
     window.addEventListener("focus", () => void this.requestSync("window focus"));
     window.addEventListener("online", () => void this.requestSync("network restored"));
@@ -127,12 +132,60 @@ class BrowserSyncService {
         void this.requestSync("periodic refresh");
       }
     }, PERIODIC_SYNC_MS);
-    void this.load().catch((error: unknown) => {
+  }
+
+  /**
+   * Stops all sync activity and drops the credential. Called before a profile
+   * switch so no cycle can carry one library's updates into another.
+   */
+  private async quiesce(): Promise<void> {
+    if (this.localChangeTimer !== null) {
+      window.clearTimeout(this.localChangeTimer);
+      this.localChangeTimer = null;
+    }
+    this.rerunAfterCurrentSync = false;
+    await this.running?.catch(() => undefined);
+    this.#names = null;
+    this.#token = null;
+    this.retryNotBefore = 0;
+    this.channel?.close();
+    this.channel = null;
+    this.state = {
+      configuration: null,
+      credentialAvailable: false,
+      syncing: false,
+      status: "Opening your private library…",
+      error: null,
+      lastCycle: null,
+    };
+    for (const listener of this.listeners) listener(this.state);
+  }
+
+  /** Binds sync to one profile's lock, channel, and session credential. */
+  private async bind(profile: LibraryProfile): Promise<void> {
+    const names = profileStorageNames(profile.namespace);
+    this.#names = names;
+    this.#token = readSessionToken(names.sessionTokenKey);
+    this.channel?.close();
+    this.channel = new BroadcastChannel(names.stateChannel);
+    this.channel.addEventListener("message", () => {
+      if (this.#token && this.state.configuration && document.visibilityState === "visible") {
+        this.scheduleLocalChangeSync();
+      }
+    });
+    try {
+      await this.load();
+    } catch (error: unknown) {
       this.patch({
         status: "Private sync could not open",
         error: error instanceof Error ? error.message : "Could not read sync configuration.",
       });
-    });
+    }
+  }
+
+  private requireNames(): ProfileStorageNames {
+    if (!this.#names) throw new Error("The browser library is still opening.");
+    return this.#names;
   }
 
   getState(): BrowserSyncState {
@@ -204,7 +257,7 @@ class BrowserSyncService {
 
   forgetCredential(): void {
     this.#token = null;
-    removeSessionToken();
+    if (this.#names) removeSessionToken(this.#names.sessionTokenKey);
     this.patch({
       credentialAvailable: false,
       status: this.state.configuration
@@ -233,7 +286,7 @@ class BrowserSyncService {
       if (reason === "local changes") this.rerunAfterCurrentSync = true;
       return this.running;
     }
-    if (!this.#token || !this.state.configuration) return;
+    if (!this.#names || !this.#token || !this.state.configuration) return;
     if (!navigator.onLine) {
       const error = new GitHubSyncError(
         "You are offline. Your queued changes remain stored here and will retry when the network returns.",
@@ -305,10 +358,10 @@ class BrowserSyncService {
       throw new Error("Safe synchronization requires a browser with Web Locks support.");
     }
     if (waitForLock) {
-      await navigator.locks.request(SYNC_LOCK, operation);
+      await navigator.locks.request(this.requireNames().syncLock, operation);
     } else {
       await navigator.locks.request(
-        SYNC_LOCK,
+        this.requireNames().syncLock,
         { ifAvailable: true },
         async (lock) => {
           if (lock) await operation();
@@ -584,8 +637,9 @@ class BrowserSyncService {
     void client;
     this.#token = normalizedToken;
     try {
-      if (rememberForTab) writeSessionToken(normalizedToken);
-      else removeSessionToken();
+      const key = this.requireNames().sessionTokenKey;
+      if (rememberForTab) writeSessionToken(key, normalizedToken);
+      else removeSessionToken(key);
     } catch (error) {
       this.#token = null;
       throw error;
@@ -844,18 +898,18 @@ async function retryDelay(path: string, attempt: number): Promise<void> {
   await new Promise((resolve) => window.setTimeout(resolve, base + jitter));
 }
 
-function readSessionToken(): string | null {
+function readSessionToken(key: string): string | null {
   try {
-    const token = sessionStorage.getItem(SESSION_TOKEN_KEY);
+    const token = sessionStorage.getItem(key);
     return token?.trim() ? token : null;
   } catch {
     return null;
   }
 }
 
-function writeSessionToken(token: string): void {
+function writeSessionToken(key: string, token: string): void {
   try {
-    sessionStorage.setItem(SESSION_TOKEN_KEY, token);
+    sessionStorage.setItem(key, token);
   } catch {
     throw new GitHubSyncError(
       "This browser blocked tab-only token storage. Leave the option off to keep it in memory.",
@@ -864,9 +918,9 @@ function writeSessionToken(token: string): void {
   }
 }
 
-function removeSessionToken(): void {
+function removeSessionToken(key: string): void {
   try {
-    sessionStorage.removeItem(SESSION_TOKEN_KEY);
+    sessionStorage.removeItem(key);
   } catch {
     // The in-memory token is still forgotten even if storage is unavailable.
   }
