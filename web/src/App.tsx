@@ -1008,7 +1008,6 @@ export function App() {
             <span><b>/</b> search</span>
             <span><b>⏎</b> reader</span>
             <span><b>↗</b> open</span>
-            <span className="keyboard-footer-note">local-first · private · no tracking</span>
           </footer>
           </section>
         </main>
