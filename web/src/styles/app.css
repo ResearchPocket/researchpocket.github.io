@@ -2217,10 +2217,6 @@ kbd {
   color: var(--color-text-soft);
 }
 
-.keyboard-footer-note {
-  margin-left: auto;
-}
-
 .sync-section {
   border: 0;
   display: grid;
