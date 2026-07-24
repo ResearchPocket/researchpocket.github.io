@@ -19,8 +19,7 @@ WASM and IndexedDB transaction boundary; it never deletes an outbox row or
 rewrites immutable history. The token records the exact resulting item
 projection and fails stale if any later local or remote item change intervenes.
 Only the latest action is retained in memory. Delete remains recoverable through
-the archive after dismissal or reload. See
-[ADR 0005](./ADR_0005_COMPENSATING_UNDO.md).
+the archive after dismissal or reload.
 
 First run offers two explicit paths. Starting locally creates an empty browser
 library. Restoring prepares the same empty local shell and opens private sync

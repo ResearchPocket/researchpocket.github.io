@@ -195,9 +195,7 @@ bounded retries and a sanitized category; page bodies and credentials are never
 stored in a job. Successful bounded Firecrawl Markdown is stored only through
 the normal excerpt mutation, not duplicated in the job. A successful result is
 one V2 edit/outbox update only when at least one eligible field is applied. Raw
-HTML, PDF, and attachment storage remains outside this feature; see
-[ADR 0002](./ADR_0002_LINK_ENRICHMENT.md) and
-[ADR 0004](./ADR_0004_BOUNDED_FIRECRAWL_MARKDOWN.md).
+HTML, PDF, and attachment storage remains outside this feature.
 
 ## Browser capture through the URL scheme
 
@@ -363,9 +361,6 @@ owner remembers external-protocol permission may attempt unwanted captures. URI
 validation limits that risk to bounded save spam: the transport cannot read or
 edit the library, execute commands, select a database, obtain credentials, or
 start sync. See [THREAT_MODEL.md](./THREAT_MODEL.md#native-bookmarklet-capture).
-The custom-handler tradeoff is recorded in
-[ADR 0001](./ADR_0001_NATIVE_BROWSER_CAPTURE.md); the post-save enrichment
-boundary is recorded in [ADR 0002](./ADR_0002_LINK_ENRICHMENT.md).
 
 ## Edit and lifecycle
 
