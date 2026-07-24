@@ -2,6 +2,23 @@
 
 Status: accepted direction for V2 planning and implementation
 
+## Version staging
+
+Version 2.0 stabilizes the foundation exercised through the four preview
+releases: the native CLI and TUI, browser capture, optional retryable
+enrichment, private immutable-update GitHub synchronization, and the
+offline-capable hosted owner application.
+
+The remaining product-parity surfaces in this contract—local loopback web
+serving, collections and selective publication, broader import/export, and
+repository profiles—remain required V2 direction and are scheduled for the 2.1
+iteration. Their privacy, convergence, and compatibility requirements are not
+relaxed by the staged release. The 2.0 release must describe these omissions
+plainly and must not expose partial or unsafe implementations.
+
+The version boundary and supported distribution channels are recorded in
+[ADR 0006](./ADR_0006_STAGED_V2_PARITY.md).
+
 ## Vision
 
 ResearchPocket is a local-first, URL-first personal library for developers. It
