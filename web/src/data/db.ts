@@ -130,13 +130,6 @@ interface ResearchPocketBrowserDb extends DBSchema {
   };
 }
 
-let databasePromise: Promise<IDBPDatabase<ResearchPocketBrowserDb>> | undefined;
-
-export function browserDatabase(): Promise<IDBPDatabase<ResearchPocketBrowserDb>> {
-  databasePromise ??= openBrowserDatabase("researchpocket-v2");
-  return databasePromise;
-}
-
 export function openBrowserDatabase(
   name: string,
 ): Promise<IDBPDatabase<ResearchPocketBrowserDb>> {
