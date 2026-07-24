@@ -12,7 +12,9 @@ mod projection;
 #[cfg(target_arch = "wasm32")]
 mod wasm;
 
-pub use document::{DomainError, DomainResult, ItemSeed, Library, validate_item_url};
+pub use document::{
+    DomainError, DomainResult, ItemSeed, Library, TextSplice, validate_item_url,
+};
 pub use envelope::{DOMAIN_SCHEMA_VERSION, LORO_CODEC, PROTOCOL_VERSION, UpdateEnvelope};
 pub use genesis::{LibraryGenesis, SYNC_FORMAT};
 pub use pack::{
