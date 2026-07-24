@@ -2763,7 +2763,7 @@ dependencies = [
 
 [[package]]
 name = "research"
-version = "2.0.0-preview.4"
+version = "2.0.0"
 dependencies = [
  "base64",
  "chrono",

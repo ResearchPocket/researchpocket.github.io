@@ -7,6 +7,12 @@ phases. Work may overlap within a phase, but no phase exits until its stated
 criteria are demonstrated. GitHub Project status reflects verified progress;
 it does not replace these release gates.
 
+Version 2.0 stabilizes the implemented foundation through hosted owner mode.
+Incomplete local-loopback, publication, broader portability, governance, and
+repository-profile work continues in the 2.1 iteration. Phase exit criteria
+remain the parity gates for that work; moving an issue to 2.1 does not mark the
+phase complete. See [ADR 0006](./ADR_0006_STAGED_V2_PARITY.md).
+
 ## Architecture boundaries
 
 V2 must preserve the following boundaries throughout delivery:
@@ -233,15 +239,18 @@ V2 must preserve the following boundaries throughout delivery:
 - **Alpha:** protocol/persistence, V1 import, CLI, TUI, and local web gates pass.
 - **Beta:** GitHub synchronization, hosted owner mode, and publication gates
   pass with recovery and privacy scenarios exercised against real test repos.
-- **GA:** all supported platforms pass, a clean-room restore drill succeeds,
-  no open P0/P1 correctness or privacy defects remain, and release docs match
-  the shipped interfaces.
+- **2.0 stable foundation:** implemented CLI, TUI, capture, enrichment, private
+  synchronization, and hosted-owner paths pass their supported checks; release
+  docs enumerate deferred surfaces and match the shipped interfaces.
+- **V2 parity:** all supported platforms and required surfaces pass, a
+  clean-room restore drill succeeds, no open P0/P1 correctness or privacy
+  defects remain, and publication privacy gates pass.
 
 ## GitHub Project tracking conventions
 
-- Track implementation work as repository issues attached to the `v2.0`
-  milestone and the ResearchPocket V2 project; use draft items only for ideas
-  that are not yet committed.
+- Track implementation work as repository issues attached to the applicable
+  version milestone and iteration in the ResearchPocket V2 project; use draft
+  items only for ideas that are not yet committed.
 - Organize work under seven epics: product governance, V1 migration, data and
   CRDT, local experience, sync and hosted editing, publishing, and release.
 - Every actionable issue contains Context, Deliverables, Acceptance criteria,

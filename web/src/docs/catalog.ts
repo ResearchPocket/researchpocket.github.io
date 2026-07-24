@@ -1,5 +1,6 @@
 import contributingSource from "../../../CONTRIBUTING.md?raw";
 import overviewSource from "../../../README.md?raw";
+import release2Source from "../../../docs/releases/v2.0.0.md?raw";
 import releasePreview2Source from "../../../docs/releases/v2.0.0-preview.2.md?raw";
 import releasePreview3Source from "../../../docs/releases/v2.0.0-preview.3.md?raw";
 import releasePreview4Source from "../../../docs/releases/v2.0.0-preview.4.md?raw";
@@ -8,6 +9,7 @@ import adrEnrichmentSource from "../../../docs/v2/ADR_0002_LINK_ENRICHMENT.md?ra
 import adrOperationPacksSource from "../../../docs/v2/ADR_0003_OPERATION_PACKS.md?raw";
 import adrFirecrawlMarkdownSource from "../../../docs/v2/ADR_0004_BOUNDED_FIRECRAWL_MARKDOWN.md?raw";
 import adrUndoSource from "../../../docs/v2/ADR_0005_COMPENSATING_UNDO.md?raw";
+import adrStagedParitySource from "../../../docs/v2/ADR_0006_STAGED_V2_PARITY.md?raw";
 import cliSource from "../../../docs/v2/CLI.md?raw";
 import designSystemSource from "../../../docs/v2/DESIGN_SYSTEM.md?raw";
 import migrationSource from "../../../docs/v2/MIGRATION.md?raw";
@@ -160,6 +162,15 @@ export const referenceDocuments: ReferenceDocument[] = [
     title: "ADR 0005 · Compensating undo",
   },
   {
+    description: "Stabilize the implemented foundation while keeping full V2 parity scheduled and explicit.",
+    id: "adr-staged-parity",
+    section: "decisions",
+    source: adrStagedParitySource,
+    sourcePath: "docs/v2/ADR_0006_STAGED_V2_PARITY.md",
+    status: "Accepted",
+    title: "ADR 0006 · Staged V2 parity",
+  },
+  {
     description: "Contribution workflow, repository conventions, toolchain, and required local checks.",
     id: "contributing",
     section: "project",
@@ -178,12 +189,21 @@ export const referenceDocuments: ReferenceDocument[] = [
     title: "Delivery roadmap",
   },
   {
-    description: "Current preview release notes, operation-pack upgrade requirements, and downloads.",
+    description: "Stable local-first foundation, supported downloads, upgrade requirements, and deferred parity.",
+    id: "release-2",
+    section: "releases",
+    source: release2Source,
+    sourcePath: "docs/releases/v2.0.0.md",
+    status: "Latest release",
+    title: "v2.0.0",
+  },
+  {
+    description: "Historical preview notes for operation-pack upgrade requirements and downloads.",
     id: "release-preview-4",
     section: "releases",
     source: releasePreview4Source,
     sourcePath: "docs/releases/v2.0.0-preview.4.md",
-    status: "Latest release",
+    status: "Historical",
     title: "v2.0.0-preview.4",
   },
   {

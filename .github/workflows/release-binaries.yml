@@ -171,7 +171,7 @@ jobs:
           retention-days: 14
 
   publish:
-    name: Stage draft prerelease
+    name: Stage draft release
     if: needs.build.result == 'success'
     needs: build
     runs-on: ubuntu-latest
@@ -220,7 +220,7 @@ jobs:
           sha256sum "${expected[@]}" > SHA256SUMS
           sha256sum --check SHA256SUMS
 
-      - name: Create or refresh draft prerelease
+      - name: Create or refresh draft release
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -236,12 +236,17 @@ jobs:
             exit 0
           fi
 
+          is_prerelease=false
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            is_prerelease=true
+          fi
+          release_type_args=(--latest=false "--prerelease=$is_prerelease")
+
           if [[ "$existing_draft" == 'true' ]]; then
             gh release edit "$GITHUB_REF_NAME" \
               --repo "$GITHUB_REPOSITORY" \
               --draft \
-              --prerelease \
-              --latest=false \
+              "${release_type_args[@]}" \
               --title "ResearchPocket ${GITHUB_REF_NAME#v}" \
               --notes-file "docs/releases/${GITHUB_REF_NAME}.md"
           else
@@ -249,8 +254,7 @@ jobs:
               --repo "$GITHUB_REPOSITORY" \
               --verify-tag \
               --draft \
-              --prerelease \
-              --latest=false \
+              "${release_type_args[@]}" \
               --title "ResearchPocket ${GITHUB_REF_NAME#v}" \
               --notes-file "docs/releases/${GITHUB_REF_NAME}.md"
           fi

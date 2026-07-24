@@ -56,6 +56,16 @@ migration workspaces; they are not maintained beside the product. Their former
 commands are not compatibility requirements. Do not add new Pocket dependencies
 or design V2 behavior around the discontinued service.
 
+Version 2.0 is the stable local-first foundation exercised by the four V2
+preview releases: native CLI/TUI management, browser capture, retryable
+enrichment, private immutable-update synchronization, and the offline-capable
+hosted owner application. Local loopback web serving, collections and selective
+publication, broader import/export, and repository-profile work remain V2
+targets scheduled for the 2.1 iteration. Do not claim an unshipped target as a
+2.0 feature. [ADR 0006](docs/v2/ADR_0006_STAGED_V2_PARITY.md) records this
+release boundary without weakening the sync, privacy, or publication
+invariants that apply when those surfaces ship.
+
 V2 consolidates product development in this repository. `my-list` and
 `ResearchGarden` are migration references until V2 reaches publishing parity;
 new application behavior belongs here.
