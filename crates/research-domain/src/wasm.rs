@@ -499,14 +499,7 @@ fn apply_edit(
                 "edit does not change the item".into(),
             ));
         }
-        if replacement != current.note {
-            library.splice_note_utf16(
-                item_id,
-                0,
-                current.note.encode_utf16().count(),
-                replacement,
-            )?;
-        }
+        library.set_note(item_id, &current.note, replacement)?;
     }
     for tag in remove_tags {
         library.remove_tag(item_id, &tag)?;
