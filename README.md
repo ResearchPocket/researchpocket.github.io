@@ -40,7 +40,13 @@ existing library** before adding anything on the new device.
 
 ### From the terminal
 
-Download the archive for your platform from the
+If Rust is installed, install the current CLI directly from crates.io:
+
+```sh
+cargo install --locked research
+```
+
+Alternatively, download the archive for your platform from the
 [release page](https://github.com/ResearchPocket/researchpocket.github.io/releases),
 check it against `SHA256SUMS`, and put `research` or `research.exe` somewhere on
 your `PATH`.
@@ -59,7 +65,7 @@ accept one, install [Rust](https://www.rust-lang.org/tools/install) and build th
 matching release tag from source instead of weakening system-wide security:
 
 ```sh
-git clone --branch v2.0.0 --depth 1 \
+git clone --branch v2.0.1 --depth 1 \
   https://github.com/ResearchPocket/researchpocket.github.io.git
 cd researchpocket.github.io
 cargo build --locked --release

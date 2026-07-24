@@ -4140,12 +4140,6 @@ kbd {
   line-height: var(--line-height-tight);
 }
 
-.docs-nav a small {
-  color: var(--color-text-soft);
-  font-size: var(--font-size-xs);
-  font-weight: 400;
-}
-
 .docs-search-empty {
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
@@ -4162,40 +4156,6 @@ kbd {
   margin: 0 auto;
   max-width: 58rem;
   padding: 1.75rem clamp(1.5rem, 5vw, 4rem) 4rem;
-}
-
-.docs-document-meta {
-  align-items: center;
-  border-bottom: var(--rule) solid var(--color-border);
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 1.75rem;
-  min-height: 2.5rem;
-}
-
-.docs-document-meta > div {
-  align-items: center;
-  display: flex;
-  gap: 0.75rem;
-}
-
-.docs-document-meta span,
-.docs-document-meta strong,
-.docs-document-meta a {
-  font-size: var(--font-size-xs);
-}
-
-.docs-document-meta span {
-  color: var(--color-text-muted);
-}
-
-.docs-document-meta strong {
-  color: var(--color-accent-strong);
-  font-weight: 700;
-}
-
-.docs-document-meta a {
-  color: var(--color-text-muted);
 }
 
 .docs-markdown {
@@ -4248,6 +4208,106 @@ kbd {
 
 .docs-markdown pre {
   max-width: 100%;
+}
+
+.docs-code-block {
+  background: var(--color-surface-muted);
+  border: var(--rule) solid var(--color-border);
+  border-radius: var(--radius);
+  margin: 0 0 1rem;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.docs-code-block figcaption {
+  align-items: center;
+  border-bottom: var(--rule) solid var(--color-border);
+  color: var(--color-text-muted);
+  display: flex;
+  font-size: var(--font-size-xs);
+  justify-content: space-between;
+  min-height: 2.25rem;
+  padding-left: 0.875rem;
+}
+
+.docs-code-block figcaption > span {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.docs-code-block button {
+  align-self: stretch;
+  background: transparent;
+  border: 0;
+  border-left: var(--rule) solid var(--color-border);
+  color: var(--color-text-soft);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  min-height: 2.25rem;
+  padding: 0 0.875rem;
+}
+
+.docs-code-block button:hover,
+.docs-code-block button:focus-visible {
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+}
+
+.docs-code-block pre {
+  background: transparent;
+  border: 0;
+  margin: 0;
+  padding: 1rem;
+}
+
+.docs-code-block code {
+  background: transparent;
+  border: 0;
+  color: var(--color-text-reader);
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: var(--font-size-sm);
+  line-height: 1.65;
+  padding: 0;
+}
+
+.docs-code-block .hljs-comment,
+.docs-code-block .hljs-quote {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.docs-code-block .hljs-keyword,
+.docs-code-block .hljs-selector-tag,
+.docs-code-block .hljs-literal,
+.docs-code-block .hljs-built_in,
+.docs-code-block .hljs-type {
+  color: var(--color-accent-strong);
+  font-weight: 700;
+}
+
+.docs-code-block .hljs-string,
+.docs-code-block .hljs-attr,
+.docs-code-block .hljs-template-variable,
+.docs-code-block .hljs-regexp {
+  color: var(--color-accent);
+}
+
+.docs-code-block .hljs-title,
+.docs-code-block .hljs-section,
+.docs-code-block .hljs-name,
+.docs-code-block .hljs-selector-id,
+.docs-code-block .hljs-selector-class {
+  color: var(--color-text);
+  font-weight: 700;
+}
+
+.docs-code-block .hljs-number,
+.docs-code-block .hljs-symbol,
+.docs-code-block .hljs-variable,
+.docs-code-block .hljs-meta {
+  color: var(--color-text-soft);
 }
 
 .docs-markdown table {
@@ -4387,18 +4447,6 @@ kbd {
 
   .docs-article {
     padding: 1rem 1rem 3rem;
-  }
-
-  .docs-document-meta {
-    align-items: flex-start;
-    gap: 0.5rem;
-    margin-bottom: 1.25rem;
-  }
-
-  .docs-document-meta > div {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 0.125rem;
   }
 
   .docs-markdown {

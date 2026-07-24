@@ -1,0 +1,169 @@
+name: Publish Cargo workspace
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Stable release tag (for example, v2.0.1)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  cargo-publish:
+    name: Publish ${{ inputs.tag }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out tagged sources
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: 1.97.0
+
+      - name: Verify tag, versions, and public GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$RELEASE_TAG"
+          version="${tag#v}"
+
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Cargo publication requires a stable v-prefixed semantic version tag." >&2
+            exit 1
+          fi
+
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "Cargo release tags must belong to protected main." >&2
+            exit 1
+          fi
+
+          package_report="$(
+            cargo metadata --locked --no-deps --format-version 1 |
+              jq -r --arg version "$version" '
+                [.packages[]
+                  | select(.name == "research"
+                      or .name == "research-domain"
+                      or .name == "research-store")]
+                | if length != 3 then
+                    "expected three release packages"
+                  elif any(.version != $version) then
+                    map("\(.name)=\(.version)") | join(", ")
+                  else
+                    empty
+                  end'
+          )"
+          if [[ -n "$package_report" ]]; then
+            echo "Package versions do not match $version: $package_report" >&2
+            exit 1
+          fi
+
+          release="$(gh release view "$tag" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json isDraft,isPrerelease,tagName)"
+          if [[ "$(jq -r '.isDraft' <<<"$release")" != false ||
+                "$(jq -r '.isPrerelease' <<<"$release")" != false ||
+                "$(jq -r '.tagName' <<<"$release")" != "$tag" ]]; then
+            echo "Publish and verify the matching stable GitHub release first." >&2
+            exit 1
+          fi
+
+      - name: Publish exact workspace packages
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$RELEASE_TAG"
+          version="${version#v}"
+          user_agent='ResearchPocket cargo release (https://github.com/ResearchPocket/researchpocket.github.io)'
+
+          remote_checksum() {
+            local crate_name="$1"
+            curl --fail --silent --show-error \
+              --user-agent "$user_agent" \
+              "https://crates.io/api/v1/crates/$crate_name" 2>/dev/null |
+              jq -r --arg version "$version" \
+                '.versions[]? | select(.num == $version) | .checksum' |
+              head -n 1
+          }
+
+          publish_one() {
+            local crate_name="$1"
+            local archive="target/package/$crate_name-$version.crate"
+            local packaged=false
+            for package_attempt in {1..10}; do
+              if cargo package --locked --no-verify -p "$crate_name"; then
+                packaged=true
+                break
+              fi
+              if [[ "$package_attempt" -eq 10 ]]; then
+                echo "Failed to package $crate_name $version after registry retries." >&2
+                return 1
+              fi
+              sleep 15
+            done
+            if [[ "$packaged" != true ]]; then
+              return 1
+            fi
+            local expected_checksum
+            expected_checksum="$(sha256sum "$archive" | cut -d ' ' -f 1)"
+
+            for attempt in {1..10}; do
+              local existing_checksum
+              existing_checksum="$(remote_checksum "$crate_name" || true)"
+              if [[ -n "$existing_checksum" ]]; then
+                if [[ "$existing_checksum" == "$expected_checksum" ]]; then
+                  echo "$crate_name $version already exists with the expected checksum."
+                  return 0
+                fi
+                echo "$crate_name $version exists with different bytes." >&2
+                return 1
+              fi
+
+              if cargo publish --locked -p "$crate_name"; then
+                echo "Uploaded $crate_name $version; waiting for registry visibility."
+              elif [[ "$attempt" -eq 10 ]]; then
+                echo "Failed to publish $crate_name $version after bounded retries." >&2
+                return 1
+              fi
+              sleep 15
+            done
+
+            echo "$crate_name $version did not become visible with the expected checksum." >&2
+            return 1
+          }
+
+          publish_one research-domain
+          publish_one research-store
+          publish_one research
+
+      - name: Install the published CLI
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$RELEASE_TAG"
+          version="${version#v}"
+          install_root="$RUNNER_TEMP/research-cargo-install"
+          cargo install --locked --version "=$version" --root "$install_root" research
+          if [[ "$("$install_root/bin/research" --version)" != "research $version" ]]; then
+            echo "The installed registry binary does not match the release version." >&2
+            exit 1
+          fi

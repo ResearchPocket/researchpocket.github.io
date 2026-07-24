@@ -1,9 +1,12 @@
 [package]
 name = "research-domain"
-version = "0.0.0"
+version = "2.0.1"
 edition = "2024"
 rust-version = "1.94"
-publish = false
+authors = ["KorigamiK <korigamik.is-a.dev>"]
+license = "Apache-2.0"
+repository = "https://github.com/ResearchPocket/researchpocket.github.io"
+description = "Shared CRDT domain and immutable synchronization protocol for ResearchPocket."
 
 [lib]
 crate-type = ["cdylib", "rlib"]
