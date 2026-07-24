@@ -1,7 +1,7 @@
 {
   "name": "research-pocket-web",
   "private": true,
-  "version": "2.0.0",
+  "version": "2.0.1",
   "type": "module",
   "scripts": {
     "dev": "npm run wasm && vite",
@@ -15,6 +15,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "highlight.js": "11.11.1",
     "idb": "8.0.3",
     "react": "19.2.7",
     "react-dom": "19.2.7",

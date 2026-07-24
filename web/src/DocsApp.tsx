@@ -1,4 +1,6 @@
 import {
+  Children,
+  isValidElement,
   type MouseEvent as ReactMouseEvent,
   useDeferredValue,
   useEffect,
@@ -7,6 +9,7 @@ import {
   useState,
 } from "react";
 import type { Components } from "react-markdown";
+import { HighlightedCodeBlock } from "./components/HighlightedCodeBlock.tsx";
 import { MarkdownDocument } from "./components/MarkdownDocument.tsx";
 import {
   type ReferenceDocument,
@@ -51,7 +54,7 @@ export function DocsApp() {
     () =>
       normalizedQuery
         ? referenceDocuments.filter((document) =>
-            [document.title, document.description, document.status, document.source]
+            [document.title, document.description, document.source]
               .join("\n")
               .toLocaleLowerCase()
               .includes(normalizedQuery),
@@ -81,7 +84,7 @@ export function DocsApp() {
   }, []);
 
   useEffect(() => {
-    document.title = `${selectedDocument.title}: ResearchPocket reference`;
+    document.title = `${selectedDocument.title}: ResearchPocket docs`;
     const canonical = document.querySelector<HTMLLinkElement>('link[rel="canonical"]');
     const description = document.querySelector<HTMLMetaElement>('meta[name="description"]');
     if (canonical) {
@@ -174,14 +177,14 @@ export function DocsApp() {
   return (
     <div className="docs-app">
       <a className="skip-link" href="#docs-content">
-        Skip to reference
+        Skip to guide
       </a>
 
       <header className="docs-header">
         <a className="docs-brand" href="../">
           <span aria-hidden="true" className="brand-mark">rp</span>
           <span>ResearchPocket</span>
-          <small>Reference</small>
+          <small>Docs</small>
         </a>
         <nav aria-label="Site navigation" className="docs-header-actions">
           <a className="docs-header-link" href="../overview/">Overview</a>
@@ -212,13 +215,13 @@ export function DocsApp() {
           id="docs-navigation"
         >
           <div className="docs-search">
-            <label htmlFor="docs-search">Find a page</label>
+            <label htmlFor="docs-search">Search docs</label>
             <div>
               <input
                 autoComplete="off"
                 id="docs-search"
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search the reference"
+                placeholder="Search the guide"
                 ref={searchRef}
                 type="search"
                 value={query}
@@ -228,7 +231,7 @@ export function DocsApp() {
             <p>{matchingDocuments.length} of {referenceDocuments.length} pages</p>
           </div>
 
-          <nav aria-label="Reference pages" className="docs-nav">
+          <nav aria-label="Guide pages" className="docs-nav">
             {referenceSections.map((section) => {
               const sectionDocuments = matchingDocuments.filter(
                 (document) => document.section === section.id,
@@ -245,7 +248,6 @@ export function DocsApp() {
                       onClick={(event) => handleDocumentClick(event, document.id)}
                     >
                       <span>{document.title}</span>
-                      <small>{document.status}</small>
                     </a>
                   ))}
                 </section>
@@ -266,14 +268,6 @@ export function DocsApp() {
           tabIndex={-1}
         >
           <article className="docs-article">
-            <header className="docs-document-meta">
-              <div>
-                <span>{sectionLabel(selectedDocument.section)}</span>
-                <strong>{selectedDocument.status}</strong>
-              </div>
-              <a href={`${SOURCE_ROOT}${selectedDocument.sourcePath}`}>View source ↗</a>
-            </header>
-
             <MarkdownDocument
               className="reader-markdown docs-markdown"
               components={markdownComponents}
@@ -385,6 +379,19 @@ function createMarkdownComponents(
     h6: ({ children, node, ...props }) => (
       <h6 {...props} id={headingId(node?.position?.start.line, headingIds)}>{children}</h6>
     ),
+    pre: ({ children }) => {
+      const child = Children.toArray(children)[0];
+      if (isValidElement<{ children?: unknown; className?: string }>(child)) {
+        const language = child.props.className?.match(/(?:^|\s)language-([\w-]+)/)?.[1];
+        return (
+          <HighlightedCodeBlock
+            code={String(child.props.children ?? "").replace(/\n$/, "")}
+            language={language}
+          />
+        );
+      }
+      return <pre>{children}</pre>;
+    },
   };
 }
 
@@ -512,8 +519,4 @@ function canonicalDocumentHref(documentId: string) {
   return documentId === DEFAULT_DOCUMENT_ID
     ? window.location.pathname
     : documentHref(documentId);
-}
-
-function sectionLabel(sectionId: string) {
-  return referenceSections.find((section) => section.id === sectionId)?.label ?? "Reference";
 }

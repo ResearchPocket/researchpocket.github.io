@@ -51,6 +51,10 @@ release requires an explicit workspace-publication design; it must not silently
 publish internal crates or substitute registry versions for reviewed path
 dependencies.
 
+[ADR 0007](./ADR_0007_CARGO_WORKSPACE_PUBLICATION.md) subsequently defines that
+workspace-publication design for patch release 2.0.1. This paragraph remains
+the distribution decision for the immutable 2.0.0 tag.
+
 The binary release workflow continues to stage every tag as a draft. Tags
 containing a prerelease suffix are marked prerelease; stable tags are not.
 Maintainers inspect artifacts and checksums before publishing a stable draft as
@@ -65,8 +69,9 @@ latest.
 - Users who need local loopback serving, collections, selective publication,
   broader import/export, or repository profiles must wait for a later release.
 - The `research` crate on crates.io remains on its historical version; 2.0
-  installation instructions point only to verified GitHub assets or tagged
-  source.
+  installation instructions initially point only to verified GitHub assets or
+  tagged source. Patch release 2.0.1 supersedes this consequence through ADR
+  0007.
 - No protocol version, CRDT schema, SQLite schema, or immutable update bytes
   change solely because of the stable version label.
 
