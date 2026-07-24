@@ -207,6 +207,23 @@ impl Library {
             .map_err(loro_error)
     }
 
+    /// Rewrites a note by splicing only the range that actually changed.
+    ///
+    /// Replacing the whole range would carry the entire note in every update
+    /// and would make two devices editing different regions conflict over the
+    /// full text instead of merging.
+    pub fn set_note(
+        &self,
+        item_id: &str,
+        current: &str,
+        replacement: &str,
+    ) -> DomainResult<()> {
+        let Some(splice) = TextSplice::between(current, replacement) else {
+            return Ok(());
+        };
+        self.splice_note_utf16(item_id, splice.position, splice.length, &splice.insert)
+    }
+
     pub fn write_url(&self, item_id: &str, revision_id: &str, value: &str) -> DomainResult<()> {
         validate_item_url(value)?;
         self.write_scalar(item_id, URL, revision_id, value.to_owned())
@@ -486,6 +503,63 @@ fn validate_tag(tag: &str) -> DomainResult<String> {
 
 fn operation_id(prefix: &str, suffix: &str) -> String {
     format!("{prefix}/{suffix}")
+}
+
+/// The narrowest UTF-16 splice that turns one string into another.
+#[derive(Debug, PartialEq, Eq)]
+pub struct TextSplice {
+    /// Offset in UTF-16 code units where the replacement begins.
+    pub position: usize,
+    /// Number of UTF-16 code units to remove.
+    pub length: usize,
+    /// Text to insert at `position`.
+    pub insert: String,
+}
+
+fn is_low_surrogate(unit: u16) -> bool {
+    (0xDC00..=0xDFFF).contains(&unit)
+}
+
+impl TextSplice {
+    /// Returns `None` when the two strings are already equal.
+    ///
+    /// Boundaries never fall between a surrogate pair, so the removed range and
+    /// the inserted text are always well-formed UTF-16.
+    pub fn between(current: &str, replacement: &str) -> Option<Self> {
+        if current == replacement {
+            return None;
+        }
+        let old: Vec<u16> = current.encode_utf16().collect();
+        let new: Vec<u16> = replacement.encode_utf16().collect();
+        let shortest = old.len().min(new.len());
+
+        let mut prefix = 0;
+        while prefix < shortest && old[prefix] == new[prefix] {
+            prefix += 1;
+        }
+        // A boundary that lands on a low surrogate would split the pair whose
+        // high half is already inside the prefix.
+        if prefix < shortest && is_low_surrogate(old[prefix]) {
+            prefix -= 1;
+        }
+
+        let mut suffix = 0;
+        while suffix < shortest - prefix
+            && old[old.len() - suffix - 1] == new[new.len() - suffix - 1]
+        {
+            suffix += 1;
+        }
+        if suffix > 0 && is_low_surrogate(old[old.len() - suffix]) {
+            suffix -= 1;
+        }
+
+        Some(Self {
+            position: prefix,
+            length: old.len() - prefix - suffix,
+            insert: String::from_utf16(&new[prefix..new.len() - suffix])
+                .expect("surrogate pairs are kept whole"),
+        })
+    }
 }
 
 fn insert_boolean_dot(map: &LoroMap, dot: &str) -> DomainResult<()> {
