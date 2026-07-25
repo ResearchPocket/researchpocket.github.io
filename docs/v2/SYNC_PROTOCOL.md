@@ -86,7 +86,7 @@ sync/
 {
   "format": "researchpocket-sync",
   "protocol_version": 1,
-  "domain_schema_version": 2,
+  "domain_schema_version": 3,
   "loro_codec": "1.13.6",
   "required_features": [],
   "library_id": "019...",
@@ -111,7 +111,7 @@ An operation file is UTF-8 JSON containing one `UpdateEnvelope`:
 ```json
 {
   "protocol_version": 1,
-  "domain_schema_version": 2,
+  "domain_schema_version": 3,
   "loro_codec": "1.13.6",
   "required_features": [],
   "extensions": {},
@@ -155,7 +155,9 @@ changes validation or materialization must appear in sorted
 Envelopes produced before negotiation fields were added omit
 `domain_schema_version`, `loro_codec`, `required_features`, and `extensions`.
 Protocol-v1 readers interpret those omissions as schema 2, codec 1.13.6, and
-empty feature/extension sets. No other missing required field receives a
+empty feature/extension sets. Readers accept any schema at or below their own
+and reject only schemas from the future, so a repository written before a schema
+change keeps its history. No other missing required field receives a
 default.
 
 ## Operation pack
@@ -216,14 +218,15 @@ An invalid member rolls back the entire pack.
 ## Domain convergence rules
 
 The payload is an opaque Loro update. Git and the transport do not inspect or
-choose field values. Domain schema 2 applies these rules:
+choose field values. Domain schema 3 applies these rules:
 
 - **Identity and duplicate URLs:** items use UUIDv7 identity. Multiple items may
   have the same URL and remain visible until the owner explicitly curates them.
-- **Notes:** Loro character-level text. Concurrent edits retain independently
-  inserted characters rather than selecting one whole note.
-- **Scalars:** URL, nullable title, nullable excerpt, favorite, nullable
-  language, and original saved time are causal registers. Every immutable
+- **Notes and excerpts:** Loro character-level text. Concurrent edits retain
+  independently inserted characters rather than selecting one whole value. Text
+  has no empty-versus-absent distinction: a blank excerpt is an absent excerpt.
+- **Scalars:** URL, nullable title, favorite, nullable language, and original
+  saved time are causal registers. Every immutable
   revision records observed parent heads. The visible winner is deterministic,
   while all concurrent revisions remain recoverable.
 - **Tags:** exact-text add-wins observed-remove sets. Remove records all observed
@@ -242,7 +245,7 @@ choose field values. Domain schema 2 applies these rules:
 
 Collections and visibility require a future domain-schema/feature negotiation;
 protocol v1 reserves their convergence behavior but does not silently reinterpret
-schema-2 payloads. Publishers consume only the validated materialized visibility
+earlier payloads. Publishers consume only the validated materialized visibility
 and collection policy and fail closed on missing or unsupported state.
 
 ## Local transaction and receipts
@@ -363,7 +366,7 @@ A checkpoint is an immutable JSON envelope at
 ```json
 {
   "protocol_version": 1,
-  "domain_schema_version": 2,
+  "domain_schema_version": 3,
   "loro_codec": "1.13.6",
   "required_features": [],
   "library_id": "019...",

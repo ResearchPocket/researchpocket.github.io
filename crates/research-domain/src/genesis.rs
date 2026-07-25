@@ -45,7 +45,8 @@ impl LibraryGenesis {
         if self.protocol_version != PROTOCOL_VERSION {
             return Err(DomainError::UnsupportedProtocol(self.protocol_version));
         }
-        if self.domain_schema_version != DOMAIN_SCHEMA_VERSION {
+        // A repository written before a schema change must still open here.
+        if self.domain_schema_version > DOMAIN_SCHEMA_VERSION {
             return Err(DomainError::UnsupportedDomainSchema(
                 self.domain_schema_version,
             ));

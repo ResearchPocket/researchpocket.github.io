@@ -147,6 +147,11 @@ impl Library {
         self.note_mut(&seed.item_id)?
             .splice_utf16(0, 0, &seed.note)
             .map_err(loro_error)?;
+        // Creating the container even for a blank excerpt is what tells the
+        // projection this item was never a scalar register.
+        self.excerpt_mut(&seed.item_id)?
+            .splice_utf16(0, 0, seed.excerpt.as_deref().unwrap_or_default())
+            .map_err(loro_error)?;
         self.write_url(
             &seed.item_id,
             &operation_id(operation_prefix, URL),
@@ -156,11 +161,6 @@ impl Library {
             &seed.item_id,
             &operation_id(operation_prefix, TITLE),
             seed.title.as_deref(),
-        )?;
-        self.write_excerpt(
-            &seed.item_id,
-            &operation_id(operation_prefix, EXCERPT),
-            seed.excerpt.as_deref(),
         )?;
         self.write_favorite(
             &seed.item_id,
@@ -238,13 +238,46 @@ impl Library {
         self.write_scalar(item_id, TITLE, revision_id, value.map(str::to_owned))
     }
 
-    pub fn write_excerpt(
+    pub fn splice_excerpt_utf16(
         &self,
         item_id: &str,
-        revision_id: &str,
-        value: Option<&str>,
+        position: usize,
+        length: usize,
+        replacement: &str,
     ) -> DomainResult<()> {
-        self.write_scalar(item_id, EXCERPT, revision_id, value.map(str::to_owned))
+        self.excerpt_mut(item_id)?
+            .splice_utf16(position, length, replacement)
+            .map_err(loro_error)
+    }
+
+    /// Rewrites an excerpt by splicing only the range that actually changed.
+    ///
+    /// `current` is only consulted for libraries written before schema 3, where
+    /// the excerpt still lives in the scalar register and no text container
+    /// exists yet. The first edit after that migrates the value by writing it
+    /// once in full; every later edit is a minimal splice.
+    pub fn set_excerpt(
+        &self,
+        item_id: &str,
+        current: &str,
+        replacement: &str,
+    ) -> DomainResult<()> {
+        let Some(text) = self.excerpt_text(item_id)? else {
+            if current == replacement {
+                return Ok(());
+            }
+            // Creating the container here, and only here, keeps an untouched
+            // legacy item readable through its scalar register.
+            return self
+                .excerpt_mut(item_id)?
+                .splice_utf16(0, 0, replacement)
+                .map_err(loro_error);
+        };
+        let Some(splice) = TextSplice::between(&text.to_string(), replacement) else {
+            return Ok(());
+        };
+        text.splice_utf16(splice.position, splice.length, &splice.insert)
+            .map_err(loro_error)
     }
 
     pub fn write_favorite(
@@ -398,7 +431,7 @@ impl Library {
             let scalars = map_child(&item, SCALARS)?;
             let url = project_scalar::<String>(&scalars, URL)?;
             let title = project_scalar::<Option<String>>(&scalars, TITLE)?;
-            let excerpt = project_scalar::<Option<String>>(&scalars, EXCERPT)?;
+            let excerpt = project_excerpt(&item, &scalars)?;
             let favorite = project_scalar::<bool>(&scalars, FAVORITE)?;
             let language = project_scalar::<Option<String>>(&scalars, LANGUAGE)?;
             let saved_at = project_scalar::<i64>(&scalars, SAVED_AT)?;
@@ -423,7 +456,7 @@ impl Library {
             );
         }
         Ok(CanonicalProjection {
-            schema_version: 2,
+            schema_version: 3,
             items: projected,
         })
     }
@@ -439,6 +472,24 @@ impl Library {
         self.item_mut(item_id)?
             .ensure_mergeable_text(NOTE)
             .map_err(loro_error)
+    }
+
+    fn excerpt_mut(&self, item_id: &str) -> DomainResult<LoroText> {
+        self.item_mut(item_id)?
+            .ensure_mergeable_text(EXCERPT)
+            .map_err(loro_error)
+    }
+
+    /// Reads the excerpt container without creating it, so that merely looking
+    /// at a pre-schema-3 item never strands its scalar value.
+    fn excerpt_text(&self, item_id: &str) -> DomainResult<Option<LoroText>> {
+        match self.item_mut(item_id)?.get(EXCERPT) {
+            Some(ValueOrContainer::Container(Container::Text(text))) => Ok(Some(text)),
+            None => Ok(None),
+            _ => Err(DomainError::InvalidState(
+                "excerpt is not a text container".into(),
+            )),
+        }
     }
 
     fn scalar_revisions_mut(&self, item_id: &str, field: &str) -> DomainResult<LoroMap> {
@@ -638,6 +689,23 @@ where
     scalar_view(read_records(&revisions)?)
 }
 
+/// Reads the excerpt, falling back to the pre-schema-3 scalar register.
+///
+/// The fallback is read-only and derives from operations that are already in
+/// history, so two replicas that have never edited the item still agree without
+/// either of them writing a migration operation.
+fn project_excerpt(item: &LoroMap, scalars: &LoroMap) -> DomainResult<String> {
+    if let Some(ValueOrContainer::Container(Container::Text(text))) = item.get(EXCERPT) {
+        return Ok(text.to_string());
+    }
+    match scalars.get(EXCERPT) {
+        Some(_) => Ok(project_scalar::<Option<String>>(scalars, EXCERPT)?
+            .value
+            .unwrap_or_default()),
+        None => Ok(String::new()),
+    }
+}
+
 fn project_tags(tags: LoroMap) -> DomainResult<Vec<String>> {
     let mut visible = Vec::new();
     for tag in map_keys(&tags) {
@@ -660,4 +728,206 @@ fn project_tags(tags: LoroMap) -> DomainResult<Vec<String>> {
         }
     }
     Ok(visible)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ITEM: &str = "0197f2b5-93d7-7ad4-8c67-21e98f0c7341";
+
+    fn seeded(excerpt: &str) -> Library {
+        let library = Library::with_peer_id_for_fixture(101).expect("library");
+        library
+            .create_item(
+                &ItemSeed {
+                    item_id: ITEM.to_owned(),
+                    url: "https://example.com/one".to_owned(),
+                    title: None,
+                    excerpt: Some(excerpt.to_owned()),
+                    favorite: false,
+                    language: None,
+                    saved_at: 1_700_000_000,
+                    note: String::new(),
+                    tags: Vec::new(),
+                },
+                "device-base/00000000000000000001",
+            )
+            .expect("seed item");
+        library
+    }
+
+    /// Rewrites a seeded item into the shape a schema 2 client would have
+    /// written: an excerpt scalar register and no text container.
+    fn as_legacy(library: &Library, excerpt: &str) {
+        library
+            .write_scalar(
+                ITEM,
+                EXCERPT,
+                "device-base/00000000000000000001/excerpt",
+                Some(excerpt.to_owned()),
+            )
+            .expect("legacy scalar");
+        library
+            .item_mut(ITEM)
+            .expect("item")
+            .delete(EXCERPT)
+            .expect("drop the text container");
+    }
+
+    fn excerpt_of(library: &Library) -> String {
+        library
+            .canonical_projection()
+            .expect("projection")
+            .items
+            .get(ITEM)
+            .expect("item")
+            .excerpt
+            .clone()
+    }
+
+    #[test]
+    fn an_item_written_before_schema_3_still_reads_its_excerpt() {
+        let library = seeded("");
+        as_legacy(&library, "Legacy excerpt");
+
+        assert_eq!(excerpt_of(&library), "Legacy excerpt");
+    }
+
+    #[test]
+    fn reading_a_legacy_item_writes_nothing() {
+        let library = seeded("");
+        as_legacy(&library, "Legacy excerpt");
+
+        let before = library.export_snapshot().expect("snapshot");
+        assert_eq!(excerpt_of(&library), "Legacy excerpt");
+        let after = library.export_snapshot().expect("snapshot");
+
+        assert_eq!(
+            before, after,
+            "projecting a legacy excerpt must not produce an operation"
+        );
+    }
+
+    #[test]
+    fn the_first_edit_migrates_and_later_edits_are_splices() {
+        let excerpt = "Legacy excerpt".repeat(200);
+        let library = seeded("");
+        as_legacy(&library, &excerpt);
+
+        let migrating = format!("{excerpt}!");
+        let before_migration = library.version();
+        library
+            .set_excerpt(ITEM, &excerpt, &migrating)
+            .expect("migrating edit");
+        assert_eq!(excerpt_of(&library), migrating);
+
+        let migration_update = library
+            .export_envelope(
+                &before_migration,
+                "00000000-0000-7000-8000-000000000001",
+                "00000000-0000-7000-8000-000000000002",
+                1,
+                "2026-07-25T00:00:00Z",
+            )
+            .expect("envelope")
+            .payload
+            .len();
+
+        let spliced = format!("{migrating}?");
+        let before_splice = library.version();
+        library
+            .set_excerpt(ITEM, &migrating, &spliced)
+            .expect("splicing edit");
+        let splice_update = library
+            .export_envelope(
+                &before_splice,
+                "00000000-0000-7000-8000-000000000001",
+                "00000000-0000-7000-8000-000000000002",
+                2,
+                "2026-07-25T00:00:01Z",
+            )
+            .expect("envelope")
+            .payload
+            .len();
+
+        assert_eq!(excerpt_of(&library), spliced);
+        assert!(
+            splice_update < migration_update / 10,
+            "only the migrating write carries the whole excerpt: {migration_update} then {splice_update}"
+        );
+    }
+
+    #[test]
+    fn clearing_a_legacy_excerpt_leaves_it_blank() {
+        let library = seeded("");
+        as_legacy(&library, "Legacy excerpt");
+
+        library
+            .set_excerpt(ITEM, "Legacy excerpt", "")
+            .expect("clear");
+
+        assert_eq!(excerpt_of(&library), "");
+    }
+
+    #[test]
+    fn an_unchanged_edit_does_not_migrate() {
+        let library = seeded("");
+        as_legacy(&library, "Legacy excerpt");
+
+        let before = library.export_snapshot().expect("snapshot");
+        library
+            .set_excerpt(ITEM, "Legacy excerpt", "Legacy excerpt")
+            .expect("no-op edit");
+
+        assert_eq!(before, library.export_snapshot().expect("snapshot"));
+        assert_eq!(excerpt_of(&library), "Legacy excerpt");
+    }
+
+    #[test]
+    fn two_replicas_editing_one_excerpt_merge_their_text() {
+        let library = seeded("Shared");
+        let snapshot = library.export_snapshot().expect("snapshot");
+
+        let alice = Library::from_snapshot(&snapshot, 202).expect("alice");
+        let bob = Library::from_snapshot(&snapshot, 303).expect("bob");
+        alice
+            .set_excerpt(ITEM, "Shared", "Shared alice")
+            .expect("alice edit");
+        bob.set_excerpt(ITEM, "Shared", "Shared bob")
+            .expect("bob edit");
+
+        let merged = Library::from_snapshot(&snapshot, 404).expect("merged");
+        merged
+            .import_envelope(
+                &alice
+                    .export_envelope(
+                        &VersionVector::new(),
+                        "00000000-0000-7000-8000-000000000001",
+                        "00000000-0000-7000-8000-000000000202",
+                        1,
+                        "2026-07-25T00:00:00Z",
+                    )
+                    .expect("alice envelope"),
+            )
+            .expect("import alice");
+        merged
+            .import_envelope(
+                &bob.export_envelope(
+                    &VersionVector::new(),
+                    "00000000-0000-7000-8000-000000000001",
+                    "00000000-0000-7000-8000-000000000303",
+                    1,
+                    "2026-07-25T00:00:01Z",
+                )
+                .expect("bob envelope"),
+            )
+            .expect("import bob");
+
+        let merged_excerpt = excerpt_of(&merged);
+        assert!(
+            merged_excerpt.contains("alice") && merged_excerpt.contains("bob"),
+            "concurrent excerpt edits merge rather than compete: {merged_excerpt:?}"
+        );
+    }
 }

@@ -503,12 +503,12 @@ impl App {
                     .is_some_and(|item| item.state == "active")
                 {
                     let item = self.selected_item().cloned().expect("selected active item");
-                    match store.item_excerpt_revision(&item.id).await {
-                        Ok(expected_excerpt_revision) => {
+                    match store.item_excerpt_text(&item.id).await {
+                        Ok(expected_excerpt) => {
                             self.mode = Mode::ConfirmForceEnrich(ForceEnrichmentConfirmation {
                                 item_id: item.id,
                                 title: item.title,
-                                expected_excerpt_revision,
+                                expected_excerpt,
                             });
                         }
                         Err(error) => self.notice_error(error),
@@ -648,7 +648,7 @@ impl App {
             target.item_id,
             "Excerpt replacement",
             true,
-            Some(target.expected_excerpt_revision),
+            Some(target.expected_excerpt),
         );
     }
 
@@ -724,7 +724,7 @@ impl App {
         item_id: String,
         action: &'static str,
         replace_excerpt: bool,
-        expected_excerpt_revision: Option<String>,
+        expected_excerpt: Option<String>,
     ) {
         let data_dir = data_dir.to_path_buf();
         let preferred_id = item_id.clone();
@@ -749,7 +749,7 @@ impl App {
                                 &data_dir,
                                 &item_id,
                                 replace_excerpt,
-                                expected_excerpt_revision,
+                                expected_excerpt,
                             )
                             .await
                         };
@@ -1008,7 +1008,7 @@ struct BackgroundCompletion {
 struct ForceEnrichmentConfirmation {
     item_id: String,
     title: Option<String>,
-    expected_excerpt_revision: String,
+    expected_excerpt: String,
 }
 
 struct ItemForm {

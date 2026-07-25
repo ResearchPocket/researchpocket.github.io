@@ -201,7 +201,8 @@ async fn local_mutations_are_atomic_durable_and_lifecycle_safe() {
         .await
         .expect("edit item");
     assert_eq!(edited.title.as_deref(), Some(""));
-    assert_eq!(edited.excerpt.as_deref(), Some(""));
+    // Excerpt is merged text since schema 3, so a blank excerpt is absent.
+    assert_eq!(edited.excerpt, None);
     assert_eq!(edited.language.as_deref(), Some(""));
     assert_eq!(edited.note.as_deref(), Some("human 😀 note"));
     assert!(edited.favorite);
@@ -393,7 +394,8 @@ async fn enrichment_is_durable_bounded_and_never_overwrites_authored_values() {
         .expect("created enrichment job");
     assert_eq!(queued.status, EnrichmentStatus::Pending);
     assert!(queued.target_title);
-    assert!(!queued.target_excerpt);
+    // Text cannot record "deliberately blank", so an empty excerpt is fillable.
+    assert!(queued.target_excerpt);
     assert!(queued.target_language);
     let claim = store
         .claim_next_due_enrichment_job()
@@ -462,17 +464,21 @@ async fn enrichment_is_durable_bounded_and_never_overwrites_authored_values() {
         .await
         .expect("apply still-missing enrichment fields");
     assert_eq!(applied.item.title, None);
-    assert_eq!(applied.item.excerpt.as_deref(), Some(""));
+    assert_eq!(applied.item.excerpt.as_deref(), Some("Fetched excerpt"));
     assert_eq!(applied.item.language.as_deref(), Some("en"));
     assert!(!applied.applied_title);
-    assert!(!applied.applied_excerpt);
+    assert!(applied.applied_excerpt);
     assert!(applied.applied_language);
     assert_eq!(applied.job.status, EnrichmentStatus::Succeeded);
     let cleared_requeue = store
         .queue_item_enrichment(&item.id, EnrichmentProvider::Direct)
         .await
         .expect("requeue after a human clear");
-    assert_eq!(cleared_requeue.status, EnrichmentStatus::Skipped);
+    // The excerpt on this item is the one enrichment wrote, so a requeue may
+    // still refresh it; the human-authored title stays off the target list.
+    assert_eq!(cleared_requeue.status, EnrichmentStatus::Pending);
+    assert!(!cleared_requeue.target_title);
+    assert!(cleared_requeue.target_excerpt);
     assert_eq!(
         store.item(&item.id).await.expect("read cleared item").title,
         None

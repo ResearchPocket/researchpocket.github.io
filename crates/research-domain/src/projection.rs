@@ -44,7 +44,8 @@ pub struct LifecycleView {
 pub struct CanonicalItem {
     pub url: ScalarView<String>,
     pub title: ScalarView<Option<String>>,
-    pub excerpt: ScalarView<Option<String>>,
+    /// Merged text since schema 3. Blank means "no excerpt".
+    pub excerpt: String,
     pub favorite: ScalarView<bool>,
     pub language: ScalarView<Option<String>>,
     pub saved_at: ScalarView<i64>,

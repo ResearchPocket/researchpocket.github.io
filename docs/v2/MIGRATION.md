@@ -68,7 +68,7 @@ reports zero newly imported rows and all accepted rows as skipped.
 | --- | --- |
 | `items.uri` | Preserved as the saved URL |
 | `items.title` | Preserved |
-| `items.excerpt` | Preserved |
+| `items.excerpt` | Preserved as merged text; a blank excerpt imports as absent |
 | `items.time_added` | Preserved as the original saved time |
 | `items.favorite` | Preserved |
 | `items.lang` | Preserved when present |

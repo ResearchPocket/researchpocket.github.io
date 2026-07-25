@@ -9,7 +9,7 @@ use sha2::{Digest, Sha256};
 use crate::{DomainError, DomainResult, identity::validate_uuid_v7};
 
 pub const PROTOCOL_VERSION: u8 = 1;
-pub const DOMAIN_SCHEMA_VERSION: u16 = 2;
+pub const DOMAIN_SCHEMA_VERSION: u16 = 3;
 pub const LORO_CODEC: &str = "1.13.6";
 
 /// Immutable transport envelope. Git stores this value but never merges it.
@@ -117,7 +117,9 @@ impl UpdateEnvelope {
         if self.protocol_version != PROTOCOL_VERSION {
             return Err(DomainError::UnsupportedProtocol(self.protocol_version));
         }
-        if self.domain_schema_version != DOMAIN_SCHEMA_VERSION {
+        // Older operations stay readable so a library that predates a schema
+        // change keeps its history; only versions from the future are rejected.
+        if self.domain_schema_version > DOMAIN_SCHEMA_VERSION {
             return Err(DomainError::UnsupportedDomainSchema(
                 self.domain_schema_version,
             ));

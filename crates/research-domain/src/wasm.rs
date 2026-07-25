@@ -474,7 +474,11 @@ fn apply_edit(
         library.write_title(item_id, &format!("{prefix}/title"), title.value())?;
     }
     if let Some(excerpt) = excerpt {
-        library.write_excerpt(item_id, &format!("{prefix}/excerpt"), excerpt.value())?;
+        library.set_excerpt(
+            item_id,
+            &current.excerpt,
+            excerpt.value().unwrap_or_default(),
+        )?;
     }
     if let Some(favorite) = favorite {
         library.write_favorite(item_id, &format!("{prefix}/favorite"), favorite)?;
@@ -556,7 +560,7 @@ fn browser_projection(projection: CanonicalProjection) -> BrowserProjection {
                 id,
                 url: item.url.value,
                 title: item.title.value,
-                excerpt: item.excerpt.value,
+                excerpt: (!item.excerpt.is_empty()).then_some(item.excerpt),
                 note: (!item.note.is_empty()).then_some(item.note),
                 favorite: item.favorite.value,
                 language: item.language.value,

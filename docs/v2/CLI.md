@@ -95,11 +95,14 @@ job queued instead of inviting a duplicate save.
 
 Enrichment can fill a missing title, excerpt, or language after the URL is
 durable. It never changes the URL, note, tags, favorite state, saved time, or
-lifecycle state. A field is eligible only when the exact missing-field revision
-recorded at queue time is still current when the result is applied. A later
-human clear/edit and a concurrent unsynchronized human revision both win.
-`--title ""`, `--excerpt ""`, and `--language ""` are authored values and are
-not replaced.
+lifecycle state. Title and language are eligible only when the exact missing-field revision
+recorded at queue time is still current when the result is applied. Excerpt is
+merged text rather than a register, so it is guarded by the excerpt text
+observed at queue time instead. A later human clear/edit and a concurrent
+unsynchronized human revision both win. `--title ""` and `--language ""` are
+authored values and are not replaced; `--excerpt ""` leaves the excerpt blank,
+which merged text cannot distinguish from unset, so enrichment may still fill
+it.
 
 ### Direct public-HTML provider
 
@@ -130,16 +133,16 @@ URL is sent to the configured Firecrawl service. ResearchPocket uses the narrow
 `/v2/scrape` REST endpoint through its existing HTTP client. It retains cleaned
 Markdown in a missing excerpt, plus normalized title and language metadata, and
 adds no Firecrawl Cargo dependency. Markdown is preserved up to 4 MiB inside the
-existing convergent excerpt register; the complete JSON response is limited to
+existing excerpt text; the complete JSON response is limited to
 8 MiB. Larger results fail explicitly and remain retryable without affecting the
 already-saved URL. The request includes the complete page instead of restricting
 extraction to main content, disables Firecrawl cache storage, requires target TLS
 validation, and uses the basic proxy tier.
 
 Passing an item ID and `--provider firecrawl` can upgrade an excerpt created by
-an earlier enrichment run. The replacement is allowed only while the current
-winning excerpt revision is enrichment-owned; authored excerpts and explicit
-clears remain ineligible.
+an earlier enrichment run. The replacement is allowed only while the excerpt still
+reads exactly as the previous enrichment run left it; an excerpt a human has
+since edited remains ineligible.
 
 To deliberately re-parse a saved URL and replace any current excerpt, including
 authored content, use the explicit replacement flag:
