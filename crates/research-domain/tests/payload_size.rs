@@ -56,7 +56,7 @@ fn measure(excerpt: &str, note: &str, edit: impl FnOnce(&Library)) -> Measured {
 }
 
 #[test]
-fn one_character_excerpt_edit_reports_its_true_cost() {
+fn one_character_excerpt_edit_sends_only_the_change() {
     let excerpt = paragraph(400);
     let edited = format!("{excerpt}.");
     println!(
@@ -66,8 +66,8 @@ fn one_character_excerpt_edit_reports_its_true_cost() {
 
     let measured = measure(&excerpt, "", |library| {
         library
-            .write_excerpt(ITEM, "device-a/00000000000000000002/excerpt", Some(&edited))
-            .expect("write excerpt");
+            .set_excerpt(ITEM, &excerpt, &edited)
+            .expect("set excerpt");
     });
 
     // Layer sizes on the way to GitHub.
@@ -84,8 +84,8 @@ fn one_character_excerpt_edit_reports_its_true_cost() {
     );
 
     assert!(
-        measured.update > excerpt.len(),
-        "a scalar rewrite carries the whole excerpt: update {} vs excerpt {}",
+        measured.update < excerpt.len() / 4,
+        "a minimal splice must not carry the whole excerpt: update {} vs excerpt {}",
         measured.update,
         excerpt.len()
     );
@@ -195,14 +195,13 @@ fn repeated_excerpt_edits_compress_well_at_rest() {
         .expect("seed item");
 
     let baseline = library.export_snapshot().expect("snapshot").len();
+    let mut current = excerpt.clone();
     for revision in 2..=21u64 {
+        let next = format!("{excerpt} revision {revision}");
         library
-            .write_excerpt(
-                ITEM,
-                &format!("device-a/{revision:020}/excerpt"),
-                Some(&format!("{excerpt} revision {revision}")),
-            )
-            .expect("write excerpt");
+            .set_excerpt(ITEM, &current, &next)
+            .expect("set excerpt");
+        current = next;
     }
     let after = library.export_snapshot().expect("snapshot").len();
 

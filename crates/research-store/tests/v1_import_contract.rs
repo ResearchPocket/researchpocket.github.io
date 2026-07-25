@@ -57,7 +57,8 @@ async fn import_v1_is_idempotent_read_only_and_preserves_fields() {
         .iter()
         .find(|item| item.title.as_deref() == Some("First save"))
         .expect("complete imported row");
-    assert_eq!(complete.excerpt.as_deref(), Some(""));
+    // Merged text has no empty-versus-absent distinction.
+    assert_eq!(complete.excerpt, None);
     assert_eq!(complete.note.as_deref(), Some("private authored note"));
     assert!(complete.favorite);
     assert_eq!(complete.language.as_deref(), Some(""));

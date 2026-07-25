@@ -162,6 +162,9 @@ type TextUpdate =
 
 const U64_MAX = 18_446_744_073_709_551_615n;
 
+/** Must track `DOMAIN_SCHEMA_VERSION` in the Rust core. */
+const DOMAIN_SCHEMA_VERSION = 3;
+
 let wasmPromise: Promise<unknown> | undefined;
 
 function ensureWasm(): Promise<unknown> {
@@ -805,7 +808,7 @@ async function replaceItems(
 }
 
 function materializeProjection(projection: RawProjection): PersistedItem[] {
-  if (projection.schema_version !== 2 || !Array.isArray(projection.items)) {
+  if (projection.schema_version !== DOMAIN_SCHEMA_VERSION || !Array.isArray(projection.items)) {
     throw new Error("The domain core returned an unsupported browser projection.");
   }
   const itemIds = new Set<string>();

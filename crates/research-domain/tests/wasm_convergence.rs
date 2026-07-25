@@ -25,7 +25,7 @@ fn browser_snapshot_boundary_preserves_the_mutation_and_replay_contract() {
         &materialize_library(&empty, "1").expect("materialize empty snapshot"),
     )
     .expect("empty projection JSON");
-    assert_eq!(empty_projection, json!({"schema_version": 2, "items": []}));
+    assert_eq!(empty_projection, json!({"schema_version": 3, "items": []}));
 
     let created = mutation(
         &empty,
@@ -97,7 +97,7 @@ fn browser_snapshot_boundary_preserves_the_mutation_and_replay_contract() {
     );
 
     let expected_projection = json!({
-        "schema_version": 2,
+        "schema_version": 3,
         "items": [{
             "id": ITEM_ID,
             "url": "https://example.com",
@@ -127,7 +127,7 @@ fn browser_snapshot_boundary_preserves_the_mutation_and_replay_contract() {
     assert_eq!(child_only["pending_indices"], json!([0]));
     assert_eq!(
         child_only["projection"],
-        json!({"schema_version": 2, "items": []})
+        json!({"schema_version": 3, "items": []})
     );
 
     let resolved: Value = serde_json::from_str(

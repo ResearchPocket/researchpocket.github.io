@@ -294,7 +294,7 @@ async fn explicit_enrichment_job(
     item_id: &str,
     requested_provider: Option<EnrichmentProvider>,
     replace_excerpt: bool,
-    expected_excerpt_revision: Option<&str>,
+    expected_excerpt: Option<&str>,
 ) -> CliResult<Option<EnrichmentClaim>> {
     let existing = store.enrichment_job(item_id).await?;
     if replace_excerpt {
@@ -315,13 +315,13 @@ async fn explicit_enrichment_job(
                 )
             })?,
         };
-        let queued = match expected_excerpt_revision {
-            Some(expected_excerpt_revision) => {
+        let queued = match expected_excerpt {
+            Some(expected_excerpt) => {
                 store
-                    .queue_item_enrichment_replacing_excerpt_if_revision(
+                    .queue_item_enrichment_replacing_excerpt_if_unchanged(
                         item_id,
                         provider,
-                        expected_excerpt_revision,
+                        expected_excerpt,
                     )
                     .await?
             }
@@ -454,7 +454,7 @@ pub(crate) async fn enrich_item_with_configured_provider(
     data_dir: &Path,
     item_id: &str,
     replace_excerpt: bool,
-    expected_excerpt_revision: Option<String>,
+    expected_excerpt: Option<String>,
 ) -> CliResult<EnrichmentAttemptOutcome> {
     let existing = store.enrichment_job(item_id).await?;
     let requested_provider = if !replace_excerpt
@@ -480,7 +480,7 @@ pub(crate) async fn enrich_item_with_configured_provider(
         item_id,
         requested_provider,
         replace_excerpt,
-        expected_excerpt_revision.as_deref(),
+        expected_excerpt.as_deref(),
     )
     .await
     {
@@ -1417,16 +1417,16 @@ mod tests {
         )
         .expect("configure provider");
 
-        let expected_excerpt_revision = store
-            .item_excerpt_revision(&item.id)
+        let expected_excerpt = store
+            .item_excerpt_text(&item.id)
             .await
-            .expect("excerpt revision");
+            .expect("excerpt text");
         let outcome = enrich_item_with_configured_provider(
             &store,
             directory.path(),
             &item.id,
             true,
-            Some(expected_excerpt_revision),
+            Some(expected_excerpt),
         )
         .await
         .expect("attempt forced enrichment");
@@ -1458,9 +1458,9 @@ mod tests {
             .await
             .expect("create changing save");
         let stale_revision = store
-            .item_excerpt_revision(&changed_item.id)
+            .item_excerpt_text(&changed_item.id)
             .await
-            .expect("confirmed excerpt revision");
+            .expect("confirmed excerpt text");
         store
             .edit_item(EditItemRequest {
                 item_id: changed_item.id.clone(),

@@ -136,10 +136,10 @@ impl V2Store {
                 )?;
             }
             if let Some(excerpt) = &request.excerpt {
-                library.write_excerpt(
+                library.set_excerpt(
                     &mutation_item_id,
-                    &format!("{prefix}/excerpt"),
-                    optional_text(excerpt),
+                    &current.excerpt,
+                    optional_text(excerpt).unwrap_or_default(),
                 )?;
             }
             if let Some(favorite) = request.favorite {
@@ -356,7 +356,7 @@ fn stored_item(
         id: item_id.to_owned(),
         url: item.url.value.clone(),
         title: item.title.value.clone(),
-        excerpt: item.excerpt.value.clone(),
+        excerpt: (!item.excerpt.is_empty()).then(|| item.excerpt.clone()),
         note: (!item.note.is_empty()).then(|| item.note.clone()),
         favorite: item.favorite.value,
         language: item.language.value.clone(),

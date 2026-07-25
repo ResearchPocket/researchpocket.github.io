@@ -36,27 +36,29 @@ impl V2Store {
             .await
     }
 
-    pub async fn queue_item_enrichment_replacing_excerpt_if_revision(
+    /// Queues a replacement only while the excerpt still reads as the caller saw
+    /// it. Excerpt is merged text since domain schema 3, so the text itself is
+    /// the compare-and-swap token that a revision ID used to be.
+    pub async fn queue_item_enrichment_replacing_excerpt_if_unchanged(
         &self,
         item_id: &str,
         provider: EnrichmentProvider,
-        expected_excerpt_revision: &str,
+        expected_excerpt_text: &str,
     ) -> StoreResult<EnrichmentJob> {
         self.queue_item_enrichment_with_options(
             item_id,
             provider,
             true,
-            Some(expected_excerpt_revision),
+            Some(expected_excerpt_text),
         )
         .await
     }
 
-    pub async fn item_excerpt_revision(&self, item_id: &str) -> StoreResult<String> {
+    pub async fn item_excerpt_text(&self, item_id: &str) -> StoreResult<String> {
         let mut connection = self.pool.acquire().await?;
         Ok(canonical_item_from_connection(&mut connection, item_id)
             .await?
-            .excerpt
-            .winner)
+            .excerpt)
     }
 
     async fn queue_item_enrichment_with_options(
@@ -64,19 +66,18 @@ impl V2Store {
         item_id: &str,
         provider: EnrichmentProvider,
         replace_excerpt: bool,
-        expected_excerpt_revision: Option<&str>,
+        expected_excerpt_text: Option<&str>,
     ) -> StoreResult<EnrichmentJob> {
         let mut connection = self.pool.acquire().await?;
         sqlx::query("BEGIN IMMEDIATE")
             .execute(&mut *connection)
             .await?;
         let result = async {
-            if let Some(expected_excerpt_revision) = expected_excerpt_revision
+            if let Some(expected_excerpt_text) = expected_excerpt_text
                 && canonical_item_from_connection(&mut connection, item_id)
                     .await?
                     .excerpt
-                    .winner
-                    != expected_excerpt_revision
+                    != expected_excerpt_text
             {
                 return Err(StoreError::StaleEdit);
             }
@@ -215,7 +216,8 @@ impl V2Store {
 #[derive(Clone)]
 struct EnrichmentTargets {
     title_revision: Option<String>,
-    excerpt_revision: Option<String>,
+    /// The excerpt text observed at queue time, not a revision ID.
+    excerpt_text: Option<String>,
     language_revision: Option<String>,
 }
 
@@ -234,20 +236,29 @@ async fn queue_enrichment_on_connection_with_options(
     replace_excerpt: bool,
 ) -> StoreResult<()> {
     let item = canonical_item_from_connection(connection, item_id).await?;
+    // Text carries no authorship, so the excerpt enrichment last wrote is the
+    // only way left to recognize one it is allowed to refresh.
+    let applied_excerpt: Option<String> = sqlx::query_scalar(
+        "SELECT applied_excerpt_text FROM item_enrichment_jobs WHERE item_id = ?",
+    )
+    .bind(item_id)
+    .fetch_optional(&mut *connection)
+    .await?
+    .flatten();
     let targets = EnrichmentTargets {
         title_revision: (item.title.value.is_none() && item.title.revisions.len() == 1)
             .then(|| item.title.winner.clone()),
-        excerpt_revision: (replace_excerpt
-            || (item.excerpt.value.is_none() && item.excerpt.revisions.len() == 1)
-            || enrichment_owned_revision(&item.excerpt.winner))
-        .then(|| item.excerpt.winner.clone()),
+        excerpt_text: (replace_excerpt
+            || item.excerpt.is_empty()
+            || applied_excerpt.as_deref() == Some(item.excerpt.as_str()))
+        .then(|| item.excerpt.clone()),
         language_revision: (item.language.value.is_none()
             && item.language.revisions.len() == 1)
             .then(|| item.language.winner.clone()),
     };
     let now = now_rfc3339();
     let has_targets = targets.title_revision.is_some()
-        || targets.excerpt_revision.is_some()
+        || targets.excerpt_text.is_some()
         || targets.language_revision.is_some();
     let status = if has_targets { "pending" } else { "skipped" };
     let next_attempt_at = has_targets.then_some(now.as_str());
@@ -255,7 +266,7 @@ async fn queue_enrichment_on_connection_with_options(
     let updated = sqlx::query(
         "INSERT INTO item_enrichment_jobs \
          (item_id, provider, status, attempts, target_title, target_excerpt, target_language, \
-          expected_title_revision, expected_excerpt_revision, expected_language_revision, \
+          expected_title_revision, expected_excerpt_text, expected_language_revision, \
           queued_at, updated_at, next_attempt_at, last_attempt_at, completed_at, lease_token, \
           lease_expires_at, last_error_kind) \
          VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, NULL, NULL) \
@@ -264,7 +275,7 @@ async fn queue_enrichment_on_connection_with_options(
           target_title = excluded.target_title, target_excerpt = excluded.target_excerpt, \
           target_language = excluded.target_language, \
           expected_title_revision = excluded.expected_title_revision, \
-          expected_excerpt_revision = excluded.expected_excerpt_revision, \
+          expected_excerpt_text = excluded.expected_excerpt_text, \
           expected_language_revision = excluded.expected_language_revision, \
           queued_at = excluded.queued_at, updated_at = excluded.updated_at, \
           next_attempt_at = excluded.next_attempt_at, last_attempt_at = NULL, \
@@ -276,10 +287,10 @@ async fn queue_enrichment_on_connection_with_options(
     .bind(provider.as_str())
     .bind(status)
     .bind(targets.title_revision.is_some())
-    .bind(targets.excerpt_revision.is_some())
+    .bind(targets.excerpt_text.is_some())
     .bind(targets.language_revision.is_some())
     .bind(&targets.title_revision)
-    .bind(&targets.excerpt_revision)
+    .bind(&targets.excerpt_text)
     .bind(&targets.language_revision)
     .bind(&now)
     .bind(&now)
@@ -315,8 +326,7 @@ async fn apply_enrichment_on_connection(
                 == Some(current_item.title.winner.as_str())
     });
     let excerpt = candidate(candidates.excerpt).filter(|_| {
-        current_job.expected_excerpt_revision.as_deref()
-            == Some(current_item.excerpt.winner.as_str())
+        current_job.expected_excerpt_text.as_deref() == Some(current_item.excerpt.as_str())
     });
     let language = candidate(candidates.language).filter(|_| {
         current_item.language.value.is_none()
@@ -325,13 +335,15 @@ async fn apply_enrichment_on_connection(
     });
     let applied_title = title.is_some();
     let applied_excerpt = excerpt.is_some();
+    // Remembered so a later re-queue can tell this excerpt came from a provider.
+    let applied_excerpt_text = excerpt.clone();
     let applied_language = language.is_some();
     let applied_any = applied_title || applied_excerpt || applied_language;
 
     let item = if applied_any {
         let mutation_item_id = item_id.to_owned();
         let expected_title_revision = current_job.expected_title_revision.clone();
-        let expected_excerpt_revision = current_job.expected_excerpt_revision.clone();
+        let expected_excerpt_text = current_job.expected_excerpt_text.clone();
         let expected_language_revision = current_job.expected_language_revision.clone();
         apply_item_mutation(connection, item_id, move |library, projection, prefix| {
             let item = projection
@@ -351,14 +363,10 @@ async fn apply_enrichment_on_connection(
                 )?;
             }
             if let Some(excerpt) = &excerpt {
-                if expected_excerpt_revision.as_deref() != Some(item.excerpt.winner.as_str()) {
+                if expected_excerpt_text.as_deref() != Some(item.excerpt.as_str()) {
                     return Err(StoreError::StaleEdit);
                 }
-                library.write_excerpt(
-                    &mutation_item_id,
-                    &enrichment_revision_id(prefix, "excerpt"),
-                    Some(excerpt),
-                )?;
+                library.set_excerpt(&mutation_item_id, &item.excerpt, excerpt)?;
             }
             if let Some(language) = &language {
                 if item.language.value.is_some()
@@ -393,6 +401,7 @@ async fn apply_enrichment_on_connection(
         "UPDATE item_enrichment_jobs SET status = ?, attempts = ?, updated_at = ?, \
          next_attempt_at = NULL, last_attempt_at = ?, completed_at = ?, last_error_kind = NULL \
          , lease_token = NULL, lease_expires_at = NULL \
+         , applied_excerpt_text = COALESCE(?, applied_excerpt_text) \
          WHERE item_id = ? AND status = 'in_progress' AND lease_token = ?",
     )
     .bind(status)
@@ -400,6 +409,7 @@ async fn apply_enrichment_on_connection(
     .bind(&now)
     .bind(&now)
     .bind(&now)
+    .bind(applied_excerpt_text.as_deref())
     .bind(item_id)
     .bind(lease_token)
     .execute(&mut *connection)
@@ -586,7 +596,7 @@ async fn optional_enrichment_job_record(
 ) -> StoreResult<Option<EnrichmentJobRecord>> {
     sqlx::query_as::<_, EnrichmentJobRow>(
         "SELECT item_id, provider, status, attempts, target_title, target_excerpt, \
-         target_language, expected_title_revision, expected_excerpt_revision, \
+         target_language, expected_title_revision, expected_excerpt_text, \
          expected_language_revision, queued_at, updated_at, next_attempt_at, last_attempt_at, \
          completed_at, lease_token, lease_expires_at, last_error_kind \
          FROM item_enrichment_jobs WHERE item_id = ?",
@@ -646,11 +656,6 @@ fn enrichment_revision_id(operation_prefix: &str, field: &str) -> String {
     // `!` sorts before every app-generated UUID revision ID. Existing V2 clients therefore
     // deterministically prefer a concurrent human revision without changing the CRDT schema.
     format!("{ENRICHMENT_REVISION_PREFIX}/{operation_prefix}/{field}")
-}
-
-fn enrichment_owned_revision(revision_id: &str) -> bool {
-    revision_id.starts_with(ENRICHMENT_REVISION_PREFIX)
-        && revision_id.as_bytes().get(ENRICHMENT_REVISION_PREFIX.len()) == Some(&b'/')
 }
 
 fn lifecycle_state_name(state: LifecycleState) -> &'static str {
@@ -724,7 +729,7 @@ struct EnrichmentJobRow {
     target_excerpt: bool,
     target_language: bool,
     expected_title_revision: Option<String>,
-    expected_excerpt_revision: Option<String>,
+    expected_excerpt_text: Option<String>,
     expected_language_revision: Option<String>,
     queued_at: String,
     updated_at: String,
@@ -739,7 +744,7 @@ struct EnrichmentJobRow {
 struct EnrichmentJobRecord {
     job: EnrichmentJob,
     expected_title_revision: Option<String>,
-    expected_excerpt_revision: Option<String>,
+    expected_excerpt_text: Option<String>,
     expected_language_revision: Option<String>,
     lease_token: Option<String>,
     lease_expires_at: Option<String>,
@@ -776,7 +781,7 @@ impl TryFrom<EnrichmentJobRow> for EnrichmentJobRecord {
                 last_error_kind: row.last_error_kind,
             },
             expected_title_revision: row.expected_title_revision,
-            expected_excerpt_revision: row.expected_excerpt_revision,
+            expected_excerpt_text: row.expected_excerpt_text,
             expected_language_revision: row.expected_language_revision,
             lease_token: row.lease_token,
             lease_expires_at: row.lease_expires_at,
