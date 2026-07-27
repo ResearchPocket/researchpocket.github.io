@@ -286,9 +286,15 @@ sanitized before entering retry state or diagnostics.
 
 The owner Reader treats retained Markdown as untrusted input. It renders parsed
 Markdown through React without raw HTML support, converts image syntax to inert
-text instead of issuing third-party requests, and opens explicit links in a new
-non-referring browsing context. The owner application's content security policy
-continues to deny arbitrary scripts, frames, objects, and remote images.
+text by default, and opens explicit links in a new non-referring browsing
+context. An owner may explicitly load HTTPS images for one item during the
+current Reader session. Relative sources resolve against the saved URL;
+malformed, credential-bearing, and non-HTTPS sources remain inert. Requests use
+lazy loading and `Referrer-Policy: no-referrer`, but the image host still learns
+the owner's IP address, user agent, request timing, and any cookies the browser
+chooses to attach. The UI discloses that network boundary before loading.
+Permission is forgotten when the Reader closes and never enters library state,
+sync, export, publication, or the service-worker cache.
 
 Custom protocol schemes do not authenticate their caller. A browser may ask
 before handing an external link to an application, but a permission remembered
@@ -316,7 +322,7 @@ Owner mode uses a self-only CSP equivalent to:
 default-src 'none';
 script-src 'self';
 style-src 'self';
-img-src 'self' data:;
+img-src 'self' https:;
 font-src 'self';
 connect-src https://api.github.com;
 worker-src 'self';
@@ -328,10 +334,12 @@ manifest-src 'self';
 upgrade-insecure-requests
 ```
 
-No inline/evaluated script, remote module, CDN asset, remotely hosted font, or
-runtime package download is permitted. Dependencies and licensed webfont assets
-are locked, bundled, and reviewed in the application repository. Production
-builds omit public source maps and disable console logging.
+No inline/evaluated script, remote module, CDN script, remotely hosted font, or
+runtime package download is permitted. The `https:` image exception applies only
+to owner-initiated Markdown images in the private Reader; public documents keep
+their self-only image policy. Dependencies and licensed webfont assets are
+locked, bundled, and reviewed in the application repository. Production builds
+omit public source maps and disable console logging.
 
 When the host cannot set a CSP response header, a CSP `meta` element must be the
 first applicable element in `<head>`. This is weaker: CSP Level 3 specifies that

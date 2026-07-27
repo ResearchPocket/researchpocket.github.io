@@ -97,6 +97,13 @@ It explicitly bypasses all GitHub API
 traffic, cross-origin traffic, and non-GET requests, so it cannot cache a token,
 private API response, or upload body.
 
+Retained Markdown images are inert by default. Inside the owner Reader, an
+explicit action may load HTTPS images for one item until that Reader closes.
+Relative sources resolve against the saved URL, invalid and non-HTTPS sources
+stay inert, and image requests carry no referrer. The permission is presentation
+state only: it is not persisted, synchronized, exported, or published. Public
+documentation Markdown never enables this owner-only path.
+
 The canonical deployment is the organization site at
 `https://researchpocket.github.io/`, with owner mode under `/app/`. Noindex
 compatibility documents at the former `/ResearchPocket/` paths preserve query
