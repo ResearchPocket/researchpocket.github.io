@@ -208,6 +208,19 @@ if (existsSync(appPath)) {
   if (!app.includes('name="robots" content="noindex, nofollow"')) {
     failures.push("The private owner application is missing its noindex policy");
   }
+  if (!app.includes("img-src 'self' https:")) {
+    failures.push("The owner application does not permit opted-in HTTPS images");
+  }
+}
+
+for (const document of ["index.html", "docs/index.html", "overview/index.html"]) {
+  const path = resolve(distRoot, document);
+  if (
+    existsSync(path) &&
+    readFileSync(path, "utf8").includes("img-src 'self' https:")
+  ) {
+    failures.push(`${document} unexpectedly permits remote images`);
+  }
 }
 
 const manifestPath = resolve(distRoot, "manifest.webmanifest");

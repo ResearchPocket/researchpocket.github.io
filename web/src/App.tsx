@@ -2075,9 +2075,21 @@ function ReaderView({
   onFavorite: (item: LibraryItemView) => Promise<void>;
   onSelect: (item: LibraryItemView) => void;
 }) {
+  const [itemsWithImages, setItemsWithImages] = useState<Set<string>>(
+    () => new Set(),
+  );
   const label = item.title?.trim() || item.url;
   const context = item.excerpt;
   const hasContext = Boolean(context?.trim());
+  const imagesAllowed = itemsWithImages.has(item.id);
+
+  function loadImagesForItem() {
+    setItemsWithImages((current) => {
+      const next = new Set(current);
+      next.add(item.id);
+      return next;
+    });
+  }
 
   return (
     <div className="reader-view" role="dialog" aria-modal="true" aria-labelledby="reader-title">
@@ -2114,7 +2126,16 @@ function ReaderView({
           {item.tags.length > 0 ? <p className="reader-tags">{item.tags.map((tag) => <span key={tag}>#{tag}</span>)}</p> : null}
           {item.note?.trim() ? <aside className="reader-note"><strong>Your note</strong><p>{item.note}</p></aside> : null}
           <div className="reader-body">
-            {hasContext && context ? <MarkdownDocument source={context} /> : <p>This save has no extracted preview yet. Open the original to read the full page, or add a private note to keep the context that matters.</p>}
+            {hasContext && context ? (
+              <MarkdownDocument
+                imageBaseUrl={item.url}
+                imagesAllowed={imagesAllowed}
+                onLoadImages={loadImagesForItem}
+                source={context}
+              />
+            ) : (
+              <p>This save has no extracted preview yet. Open the original to read the full page, or add a private note to keep the context that matters.</p>
+            )}
             <p className="reader-source">ResearchPocket keeps the URL and your authored context locally. The original page remains at <a href={item.url} rel="noreferrer" target="_blank">{readHostname(item.url)}</a>.</p>
           </div>
         </div>

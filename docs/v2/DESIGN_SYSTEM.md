@@ -57,8 +57,10 @@ or a pointer device.
 Use the bundled Berkeley Mono WOFF2 webfonts with `ui-monospace` and `monospace`
 as local fallbacks. Use semantic HTML, native controls where practical, and
 first-party text instead of icon packages. Owner mode may load the reviewed
-font files only from the same-origin Vite artifact; external font hosts, images,
-analytics, and runtime assets remain prohibited.
+font files only from the same-origin Vite artifact; external font hosts,
+analytics, and runtime assets remain prohibited. The one image exception is an
+explicit, transient per-item action in the private Markdown Reader, as recorded
+in ADR 0009; public surfaces never load Markdown images from remote hosts.
 
 ## Source architecture
 

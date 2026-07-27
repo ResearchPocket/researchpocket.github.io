@@ -2459,8 +2459,12 @@ kbd {
 }
 
 .reader-content {
-  max-width: 66ch;
+  box-sizing: border-box;
+  margin-inline: auto;
+  max-width: 80rem;
+  min-width: 0;
   padding: 2.25rem 3rem;
+  width: 100%;
 }
 
 .reader-meta {
@@ -2534,6 +2538,8 @@ kbd {
   font-size: 0.875rem;
   gap: 1rem;
   line-height: 1.75;
+  min-width: 0;
+  width: 100%;
 }
 
 .reader-body p {
@@ -2541,8 +2547,17 @@ kbd {
 }
 
 .reader-markdown {
+  max-width: 100%;
+  min-width: 0;
   overflow-wrap: anywhere;
+  width: 100%;
   word-break: break-word;
+}
+
+.reader-markdown > * {
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .reader-markdown > :first-child {
@@ -2621,6 +2636,7 @@ kbd {
   background: var(--color-surface-muted);
   border: var(--rule) solid var(--color-border);
   border-radius: var(--radius);
+  max-width: 100%;
   overflow-x: auto;
   padding: 0.875rem;
   white-space: pre;
@@ -2637,7 +2653,7 @@ kbd {
   display: block;
   max-width: 100%;
   overflow-x: auto;
-  width: max-content;
+  width: 100%;
 }
 
 .reader-markdown th,
@@ -2661,9 +2677,40 @@ kbd {
   color: var(--color-accent-strong);
 }
 
-.reader-markdown-image {
+.reader-markdown-image-placeholder {
+  border: var(--rule) solid var(--color-border);
+  color: var(--color-text-muted);
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.75rem;
+}
+
+.reader-markdown-image-placeholder > [role="img"] {
   color: var(--color-text-muted);
   font-style: italic;
+}
+
+.reader-markdown-image-consent {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: var(--font-size-xs);
+  gap: 0.5rem 0.75rem;
+}
+
+.reader-markdown-image-consent button {
+  background: transparent;
+  border: var(--rule) solid var(--color-border-strong);
+  color: var(--color-text);
+  min-height: 2.25rem;
+  padding: 0.25rem 0.625rem;
+}
+
+.reader-markdown-image {
+  border: var(--rule) solid var(--color-border);
+  display: block;
+  height: auto;
+  max-width: 100%;
 }
 
 .reader-source {
