@@ -477,8 +477,12 @@ save** option that uses the locally configured provider. `Ctrl+N` inserts a note
 or excerpt newline, Up/Down move between lines in those multiline fields,
 `Ctrl+W` deletes the previous word, `Ctrl+S` commits, and Escape cancels. Text
 inputs use the terminal's insert-mode bar cursor rather than inserting a cursor
-glyph into their values. Pasting multiline text into excerpts and notes preserves
-newlines; other fields normalize pasted newlines to spaces.
+glyph into their values. `Ctrl+G` opens the focused text input in the command
+configured by `VISUAL`, falling back to `EDITOR`; configured arguments such as
+`code --wait` are supported. ResearchPocket suspends its terminal screen while
+the editor runs and applies the edited file only when the editor exits
+successfully. Pasting or externally editing multiline excerpts and notes
+preserves newlines; other fields normalize newlines to spaces.
 The tags field accepts a convenient comma-separated list for ordinary tags or a
 JSON string array for exact commas and leading/trailing whitespace. Existing
 tags open as JSON, so saving an untouched field is lossless.
