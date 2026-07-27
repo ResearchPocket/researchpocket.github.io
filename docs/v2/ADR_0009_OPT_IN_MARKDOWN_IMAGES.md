@@ -3,6 +3,7 @@
 - Status: accepted
 - Date: 2026-07-27
 - Issue: [#125](https://github.com/ResearchPocket/researchpocket.github.io/issues/125)
+- Follow-up: [#127](https://github.com/ResearchPocket/researchpocket.github.io/issues/127)
 
 ## Context
 
@@ -42,6 +43,18 @@ change. The public landing, overview, and documentation documents retain
 self-only image policies, and their Markdown renderer receives no image-loading
 action. Cross-origin image requests bypass the service worker and are never
 stored in ResearchPocket's shell cache.
+
+After an image is loaded, its inline rendering is a keyboard-accessible control
+that can open a contained full-screen viewer. Closing the viewer restores focus
+to that image control. The viewer reuses the already validated URL and the
+current item consent; it does not broaden the allowed source or persist image
+bytes.
+
+The owner may choose a solid image background color for transparent images.
+This browser-local Appearance preference applies to inline and expanded images
+and survives reload. It is separate from the item-scoped permission: the color
+does not authorize a request and is never canonical item, sync, export, or
+publication data.
 
 ## Consequences
 

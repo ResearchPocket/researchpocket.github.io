@@ -7,7 +7,10 @@ import {
   useRef,
   useState,
 } from "react";
-import { MarkdownDocument } from "./components/MarkdownDocument.tsx";
+import {
+  MarkdownDocument,
+  type MarkdownImage,
+} from "./components/MarkdownDocument.tsx";
 import {
   type LibraryState,
   type PendingSyncChange,
@@ -75,6 +78,8 @@ interface UndoNotice {
 
 const DENSITY_STORAGE_KEY = "researchpocket.ui.density";
 const THEME_STORAGE_KEY = "researchpocket.ui.theme";
+const IMAGE_BACKGROUND_STORAGE_KEY = "researchpocket.ui.image-background";
+const DEFAULT_IMAGE_BACKGROUND = "#ffffff";
 
 const DEFAULT_THEME: ThemeColors = {
   text: "#f5f1e9",
@@ -186,6 +191,9 @@ export function App() {
   const [sortMode, setSortMode] = useState<SortMode>("recent");
   const [density, setDensity] = useState<Density>(() => readDensityPreference());
   const [theme, setTheme] = useState<ThemeColors>(() => readThemePreference());
+  const [imageBackground, setImageBackground] = useState(
+    () => readImageBackgroundPreference(),
+  );
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [visibleLimit, setVisibleLimit] = useState(LIST_BATCH_SIZE);
   const [view, setView] = useState<WorkspaceView>(() => readWorkspaceView());
@@ -252,6 +260,25 @@ export function App() {
       // The preference remains active for this tab when storage is unavailable.
     }
   }, [theme]);
+
+  useEffect(() => {
+    document.documentElement.style.setProperty(
+      "--reader-image-background",
+      imageBackground,
+    );
+    try {
+      if (imageBackground === DEFAULT_IMAGE_BACKGROUND) {
+        window.localStorage.removeItem(IMAGE_BACKGROUND_STORAGE_KEY);
+      } else {
+        window.localStorage.setItem(
+          IMAGE_BACKGROUND_STORAGE_KEY,
+          imageBackground,
+        );
+      }
+    } catch {
+      // The preference remains active for this tab when storage is unavailable.
+    }
+  }, [imageBackground]);
 
   useEffect(() => {
     function handleShortcut(event: KeyboardEvent) {
@@ -426,7 +453,7 @@ export function App() {
       () => libraryRepository.initialize(),
     );
     if (initialized) {
-      setView(targetView);
+      navigateToView(targetView);
     }
   }
 
@@ -843,7 +870,9 @@ export function App() {
           activeProfileId={activeProfileId}
           density={density}
           hidden={view !== "settings"}
+          imageBackground={imageBackground}
           onDensityChange={setDensity}
+          onImageBackgroundChange={setImageBackground}
           onProfilesChanged={refreshProfiles}
           onSwitchLibrary={switchLibrary}
           onThemeChange={setTheme}
@@ -1248,6 +1277,37 @@ function Welcome({
   onRestore: () => Promise<void>;
   restoreFirst: boolean;
 }) {
+  useEffect(() => {
+    if (busy) return;
+
+    function handleShortcut(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      const isInteractive =
+        target?.matches("button, a, input, textarea, select") ||
+        target?.isContentEditable;
+      if (
+        isInteractive ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.shiftKey
+      ) {
+        return;
+      }
+
+      if (event.key === "Enter") {
+        event.preventDefault();
+        void onInitialize();
+      } else if (event.key.toLowerCase() === "r") {
+        event.preventDefault();
+        void onRestore();
+      }
+    }
+
+    window.addEventListener("keydown", handleShortcut);
+    return () => window.removeEventListener("keydown", handleShortcut);
+  }, [busy, onInitialize, onRestore]);
+
   return (
     <main className="welcome-shell">
       <section aria-labelledby="welcome-heading" className="welcome-card">
@@ -1319,10 +1379,6 @@ function LibrarySettings({
     <div className="settings-group">
       <div>
         <h3>Libraries</h3>
-        <p>
-          Each library keeps its own saves, queue, and repository on this device.
-          Nothing is shared between them.
-        </p>
       </div>
 
       <div className="library-settings">
@@ -1425,7 +1481,9 @@ function SettingsPanel({
   activeProfileId,
   density,
   hidden,
+  imageBackground,
   onDensityChange,
+  onImageBackgroundChange,
   onProfilesChanged,
   onSwitchLibrary,
   onThemeChange,
@@ -1435,7 +1493,9 @@ function SettingsPanel({
   activeProfileId: string | null;
   density: Density;
   hidden: boolean;
+  imageBackground: string;
   onDensityChange: (density: Density) => void;
+  onImageBackgroundChange: (color: string) => void;
   onProfilesChanged: () => Promise<void>;
   onSwitchLibrary: (profileId: string) => Promise<void>;
   onThemeChange: (theme: ThemeColors) => void;
@@ -1455,7 +1515,6 @@ function SettingsPanel({
       <header className="settings-heading">
         <p className="eyebrow">Workspace</p>
         <h2 id="settings-heading">Settings</h2>
-        <p>Preferences stay in this browser and never become library data.</p>
       </header>
 
       <LibrarySettings
@@ -1468,13 +1527,11 @@ function SettingsPanel({
       <div className="settings-group">
         <div>
           <h3>Appearance</h3>
-          <p>Adjust list density and the colors used by this owner app.</p>
         </div>
         <div className="appearance-settings">
           <label className="setting-row" htmlFor="compact-mode">
             <span>
               <strong>Compact mode</strong>
-              <small>Fit more saves on screen by hiding previews and tightening rows.</small>
             </span>
             <input
               checked={density === "compact"}
@@ -1487,11 +1544,9 @@ function SettingsPanel({
           </label>
           <fieldset className="theme-editor">
             <legend>Color theme</legend>
-            <p>Choose a preset or customize its core palette. Supporting surfaces and borders adapt automatically.</p>
             <label className="theme-preset" htmlFor="theme-preset">
               <span>
                 <strong>Theme preset</strong>
-                <small>Start with a familiar editor palette.</small>
               </span>
               <select
                 id="theme-preset"
@@ -1536,13 +1591,37 @@ function SettingsPanel({
               Reset to default theme
             </button>
           </fieldset>
+          <fieldset className="theme-editor image-background-editor">
+            <legend>Transparent image background</legend>
+            <label htmlFor="image-background">
+              <span>Color</span>
+              <input
+                id="image-background"
+                onChange={(event) =>
+                  onImageBackgroundChange(event.target.value)
+                }
+                type="color"
+                value={imageBackground}
+              />
+              <code>{imageBackground}</code>
+            </label>
+            <button
+              className="secondary-button theme-reset"
+              disabled={imageBackground === DEFAULT_IMAGE_BACKGROUND}
+              onClick={() =>
+                onImageBackgroundChange(DEFAULT_IMAGE_BACKGROUND)
+              }
+              type="button"
+            >
+              Reset image background
+            </button>
+          </fieldset>
         </div>
       </div>
 
       <div className="settings-group">
         <div>
           <h3>Keyboard</h3>
-          <p>Shortcuts are available outside text fields.</p>
         </div>
         <dl className="shortcut-list">
           <div><dt>Command palette</dt><dd><kbd>Ctrl Shift P</kbd></dd></div>
@@ -1554,7 +1633,6 @@ function SettingsPanel({
       <div className="settings-group">
         <div>
           <h3>Local data</h3>
-          <p>Your library and this preference remain on this device unless you explicitly connect private sync.</p>
         </div>
         <p className="settings-status"><span aria-hidden="true" className="status-dot" /> Browser storage enabled</p>
       </div>
@@ -2078,16 +2156,47 @@ function ReaderView({
   const [itemsWithImages, setItemsWithImages] = useState<Set<string>>(
     () => new Set(),
   );
+  const [expandedImage, setExpandedImage] = useState<{
+    image: MarkdownImage;
+    opener: HTMLButtonElement;
+  } | null>(null);
+  const imageCloseRef = useRef<HTMLButtonElement | null>(null);
   const label = item.title?.trim() || item.url;
   const context = item.excerpt;
   const hasContext = Boolean(context?.trim());
   const imagesAllowed = itemsWithImages.has(item.id);
+
+  useEffect(() => {
+    setExpandedImage(null);
+  }, [item.id]);
+
+  useEffect(() => {
+    if (expandedImage) imageCloseRef.current?.focus();
+  }, [expandedImage]);
 
   function loadImagesForItem() {
     setItemsWithImages((current) => {
       const next = new Set(current);
       next.add(item.id);
       return next;
+    });
+  }
+
+  function closeExpandedImage() {
+    const opener = expandedImage?.opener;
+    const imageSrc = expandedImage?.image.src;
+    setExpandedImage(null);
+    window.requestAnimationFrame(() => {
+      if (opener?.isConnected) {
+        opener.focus();
+        return;
+      }
+      const matchingTrigger = [
+        ...document.querySelectorAll<HTMLButtonElement>(
+          ".reader-markdown-image-trigger",
+        ),
+      ].find((candidate) => candidate.dataset.imageSrc === imageSrc);
+      matchingTrigger?.focus();
     });
   }
 
@@ -2131,6 +2240,9 @@ function ReaderView({
                 imageBaseUrl={item.url}
                 imagesAllowed={imagesAllowed}
                 onLoadImages={loadImagesForItem}
+                onOpenImage={(image, opener) =>
+                  setExpandedImage({ image, opener })
+                }
                 source={context}
               />
             ) : (
@@ -2140,6 +2252,47 @@ function ReaderView({
           </div>
         </div>
       </article>
+      {expandedImage ? (
+        <div
+          aria-label={expandedImage.image.alt || "Expanded image"}
+          aria-modal="true"
+          className="reader-image-viewer"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) closeExpandedImage();
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              event.stopPropagation();
+              closeExpandedImage();
+            } else if (event.key === "Tab") {
+              event.preventDefault();
+              imageCloseRef.current?.focus();
+            }
+          }}
+          role="dialog"
+        >
+          <button
+            aria-label="Close expanded image"
+            className="reader-image-viewer-close"
+            onClick={closeExpandedImage}
+            ref={imageCloseRef}
+            type="button"
+          >
+            ×
+          </button>
+          <figure className="reader-image-viewer-stage">
+            <img
+              alt={expandedImage.image.alt}
+              referrerPolicy="no-referrer"
+              src={expandedImage.image.src}
+            />
+            {expandedImage.image.title ? (
+              <figcaption>{expandedImage.image.title}</figcaption>
+            ) : null}
+          </figure>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -2985,6 +3138,17 @@ function readThemePreference(): ThemeColors {
     // Invalid or unavailable storage falls back to the shipped theme.
   }
   return { ...DEFAULT_THEME };
+}
+
+function readImageBackgroundPreference() {
+  try {
+    const stored = window.localStorage.getItem(IMAGE_BACKGROUND_STORAGE_KEY);
+    return stored && /^#[0-9a-f]{6}$/i.test(stored)
+      ? stored
+      : DEFAULT_IMAGE_BACKGROUND;
+  } catch {
+    return DEFAULT_IMAGE_BACKGROUND;
+  }
 }
 
 function isThemeColors(value: unknown): value is ThemeColors {

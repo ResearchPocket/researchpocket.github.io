@@ -104,6 +104,19 @@ stay inert, and image requests carry no referrer. The permission is presentation
 state only: it is not persisted, synchronized, exported, or published. Public
 documentation Markdown never enables this owner-only path.
 
+Once loaded, an image is an accessible expansion control that opens a contained
+viewer. The viewer restores focus when closed and uses the same validated image
+URL, consent state, and no-referrer request policy. A browser-local Appearance
+preference controls the solid background behind inline and expanded images so
+transparent diagrams remain legible. That preference is ordinary local UI
+state; it does not enter item data, protocol updates, exports, or publications.
+
+On narrow viewports, the owner shell and Reader use document-level vertical
+scrolling. The bottom action row remains sticky, but it does not replace the
+document scroller; this lets mobile browsers respond normally to scroll gestures
+and collapse their own toolbar. The compact masthead keeps the Library identity,
+optional library selector, and local-state indicator on one row.
+
 The canonical deployment is the organization site at
 `https://researchpocket.github.io/`, with owner mode under `/app/`. Noindex
 compatibility documents at the former `/ResearchPocket/` paths preserve query

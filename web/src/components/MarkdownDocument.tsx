@@ -2,6 +2,12 @@ import { memo } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+export interface MarkdownImage {
+  alt: string;
+  src: string;
+  title?: string;
+}
+
 function inertImage(
   alt: string | undefined,
   title: string | undefined,
@@ -18,9 +24,14 @@ function inertImage(
       </span>
       {canLoad && onLoadImages ? (
         <span className="reader-markdown-image-consent">
-          Loading images contacts their hosts and can reveal your IP address.
-          <button onClick={onLoadImages} type="button">
-            Load images for this item
+          <span>Remote · shares IP when loaded</span>
+          <button
+            aria-label="Load images for this item. Loading contacts their hosts and can reveal your IP address."
+            onClick={onLoadImages}
+            title="Loading contacts image hosts and can reveal your IP address."
+            type="button"
+          >
+            Load item images
           </button>
         </span>
       ) : null}
@@ -48,6 +59,7 @@ export const MarkdownDocument = memo(function MarkdownDocument({
   imageBaseUrl,
   imagesAllowed = false,
   onLoadImages,
+  onOpenImage,
   source,
 }: {
   className?: string;
@@ -55,6 +67,7 @@ export const MarkdownDocument = memo(function MarkdownDocument({
   imageBaseUrl?: string;
   imagesAllowed?: boolean;
   onLoadImages?: () => void;
+  onOpenImage?: (image: MarkdownImage, opener: HTMLButtonElement) => void;
   source: string;
 }) {
   const safeMarkdownComponents: Components = {
@@ -68,16 +81,29 @@ export const MarkdownDocument = memo(function MarkdownDocument({
       if (!imagesAllowed || !imageUrl) {
         return inertImage(alt, title, Boolean(imageUrl), onLoadImages);
       }
+      const image = {
+        alt: alt ?? "",
+        src: imageUrl,
+        ...(title ? { title } : {}),
+      };
       return (
-        <img
-          alt={alt ?? ""}
-          className="reader-markdown-image"
-          decoding="async"
-          loading="lazy"
-          referrerPolicy="no-referrer"
-          src={imageUrl}
-          title={title}
-        />
+        <button
+          aria-label={`Expand image${alt ? `: ${alt}` : ""}`}
+          className="reader-markdown-image-trigger"
+          data-image-src={imageUrl}
+          onClick={(event) => onOpenImage?.(image, event.currentTarget)}
+          title={title ? `${title} — expand image` : "Expand image"}
+          type="button"
+        >
+          <img
+            alt={alt ?? ""}
+            className="reader-markdown-image"
+            decoding="async"
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            src={imageUrl}
+          />
+        </button>
       );
     },
   };
