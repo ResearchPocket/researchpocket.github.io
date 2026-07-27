@@ -3190,7 +3190,9 @@ kbd {
     position: static;
   }
 
-  .app-shell:has(> .reader-view) > :not(.reader-view) {
+  .app-shell:has(> .reader-view) > .skip-link,
+  .app-shell:has(> .reader-view) > .workspace-chrome,
+  .app-shell:has(> .reader-view) > .workspace-layout {
     display: none;
   }
 
