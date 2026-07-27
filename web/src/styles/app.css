@@ -2777,12 +2777,12 @@ kbd {
 
   /* The switcher takes its own full-width row so a library name is never
      squeezed against the brand and the status indicator. */
-  .masthead {
+  .masthead.has-switcher {
     flex-wrap: wrap;
     padding-bottom: var(--space-2);
   }
 
-  .masthead-actions {
+  .masthead-actions.has-switcher {
     flex: 1 0 100%;
     gap: var(--space-3);
     justify-content: space-between;

@@ -679,7 +679,7 @@ export function App() {
       </a>
 
       <div className="workspace-chrome">
-        <header className="masthead">
+        <header className={`masthead${profiles.length > 1 ? " has-switcher" : ""}`}>
           <button
             aria-label={view === "library" ? "ResearchPocket library" : "Back to library"}
             className="brand-lockup"
@@ -695,7 +695,7 @@ export function App() {
             )}
           </button>
 
-          <div className="masthead-actions">
+          <div className={`masthead-actions${profiles.length > 1 ? " has-switcher" : ""}`}>
             {profiles.length > 1 ? (
               <div className="library-switcher">
                 <select
