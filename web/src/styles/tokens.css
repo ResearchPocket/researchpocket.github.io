@@ -58,6 +58,8 @@
   --color-accent-soft: #243230;
   --color-reader-note: #20201a;
   --color-backdrop: color-mix(in srgb, var(--color-canvas) 52%, transparent);
+  --color-image-overlay: rgb(0 0 0 / 82%);
+  --reader-image-background: #ffffff;
   --color-danger: color-mix(in srgb, var(--primary) 62%, var(--accent));
   --color-danger-soft: color-mix(in srgb, var(--accent) 28%, var(--background));
   --color-focus: color-mix(in srgb, var(--accent) 62%, var(--text));
