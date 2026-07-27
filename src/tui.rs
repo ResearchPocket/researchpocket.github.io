@@ -1,7 +1,10 @@
 use std::collections::{BTreeSet, VecDeque};
+use std::env;
 use std::error::Error;
-use std::io::{self, IsTerminal, Stdout};
+use std::fs;
+use std::io::{self, IsTerminal, Stdout, Write};
 use std::path::Path;
+use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -58,7 +61,7 @@ pub async fn run(store: &V2Store, data_dir: &Path) -> TuiResult<()> {
         }
         match event::read()? {
             Event::Key(key) if key.kind == KeyEventKind::Press && app.accept_key_press(key) => {
-                app.handle_key(store, data_dir, key).await;
+                app.handle_key(store, data_dir, &mut terminal, key).await;
             }
             Event::Key(key) if key.kind == KeyEventKind::Repeat => {
                 app.note_key_repeat(key);
@@ -129,6 +132,48 @@ impl TerminalSession {
                 Err(error)
             }
         }
+    }
+
+    fn run_child(&mut self, command: &mut Command) -> io::Result<std::process::ExitStatus> {
+        if let Err(error) = self.suspend() {
+            let _ = self.resume();
+            return Err(error);
+        }
+
+        let child_result = command.status();
+        let resume_result = self.resume();
+        match (child_result, resume_result) {
+            (_, Err(error)) => Err(error),
+            (result, Ok(())) => result,
+        }
+    }
+
+    fn suspend(&mut self) -> io::Result<()> {
+        self.terminal.show_cursor()?;
+        execute!(
+            self.terminal.backend_mut(),
+            Show,
+            SetCursorStyle::DefaultUserShape,
+            DisableBracketedPaste,
+            LeaveAlternateScreen
+        )?;
+        disable_raw_mode()
+    }
+
+    fn resume(&mut self) -> io::Result<()> {
+        enable_raw_mode()?;
+        execute!(
+            self.terminal.backend_mut(),
+            EnterAlternateScreen,
+            EnableBracketedPaste,
+            SetCursorStyle::BlinkingBar,
+            Hide
+        )?;
+        // The child editor may have replaced every visible cell. Ratatui still
+        // remembers the frame from before suspension, so invalidate its cached
+        // previous buffer and make the next draw repaint the whole interface.
+        self.terminal.swap_buffers();
+        Ok(())
     }
 }
 
@@ -233,12 +278,22 @@ impl App {
         Ok(())
     }
 
-    async fn handle_key(&mut self, store: &V2Store, data_dir: &Path, key: KeyEvent) {
+    async fn handle_key(
+        &mut self,
+        store: &V2Store,
+        data_dir: &Path,
+        terminal: &mut TerminalSession,
+        key: KeyEvent,
+    ) {
         if control_shortcut(key) && key.code == KeyCode::Char('c') {
             self.should_quit = true;
             return;
         }
         self.notice = None;
+        if control_shortcut(key) && key.code == KeyCode::Char('g') {
+            self.edit_focused_text(terminal);
+            return;
+        }
 
         match &mut self.mode {
             Mode::Browse => self.handle_browse_key(store, data_dir, key).await,
@@ -357,7 +412,7 @@ impl App {
     }
 
     fn is_one_shot_key(&self, key: KeyEvent) -> bool {
-        if control_shortcut(key) && key.code == KeyCode::Char('c') {
+        if control_shortcut(key) && matches!(key.code, KeyCode::Char('c' | 'g')) {
             return true;
         }
         match &self.mode {
@@ -545,6 +600,27 @@ impl App {
             Mode::Form(form) => form.insert_text(text),
             Mode::SyncSetup(form) => form.insert_text(text),
             _ => {}
+        }
+    }
+
+    fn edit_focused_text(&mut self, terminal: &mut TerminalSession) {
+        let result = match &mut self.mode {
+            Mode::Search(input) => edit_text_input(terminal, input, false),
+            Mode::Form(form) if form.active < form.fields.len() => {
+                let field = &mut form.fields[form.active];
+                edit_text_input(terminal, &mut field.input, field.multiline)
+            }
+            Mode::SyncSetup(form) => {
+                edit_text_input(terminal, &mut form.fields[form.active].input, false)
+            }
+            Mode::Browse
+            | Mode::Form(_)
+            | Mode::ConfirmDelete
+            | Mode::ConfirmForceEnrich(_)
+            | Mode::Help => return,
+        };
+        if let Err(error) = result {
+            self.notice_error(error);
         }
     }
 
@@ -1264,6 +1340,12 @@ impl TextInput {
         self.chars.iter().collect()
     }
 
+    fn replace(&mut self, value: String) {
+        self.chars = value.chars().collect();
+        self.cursor = self.chars.len();
+        self.vertical_column = None;
+    }
+
     fn display_value(&self, focused: bool, max_width: usize) -> (String, u16) {
         let cursor_space = usize::from(focused);
         let rendered_width = UnicodeWidthStr::width(self.value().as_str()) + cursor_space;
@@ -1468,6 +1550,59 @@ impl TextInput {
     }
 }
 
+fn edit_text_input(
+    terminal: &mut TerminalSession,
+    input: &mut TextInput,
+    multiline: bool,
+) -> TuiResult<()> {
+    let editor = configured_editor()?;
+    let suffix = if multiline { ".md" } else { ".txt" };
+    let mut temporary = tempfile::Builder::new()
+        .prefix("researchpocket-editor-")
+        .suffix(suffix)
+        .tempfile()?;
+    temporary.write_all(input.value().as_bytes())?;
+    temporary.flush()?;
+    let path = temporary.into_temp_path();
+
+    let mut command = Command::new(&editor[0]);
+    command.args(&editor[1..]).arg(path.as_os_str());
+    let status = terminal.run_child(&mut command)?;
+    if !status.success() {
+        return Err(io::Error::other(format!("editor exited with {status}")).into());
+    }
+
+    let edited = fs::read_to_string(&path)?;
+    input.replace(normalize_editor_text(&edited, multiline));
+    Ok(())
+}
+
+fn configured_editor() -> TuiResult<Vec<String>> {
+    let configured = ["VISUAL", "EDITOR"]
+        .into_iter()
+        .find_map(|name| env::var(name).ok().filter(|value| !value.trim().is_empty()))
+        .ok_or_else(|| io::Error::other("set VISUAL or EDITOR to use Ctrl+G"))?;
+    parse_editor_command(&configured)
+}
+
+fn parse_editor_command(configured: &str) -> TuiResult<Vec<String>> {
+    let editor = shell_words::split(configured).map_err(|error| {
+        io::Error::other(format!("invalid VISUAL or EDITOR value: {error}"))
+    })?;
+    if editor.is_empty() {
+        return Err(io::Error::other("VISUAL or EDITOR cannot be blank").into());
+    }
+    Ok(editor)
+}
+
+fn normalize_editor_text(value: &str, multiline: bool) -> String {
+    if multiline {
+        value.replace("\r\n", "\n").replace('\r', "\n")
+    } else {
+        single_line(value)
+    }
+}
+
 fn render(frame: &mut Frame<'_>, app: &mut App) {
     let area = frame.area();
     frame.render_widget(
@@ -1498,7 +1633,7 @@ fn render(frame: &mut Frame<'_>, app: &mut App) {
     render_footer(frame, rows[2], app);
 
     match &app.mode {
-        Mode::Form(form) => render_form(frame, area, form),
+        Mode::Form(form) => render_form(frame, area, form, app.notice.as_ref()),
         Mode::SyncSetup(form) => render_sync_setup(frame, area, form, app.notice.as_ref()),
         Mode::ConfirmDelete => render_confirmation(frame, area, app.selected_item()),
         Mode::ConfirmForceEnrich(target) => {
@@ -1670,11 +1805,10 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
                 Span::styled("Search: ", Style::default().fg(Color::Cyan)),
                 Span::raw(terminal_safe(&value)),
                 Span::styled(
-                    app.notice
-                        .as_ref()
-                        .map_or("  Enter apply | Esc cancel".to_owned(), |notice| {
-                            format!("  error: {}", terminal_safe(&notice.text))
-                        }),
+                    app.notice.as_ref().map_or(
+                        "  Enter apply | Ctrl+G editor | Esc cancel".to_owned(),
+                        |notice| format!("  error: {}", terminal_safe(&notice.text)),
+                    ),
                     Style::default().fg(if app.notice.is_some() {
                         Color::Red
                     } else {
@@ -1723,9 +1857,9 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
     }
 }
 
-fn render_form(frame: &mut Frame<'_>, area: Rect, form: &ItemForm) {
+fn render_form(frame: &mut Frame<'_>, area: Rect, form: &ItemForm, notice: Option<&Notice>) {
     if area.width < 50 || area.height < 30 {
-        render_compact_form(frame, area, form);
+        render_compact_form(frame, area, form, notice);
         return;
     }
     let popup = centered_rect(area, 90, if form.can_enrich() { 36 } else { 34 });
@@ -1839,17 +1973,36 @@ fn render_form(frame: &mut Frame<'_>, area: Rect, form: &ItemForm) {
     } else {
         form.fields.len() + 1
     };
+    let instructions = notice.map_or_else(
+        || {
+            vec![
+                Line::from("Tab/Shift+Tab fields | Up/Down multiline | Ctrl+N newline"),
+                Line::from("Ctrl+W word | Ctrl+G editor | Ctrl+S save | Esc cancel"),
+            ]
+        },
+        |notice| {
+            vec![Line::styled(
+                terminal_safe(&notice.text),
+                Style::default().fg(if notice.error {
+                    Color::Red
+                } else {
+                    Color::Green
+                }),
+            )]
+        },
+    );
     frame.render_widget(
-        Paragraph::new(vec![
-            Line::from("Tab/Shift+Tab fields | Up/Down multiline | Ctrl+N newline"),
-            Line::from("Ctrl+W delete word | Ctrl+S save | Esc cancel"),
-        ])
-        .style(Style::default().fg(Color::DarkGray)),
+        Paragraph::new(instructions).style(Style::default().fg(Color::DarkGray)),
         rows[instructions_index],
     );
 }
 
-fn render_compact_form(frame: &mut Frame<'_>, area: Rect, form: &ItemForm) {
+fn render_compact_form(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    form: &ItemForm,
+    notice: Option<&Notice>,
+) {
     let popup = centered_rect(area, 48, 10);
     frame.render_widget(Clear, popup);
     let mut cursor = None;
@@ -1858,8 +2011,11 @@ fn render_compact_form(frame: &mut Frame<'_>, area: Rect, form: &ItemForm) {
             .input
             .current_line_value(usize::from(popup.width.saturating_sub(4)));
         cursor = Some(column);
+        let hint = notice.map_or("Ctrl+G editor | Tab fields | Ctrl+S save", |notice| {
+            notice.text.as_str()
+        });
         format!(
-            "{}\n\n{}\n\nFavorite: {} | Enrich: {}\nCtrl+W word | Tab fields | Ctrl+S save",
+            "{}\n\n{}\n\nFavorite: {} | Enrich: {}\n{}",
             field.label,
             terminal_safe(&value),
             if form.favorite { "yes" } else { "no" },
@@ -1867,7 +2023,8 @@ fn render_compact_form(frame: &mut Frame<'_>, area: Rect, form: &ItemForm) {
                 if form.enrich { "yes" } else { "no" }
             } else {
                 "n/a"
-            }
+            },
+            terminal_safe(hint)
         )
     } else if form.active == form.fields.len() {
         format!(
@@ -1952,7 +2109,7 @@ fn render_sync_setup(
     }
     frame.render_widget(
         Paragraph::new(
-            "Uses RESEARCHPOCKET_GITHUB_TOKEN or GH_TOKEN from this process.\nCtrl+W delete word | Tab fields | Ctrl+S connect and sync",
+            "Uses RESEARCHPOCKET_GITHUB_TOKEN or GH_TOKEN from this process.\nCtrl+G editor | Tab fields | Ctrl+S connect and sync",
         )
         .style(Style::default().fg(Color::DarkGray)),
         rows[2],
@@ -1989,7 +2146,7 @@ fn render_compact_sync_setup(
         Line::from(terminal_safe(&value)),
         Line::default(),
         Line::styled(
-            "Tab fields | Ctrl+S connect | Esc cancel",
+            "Ctrl+G editor | Tab fields | Ctrl+S connect",
             Style::default().fg(Color::DarkGray),
         ),
     ];
@@ -2074,7 +2231,7 @@ fn render_help(frame: &mut Frame<'_>, area: Rect) {
         frame.render_widget(Clear, popup);
         let help = [
             "j/k or arrows move | g/G first/last",
-            "a add | e edit | / search",
+            "a/e add/edit | / search | Ctrl+G editor",
             "E enrich | Ctrl+E replace excerpt",
             "s connect/sync",
             "Space favorite | x delete | r restore",
@@ -2111,8 +2268,8 @@ fn render_help(frame: &mut Frame<'_>, area: Rect) {
         "Forms",
         "  Tab/Shift+Tab fields                Space toggles options",
         "  Up/Down excerpt/note lines          Ctrl+N inserts newline",
-        "  Ctrl+W deletes previous word        Ctrl+S commits mutation",
-        "  Esc cancel",
+        "  Ctrl+W deletes previous word        Ctrl+G opens terminal editor",
+        "  Ctrl+S commits mutation             Esc cancels",
         "",
         "Enrichment uses the configured local provider. Sync uses a PAT from",
         "RESEARCHPOCKET_GITHUB_TOKEN or GH_TOKEN and never persists it.",
@@ -2392,5 +2549,31 @@ mod tests {
         assert_eq!(input.display_value(true, 20), ("alpha beta".to_owned(), 5));
         assert_eq!(input.rendered_value(), "alpha beta");
         assert_eq!(input.cursor_position(), (0, 5));
+    }
+
+    #[test]
+    fn editor_configuration_supports_arguments_without_shell_evaluation() {
+        assert_eq!(
+            parse_editor_command(r#""editor with spaces" --wait "profile name""#).unwrap(),
+            ["editor with spaces", "--wait", "profile name"]
+        );
+        assert!(parse_editor_command(r#""unterminated"#).is_err());
+    }
+
+    #[test]
+    fn editor_text_respects_the_field_line_policy() {
+        assert_eq!(
+            normalize_editor_text("first\r\nsecond\rthird", true),
+            "first\nsecond\nthird"
+        );
+        assert_eq!(
+            normalize_editor_text("first\r\nsecond\rthird", false),
+            "first second third"
+        );
+
+        let mut input = TextInput::new("old".to_owned());
+        input.replace("new\nvalue".to_owned());
+        assert_eq!(input.value(), "new\nvalue");
+        assert_eq!(input.cursor, input.chars.len());
     }
 }
