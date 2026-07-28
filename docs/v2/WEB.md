@@ -90,6 +90,24 @@ loads a remote third-party runtime script, font, image, analytics, or error
 reporter.
 Production builds omit source maps.
 
+The shared Markdown component parses `$...$` and `\(...\)` inline math plus
+`$$...$$` and `\[...\]` display math, then renders them with KaTeX. It also
+recognizes escaped vector sequences retained by Firecrawl, such as
+`\\x\_1, \\x\_2, \\ldots, \\x\_t`, without requiring a user to rewrite the
+excerpt. Source-specific color macros degrade to uncolored notation. For
+example, $E = mc^2$ remains in the text flow, while a display expression is
+contained horizontally on narrow screens:
+
+$$
+\int_0^1 x^2\,dx = \frac{1}{3}
+$$
+
+KaTeX emits semantic MathML for the browser to lay out with its native math
+support. Rendering therefore adds no KaTeX font payload or inline positioning
+styles and never loads a CDN, script, font, or service. Malformed expressions
+remain visible as source text instead of crashing the Reader. Code spans and
+fenced code blocks retain literal dollar signs and TeX.
+
 The document CSP allows only same-origin application resources and future
 connections to `https://api.github.com`. The service worker handles only GETs
 from pages controlled beneath `/app/` for same-origin shell resources and WASM.

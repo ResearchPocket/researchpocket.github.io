@@ -9,7 +9,7 @@
     "check:design": "node ./scripts/check-design-system.mjs",
     "check:dist": "node ./scripts/check-dist.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test src/data/*.test.mjs",
+    "test": "node --experimental-strip-types --test src/data/*.test.mjs src/components/*.test.mjs",
     "build": "npm run wasm && npm run typecheck && npm run check:design && vite build && npm run check:dist",
     "verify": "npm test && npm run build",
     "preview": "vite preview"
@@ -17,10 +17,13 @@
   "dependencies": {
     "highlight.js": "11.11.1",
     "idb": "8.0.3",
+    "katex": "0.18.1",
     "react": "19.2.7",
     "react-dom": "19.2.7",
     "react-markdown": "10.1.0",
-    "remark-gfm": "4.0.1"
+    "rehype-katex": "7.0.1",
+    "remark-gfm": "4.0.1",
+    "remark-math": "6.0.0"
   },
   "devDependencies": {
     "@types/react": "19.2.17",
