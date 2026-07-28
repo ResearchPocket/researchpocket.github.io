@@ -3,6 +3,9 @@
 //! This crate intentionally contains no storage or Git transport code. Loro
 //! resolves application conflicts; immutable envelopes only carry its updates.
 
+mod aggregate;
+mod captured;
+mod checkpoint;
 mod document;
 mod envelope;
 mod genesis;
@@ -283,3 +286,19 @@ pub fn run_wasm_convergence_scenario() -> Result<String, wasm_bindgen::JsValue> 
     run_convergence_scenario()
         .map_err(|error| wasm_bindgen::JsValue::from_str(&error.to_string()))
 }
+pub use aggregate::{
+    AGGREGATE_GENESIS_PATH, AGGREGATE_PROTOCOL_VERSION, AggregateCatalogue, AggregateEnvelope,
+    AggregateGenesis, AggregateKind, AggregateMigration, CatalogueEntry,
+    ITEM_AGGREGATES_FEATURE, ITEM_CHECKPOINTS_PREFIX, ITEM_OPS_PREFIX, ItemAggregate,
+    ItemAggregateCheckpoint, create_aggregate_migration,
+};
+pub use captured::{
+    CAPTURED_CONTENT_PREFIX, CAPTURED_MARKDOWN_MEDIA_TYPE, CapturedDocumentArtifact,
+    CapturedDocumentProvenance, CapturedDocumentRef, MAX_CAPTURED_DOCUMENT_BYTES,
+    captured_content_path, create_captured_document, validate_captured_content,
+    validate_captured_content_for_ref, validate_captured_document_ref,
+};
+pub use checkpoint::{
+    CHECKPOINTS_PREFIX, Checkpoint, CheckpointArtifact, CheckpointCoverage, CoverageInterval,
+    MAX_CHECKPOINT_BYTES, coverage_contains, create_checkpoint, validate_checkpoint,
+};

@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{DomainError, DomainResult};
+use crate::{CapturedDocumentRef, DomainError, DomainResult};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ScalarRevision<T> {
@@ -49,6 +49,8 @@ pub struct CanonicalItem {
     pub favorite: ScalarView<bool>,
     pub language: ScalarView<Option<String>>,
     pub saved_at: ScalarView<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub captured_document: Option<ScalarView<Option<CapturedDocumentRef>>>,
     pub note: String,
     pub tags: Vec<String>,
     pub lifecycle: LifecycleView,

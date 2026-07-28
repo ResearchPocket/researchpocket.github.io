@@ -5,10 +5,13 @@ use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
 use crate::{
-    CanonicalProjection, DomainError, DomainResult, ItemSeed, Library, LibraryGenesis,
-    LifecycleState, UpdateEnvelope,
+    CanonicalItem, CanonicalProjection, CapturedDocumentRef, CheckpointCoverage, DomainError,
+    DomainResult, ItemSeed, Library, LibraryGenesis, LifecycleState, UpdateEnvelope,
+    checkpoint::{create_checkpoint, validate_checkpoint},
+    create_captured_document,
     identity::validate_uuid_v7,
     pack::{create_operation_pack, unpack_operation_pack},
+    validate_captured_content_for_ref,
 };
 
 #[derive(Serialize)]
@@ -17,7 +20,7 @@ struct BrowserProjection {
     items: Vec<BrowserItem>,
 }
 
-#[derive(Serialize)]
+#[derive(Eq, PartialEq, Serialize)]
 struct BrowserItem {
     id: String,
     url: String,
@@ -27,6 +30,8 @@ struct BrowserItem {
     favorite: bool,
     language: Option<String>,
     saved_at: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    captured_document: Option<CapturedDocumentRef>,
     tags: Vec<String>,
     state: &'static str,
 }
@@ -34,7 +39,7 @@ struct BrowserItem {
 #[derive(Serialize)]
 struct MutationResult {
     snapshot: String,
-    projection: BrowserProjection,
+    item: BrowserItem,
     /// Serialized immutable envelope, ready to persist in the browser outbox.
     envelope: String,
 }
@@ -201,6 +206,67 @@ pub fn validate_sync_genesis(genesis_json: &str) -> Result<String, JsValue> {
     Ok(genesis.library_id)
 }
 
+/// Build one immutable protocol-v1 checkpoint from a canonical snapshot.
+#[wasm_bindgen(js_name = createCheckpoint)]
+pub fn create_checkpoint_wasm(
+    snapshot_base64: &str,
+    library_id: &str,
+    created_at: &str,
+    coverage_json: &str,
+) -> Result<String, JsValue> {
+    let snapshot = STANDARD.decode(snapshot_base64).map_err(DomainError::from);
+    let coverage =
+        serde_json::from_str::<CheckpointCoverage>(coverage_json).map_err(DomainError::from);
+    let artifact = snapshot
+        .and_then(|snapshot| {
+            coverage.and_then(|coverage| {
+                create_checkpoint(&snapshot, library_id, created_at, coverage)
+            })
+        })
+        .map_err(js_error)?;
+    serde_json::to_string(&artifact).map_err(|error| js_error(error.into()))
+}
+
+/// Validate one immutable protocol-v1 checkpoint and return its restore state.
+#[wasm_bindgen(js_name = validateCheckpoint)]
+pub fn validate_checkpoint_wasm(
+    path: &str,
+    checkpoint_json: &str,
+    expected_library_id: &str,
+) -> Result<String, JsValue> {
+    let artifact =
+        validate_checkpoint(path, checkpoint_json, expected_library_id).map_err(js_error)?;
+    serde_json::to_string(&artifact).map_err(|error| js_error(error.into()))
+}
+
+/// Normalize and content-address fetched private Markdown.
+#[wasm_bindgen(js_name = createCapturedDocument)]
+pub fn create_captured_document_wasm(
+    markdown: &str,
+    provider: &str,
+    source_url: &str,
+    captured_at: &str,
+) -> Result<String, JsValue> {
+    let artifact = create_captured_document(markdown, provider, source_url, captured_at)
+        .map_err(js_error)?;
+    serde_json::to_string(&artifact).map_err(|error| js_error(error.into()))
+}
+
+/// Verify lazy-fetched Markdown against its immutable path and item reference.
+#[wasm_bindgen(js_name = validateCapturedContent)]
+pub fn validate_captured_content_wasm(
+    path: &str,
+    markdown: &str,
+    reference_json: &str,
+) -> Result<String, JsValue> {
+    let reference: CapturedDocumentRef = serde_json::from_str(reference_json)
+        .map_err(DomainError::from)
+        .map_err(js_error)?;
+    validate_captured_content_for_ref(path, markdown.as_bytes(), &reference)
+        .map_err(js_error)?;
+    Ok(markdown.to_owned())
+}
+
 /// Build one deterministic immutable operation pack from envelope JSON strings.
 #[wasm_bindgen(js_name = createOperationPack)]
 pub fn create_operation_pack_wasm(envelope_json_array: &str) -> Result<String, JsValue> {
@@ -246,6 +312,7 @@ fn apply_local_mutation(
         ));
     }
     let mutation: BrowserMutation = serde_json::from_str(mutation_json)?;
+    let mutation_item_id = browser_mutation_item_id(&mutation).to_owned();
     let library = restore(snapshot_base64, peer_id)?;
     let before = library.version();
     let before_projection = library.canonical_projection()?;
@@ -259,9 +326,15 @@ fn apply_local_mutation(
     )?;
     let envelope =
         library.export_envelope(&before, library_id, device_id, sequence_number, created_at)?;
+    let projection = library.canonical_projection()?;
+    let item = projection.items.get(&mutation_item_id).ok_or_else(|| {
+        DomainError::InvalidState(
+            "changed item is missing from the canonical projection".into(),
+        )
+    })?;
     let result = MutationResult {
         snapshot: encode_snapshot(&library)?,
-        projection: browser_projection(library.canonical_projection()?),
+        item: browser_item(mutation_item_id, item.clone()),
         envelope: serde_json::to_string(&envelope)?,
     };
     Ok(serde_json::to_string(&result)?)
@@ -307,6 +380,7 @@ fn apply_remote(
     }
 
     let library = restore(snapshot_base64, peer_id)?;
+    let before_projection = library.canonical_projection()?;
     let mut possibly_pending = Vec::new();
     for (index, (envelope, _, _)) in unique.iter().enumerate() {
         if library.import_envelope_has_pending(envelope)? {
@@ -326,9 +400,19 @@ fn apply_remote(
     }
     pending_indices.sort_unstable();
 
+    let after_projection = library.canonical_projection()?;
+    let changed = CanonicalProjection {
+        schema_version: after_projection.schema_version,
+        items: after_projection
+            .items
+            .iter()
+            .filter(|(item_id, item)| before_projection.items.get(*item_id) != Some(*item))
+            .map(|(item_id, item)| (item_id.clone(), item.clone()))
+            .collect(),
+    };
     let result = RemoteResult {
         snapshot: encode_snapshot(&library)?,
-        projection: browser_projection(library.canonical_projection()?),
+        projection: browser_projection(changed),
         pending_indices,
     };
     Ok(serde_json::to_string(&result)?)
@@ -419,6 +503,15 @@ fn apply_one_mutation(
             &item_id,
             LifecycleState::Active,
         ),
+    }
+}
+
+fn browser_mutation_item_id(mutation: &BrowserMutation) -> &str {
+    match mutation {
+        BrowserMutation::Create { item_id, .. }
+        | BrowserMutation::Edit { item_id, .. }
+        | BrowserMutation::Delete { item_id }
+        | BrowserMutation::Restore { item_id } => item_id,
     }
 }
 
@@ -553,25 +646,7 @@ fn browser_projection(projection: CanonicalProjection) -> BrowserProjection {
     let mut items = projection
         .items
         .into_iter()
-        .map(|(id, item)| {
-            let mut tags = item.tags;
-            tags.sort();
-            BrowserItem {
-                id,
-                url: item.url.value,
-                title: item.title.value,
-                excerpt: (!item.excerpt.is_empty()).then_some(item.excerpt),
-                note: (!item.note.is_empty()).then_some(item.note),
-                favorite: item.favorite.value,
-                language: item.language.value,
-                saved_at: item.saved_at.value,
-                tags,
-                state: match item.lifecycle.state {
-                    LifecycleState::Active => "active",
-                    LifecycleState::Deleted => "deleted",
-                },
-            }
-        })
+        .map(|(id, item)| browser_item(id, item))
         .collect::<Vec<_>>();
     items.sort_by(|left, right| {
         right
@@ -582,6 +657,28 @@ fn browser_projection(projection: CanonicalProjection) -> BrowserProjection {
     BrowserProjection {
         schema_version: projection.schema_version,
         items,
+    }
+}
+
+fn browser_item(id: String, item: CanonicalItem) -> BrowserItem {
+    let mut tags = item.tags;
+    tags.sort();
+    let captured_document = item.captured_document.and_then(|reference| reference.value);
+    BrowserItem {
+        id,
+        url: item.url.value,
+        title: item.title.value,
+        excerpt: (!item.excerpt.is_empty()).then_some(item.excerpt),
+        note: (!item.note.is_empty()).then_some(item.note),
+        favorite: item.favorite.value,
+        language: item.language.value,
+        saved_at: item.saved_at.value,
+        captured_document,
+        tags,
+        state: match item.lifecycle.state {
+            LifecycleState::Active => "active",
+            LifecycleState::Deleted => "deleted",
+        },
     }
 }
 

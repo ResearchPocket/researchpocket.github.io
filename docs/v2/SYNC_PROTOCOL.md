@@ -1,9 +1,9 @@
 # ResearchPocket synchronization protocol v1
 
-Status: protocol decisions for issues #33 and #68
+Status: protocol decisions for issues #33, #68, and #132
 
 Protocol version: 1  
-Domain schema version: 2  
+Domain schema version: 3
 Loro codec: 1.13.6  
 GitHub REST API version verified: 2026-03-10
 
@@ -78,6 +78,11 @@ sync/
           <pack-sha256>.json
     checkpoints/
       <snapshot-sha256>.json
+  v2/
+    content/
+      sha256/
+        <first-two-hex>/
+          <content-sha256>.md
 ```
 
 `sync/v1/library.json` is immutable genesis metadata created during setup:
@@ -99,7 +104,8 @@ checkpoint pointer, device list, or current state. If genesis already exists,
 setup accepts only the same library and compatible versions; otherwise it stops
 without replacing the file.
 
-Files outside `sync/v1/` are ignored. Within the protocol tree, a recognized
+Files outside `sync/v1/` and the recognized `sync/v2/content/sha256/` object
+namespace are ignored. Within the protocol tree, a recognized
 path with an invalid identity, non-blob Git entry, duplicate semantic identity,
 or incompatible document is an integrity error. Symlinks and submodules are not
 protocol objects.
@@ -389,27 +395,71 @@ sequences are contiguous. The checkpoint ID and path equal the decoded snapshot
 SHA-256. A client validates versions, library, path, coverage syntax, snapshot
 hash, Loro snapshot mode, and snapshot frontier before use.
 
-Create a checkpoint after either 1,000 newly applied batches or 10 MiB of
+Create a checkpoint after either 100 newly applied batches or 2 MiB of
 decoded update tail since the selected checkpoint. Checkpoint creation is an
 optimization and may be repeated by several devices. Clients select a compatible
 valid checkpoint with the greatest `batch_count`, breaking ties by lowercase
 checkpoint ID, then apply every discovered operation outside its exact coverage.
 Selection order cannot change final state.
 
-Every operation remains in the repository. A client can ignore checkpoints and
-rebuild from the full operation set, and diagnostics provide that fallback when
-checkpoint validation fails. Protocol v1 never deletes or rewrites operations or
-checkpoints.
+Every operation remains in the repository. A client can rebuild from the full
+operation set when no checkpoint exists. A discovered malformed or incompatible
+checkpoint fails closed; clients do not silently downgrade after observing a
+recognized corrupt protocol object. Protocol v1 never deletes or rewrites
+operations or checkpoints.
+
+## Captured Markdown objects
+
+New Firecrawl full-page Markdown is not embedded in an item excerpt or list
+projection. The domain normalizes line endings, removes disallowed control
+characters, trims the result, and limits it to 4 MiB of UTF-8. Exact normalized
+bytes are written once at:
+
+```text
+sync/v2/content/sha256/<first-two-hex>/<sha256>.md
+```
+
+The item CRDT carries only a causal `CapturedDocument` reference containing the
+lowercase SHA-256, byte length, fixed media type
+`text/markdown; charset=utf-8`, provider, source URL, and capture time. Before
+uploading the referencing operation, the producing client creates or verifies
+the content object. The Reader downloads it only on explicit open and validates
+path, hash, byte length, UTF-8, media type, and reference before persistence.
+Captured content is private and never enters publication output by default.
+
+## Item-aggregate protocol generation
+
+The negotiated `item-aggregates-v2` generation scopes an envelope to
+`(library_id, aggregate_kind, aggregate_id, device_id, sequence)` and stores item
+operations at:
+
+```text
+sync/v2/ops/items/<item-uuid>/<device-uuid>/<20-digit-sequence>.json
+```
+
+An immutable compact catalogue lists item aggregate IDs, saved ordering,
+lifecycle state, and content-addressed item-checkpoint paths; it contains no
+captured-document bytes. Each item checkpoint validates that its full Loro
+snapshot contains exactly its declared item. Migration deterministically seeds
+these checkpoints from one selected v1 canonical checkpoint, retains all v1
+history, and records that checkpoint identity in v2 genesis.
+
+Cutover begins with a normal recognized v1 envelope whose sole required feature
+is `item-aggregates-v2`. Older clients reject that feature during their
+pull-before-push cycle and therefore cannot upload after the barrier. Compatible
+clients accept the barrier, validate v2 genesis/catalogue/checkpoints, and apply
+only aggregate-scoped updates. Repeating migration with the same v1 checkpoint
+and identities produces the same aggregate identities and visible state.
 
 ## Version negotiation
 
 A client advertises an internal supported tuple:
 
 ```text
-protocol versions: {1}
-domain schema versions: {2}
+protocol versions: {1, 2}
+domain schema versions: {2, 3}
 Loro codecs: {1.13.6}
-required features: {}
+required features: {operation-packs-v1, item-aggregates-v2}
 ```
 
 Pack-aware clients additionally support the transport feature

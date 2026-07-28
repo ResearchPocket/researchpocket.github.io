@@ -1,13 +1,24 @@
+use std::collections::BTreeMap;
+
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use chrono::{DateTime, FixedOffset};
-use research_domain::{Library, LibraryGenesis, UpdateEnvelope, unpack_operation_pack};
+use research_domain::{
+    CheckpointArtifact, CheckpointCoverage, CoverageInterval, Library, LibraryGenesis,
+    UpdateEnvelope, coverage_contains, create_checkpoint, unpack_operation_pack,
+    validate_checkpoint,
+};
 use sqlx::{Row, SqliteConnection};
 
-use crate::import::persist_projection;
-use crate::store::{fresh_peer_id, now_rfc3339, sha256_hex};
+use crate::import::{persist_item_projection, persist_projection};
+use crate::store::{now_rfc3339, peer_id_for_device, sha256_hex};
 use crate::{
-    PendingBatch, RemoteBatchDisposition, RemoteBatchResult, RemotePackResult, StoreError,
-    StoreResult, SyncConfiguration, SyncIdentity, V2Store,
+    PendingBatch, PendingCheckpoint, RemoteBatchDisposition, RemoteBatchResult,
+    RemoteCheckpointResult, RemotePackResult, StoreError, StoreResult, SyncConfiguration,
+    SyncIdentity, V2Store,
 };
+
+pub const CHECKPOINT_BATCH_THRESHOLD: u64 = 100;
+pub const CHECKPOINT_PAYLOAD_THRESHOLD: u64 = 2 * 1024 * 1024;
 
 impl V2Store {
     pub async fn sync_identity(&self) -> StoreResult<SyncIdentity> {
@@ -136,6 +147,113 @@ impl V2Store {
             .collect()
     }
 
+    pub async fn checkpoint_candidate(
+        &self,
+        force: bool,
+    ) -> StoreResult<Option<PendingCheckpoint>> {
+        let mut connection = self.pool.acquire().await?;
+        sqlx::query("BEGIN IMMEDIATE")
+            .execute(&mut *connection)
+            .await?;
+        let result = build_checkpoint_candidate(&mut connection, force).await;
+        match result {
+            Ok(candidate) => {
+                sqlx::query("COMMIT").execute(&mut *connection).await?;
+                Ok(candidate)
+            }
+            Err(error) => {
+                let _ = sqlx::query("ROLLBACK").execute(&mut *connection).await;
+                Err(error)
+            }
+        }
+    }
+
+    pub async fn receive_remote_checkpoint(
+        &self,
+        path: &str,
+        blob_sha: &str,
+        bytes: &[u8],
+    ) -> StoreResult<RemoteCheckpointResult> {
+        validate_blob_sha(blob_sha)?;
+        let checkpoint_json = std::str::from_utf8(bytes)
+            .map_err(|_| StoreError::SyncIntegrity(format!("{path} is not UTF-8 JSON")))?;
+        let library_id = self.meta("library_id").await?;
+        let artifact = validate_checkpoint(path, checkpoint_json, &library_id)?;
+        let local_device_id = self.meta("device_id").await?;
+        let peer_id = peer_id_for_device(&local_device_id)?;
+        let snapshot = STANDARD.decode(&artifact.snapshot_base64).map_err(|_| {
+            StoreError::SyncIntegrity("checkpoint payload is not Base64".into())
+        })?;
+
+        let mut connection = self.pool.acquire().await?;
+        sqlx::query("BEGIN IMMEDIATE")
+            .execute(&mut *connection)
+            .await?;
+        let result = async {
+            let state = sqlx::query(
+                "SELECT snapshot_sha256 FROM canonical_state WHERE singleton = 1",
+            )
+            .fetch_one(&mut *connection)
+            .await?;
+            let current_snapshot_sha256: String = state.try_get("snapshot_sha256")?;
+            let pristine = store_is_pristine(&mut connection).await?;
+            let restored = if pristine {
+                let library = Library::from_snapshot(&snapshot, peer_id)?;
+                let projection = library.canonical_projection()?;
+                sqlx::query("DELETE FROM item_tags")
+                    .execute(&mut *connection)
+                    .await?;
+                sqlx::query("DELETE FROM item_search")
+                    .execute(&mut *connection)
+                    .await?;
+                sqlx::query("DELETE FROM items")
+                    .execute(&mut *connection)
+                    .await?;
+                persist_projection(&mut connection, &projection).await?;
+                sqlx::query(
+                    "UPDATE canonical_state SET snapshot = ?, snapshot_sha256 = ?, updated_at = ? \
+                     WHERE singleton = 1",
+                )
+                .bind(&snapshot)
+                .bind(&artifact.checkpoint_id)
+                .bind(now_rfc3339())
+                .execute(&mut *connection)
+                .await?;
+                true
+            } else {
+                current_snapshot_sha256 == artifact.checkpoint_id
+            };
+            persist_checkpoint(&mut connection, &artifact, "remote").await?;
+            if restored {
+                select_checkpoint(&mut connection, &artifact).await?;
+            }
+            observe_remote(&mut connection, path, blob_sha).await?;
+            Ok(RemoteCheckpointResult {
+                batch_count: artifact.batch_count,
+                restored,
+            })
+        }
+        .await;
+        match result {
+            Ok(result) => {
+                sqlx::query("COMMIT").execute(&mut *connection).await?;
+                Ok(result)
+            }
+            Err(error) => {
+                let _ = sqlx::query("ROLLBACK").execute(&mut *connection).await;
+                Err(error)
+            }
+        }
+    }
+
+    pub async fn batch_is_checkpoint_covered(
+        &self,
+        device_id: &str,
+        sequence: &str,
+    ) -> StoreResult<bool> {
+        checkpoint_covers(&self.pool, device_id, sequence).await
+    }
+
     pub async fn remote_blob_is_current(
         &self,
         path: &str,
@@ -191,6 +309,8 @@ impl V2Store {
             .map_err(|_| StoreError::SyncIntegrity(format!("{path} is not UTF-8 JSON")))?;
         let envelope: UpdateEnvelope = serde_json::from_slice(bytes)?;
         let library_id = self.meta("library_id").await?;
+        let local_device_id = self.meta("device_id").await?;
+        let peer_id = peer_id_for_device(&local_device_id)?;
         envelope.validate_identity(&library_id, path)?;
         validate_timestamp(&envelope.created_at, "operation creation time")?;
 
@@ -200,7 +320,8 @@ impl V2Store {
             .await?;
         let result = async {
             let result =
-                apply_remote_batch(&mut connection, path, envelope_json, &envelope).await?;
+                apply_remote_batch(&mut connection, path, envelope_json, &envelope, peer_id)
+                    .await?;
             observe_remote(&mut connection, path, blob_sha).await?;
             Ok(result)
         }
@@ -228,6 +349,8 @@ impl V2Store {
             .map_err(|_| StoreError::SyncIntegrity(format!("{path} is not UTF-8 JSON")))?;
         let artifact = unpack_operation_pack(path, pack_json)?;
         let expected_library_id = self.meta("library_id").await?;
+        let local_device_id = self.meta("device_id").await?;
+        let peer_id = peer_id_for_device(&local_device_id)?;
         let mut members = Vec::with_capacity(artifact.member_envelopes.len());
         for envelope_json in artifact.member_envelopes {
             let envelope: UpdateEnvelope = serde_json::from_str(&envelope_json)?;
@@ -246,9 +369,14 @@ impl V2Store {
             let mut already_applied = 0_u64;
             let mut acknowledged_outbox = 0_u64;
             for (member_path, envelope_json, envelope) in &members {
-                let member =
-                    apply_remote_batch(&mut connection, member_path, envelope_json, envelope)
-                        .await?;
+                let member = apply_remote_batch(
+                    &mut connection,
+                    member_path,
+                    envelope_json,
+                    envelope,
+                    peer_id,
+                )
+                .await?;
                 match member.disposition {
                     RemoteBatchDisposition::Applied => applied += 1,
                     RemoteBatchDisposition::AlreadyApplied => already_applied += 1,
@@ -417,6 +545,7 @@ async fn apply_remote_batch(
     path: &str,
     envelope_json: &str,
     envelope: &UpdateEnvelope,
+    peer_id: u64,
 ) -> StoreResult<RemoteBatchResult> {
     let existing = sqlx::query(
         "SELECT envelope_json, payload_sha256 FROM batches \
@@ -442,6 +571,12 @@ async fn apply_remote_batch(
             acknowledged_outbox,
         });
     }
+    if checkpoint_covers(&mut *connection, &envelope.device_id, &envelope.sequence).await? {
+        return Ok(RemoteBatchResult {
+            disposition: RemoteBatchDisposition::AlreadyApplied,
+            acknowledged_outbox: false,
+        });
+    }
 
     let state = sqlx::query(
         "SELECT snapshot, snapshot_sha256 FROM canonical_state WHERE singleton = 1",
@@ -455,7 +590,8 @@ async fn apply_remote_batch(
             "canonical snapshot checksum mismatch".into(),
         ));
     }
-    let library = Library::from_snapshot(&snapshot, fresh_peer_id())?;
+    let library = Library::from_snapshot(&snapshot, peer_id)?;
+    let before_projection = library.canonical_projection()?;
     let incoming_pending = library.import_envelope_has_pending(envelope)?;
     // A Loro snapshot does not retain an update whose causal predecessor was
     // absent when that snapshot was exported. Receipted immutable envelopes do
@@ -484,7 +620,11 @@ async fn apply_remote_batch(
     let new_snapshot = library.export_snapshot()?;
     let projection = library.canonical_projection()?;
     let now = now_rfc3339();
-    persist_projection(connection, &projection).await?;
+    for (item_id, item) in &projection.items {
+        if before_projection.items.get(item_id) != Some(item) {
+            persist_item_projection(connection, item_id, item).await?;
+        }
+    }
     sqlx::query(
         "UPDATE canonical_state SET snapshot = ?, snapshot_sha256 = ?, updated_at = ? \
          WHERE singleton = 1",
@@ -521,6 +661,286 @@ async fn apply_remote_batch(
         disposition: RemoteBatchDisposition::Applied,
         acknowledged_outbox: false,
     })
+}
+
+async fn build_checkpoint_candidate(
+    connection: &mut SqliteConnection,
+    force: bool,
+) -> StoreResult<Option<PendingCheckpoint>> {
+    if sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM deferred_batches")
+        .fetch_one(&mut *connection)
+        .await?
+        != 0
+    {
+        return Ok(None);
+    }
+    let selected_coverage = selected_coverage(&mut *connection).await?;
+    let rows = sqlx::query(
+        "SELECT device_id, sequence, envelope_json, applied_at FROM batches \
+         ORDER BY device_id ASC, sequence ASC",
+    )
+    .fetch_all(&mut *connection)
+    .await?;
+    let mut intervals = selected_coverage
+        .iter()
+        .flat_map(|(device_id, ranges)| {
+            ranges.iter().map(|range| {
+                (
+                    device_id.clone(),
+                    parse_sequence(&range.start).expect("validated checkpoint sequence"),
+                    parse_sequence(&range.end).expect("validated checkpoint sequence"),
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+    let mut tail_batches = 0_u64;
+    let mut tail_payload_bytes = 0_u64;
+    let mut created_at = selected_checkpoint_created_at(&mut *connection).await?;
+    for row in rows {
+        let device_id: String = row.try_get("device_id")?;
+        let sequence: String = row.try_get("sequence")?;
+        let sequence_number = parse_sequence(&sequence)?;
+        intervals.push((device_id.clone(), sequence_number, sequence_number));
+        let envelope_json: String = row.try_get("envelope_json")?;
+        let envelope: UpdateEnvelope = serde_json::from_str(&envelope_json)?;
+        created_at = Some(match created_at {
+            Some(current) if current >= envelope.created_at => current,
+            _ => envelope.created_at.clone(),
+        });
+        if !coverage_contains(&selected_coverage, &device_id, &sequence) {
+            tail_batches = tail_batches
+                .checked_add(1)
+                .ok_or(StoreError::NumericRange("checkpoint tail batch count"))?;
+            tail_payload_bytes = tail_payload_bytes
+                .checked_add(decoded_base64_len(&envelope.payload)?)
+                .ok_or(StoreError::NumericRange("checkpoint tail payload bytes"))?;
+        }
+    }
+    if !force
+        && tail_batches < CHECKPOINT_BATCH_THRESHOLD
+        && tail_payload_bytes < CHECKPOINT_PAYLOAD_THRESHOLD
+    {
+        return Ok(None);
+    }
+    if intervals.is_empty() {
+        return Ok(None);
+    }
+
+    let coverage = merge_coverage(intervals)?;
+    let state = sqlx::query(
+        "SELECT snapshot, snapshot_sha256 FROM canonical_state WHERE singleton = 1",
+    )
+    .fetch_one(&mut *connection)
+    .await?;
+    let snapshot: Vec<u8> = state.try_get("snapshot")?;
+    let expected_snapshot_sha256: String = state.try_get("snapshot_sha256")?;
+    if sha256_hex(&snapshot) != expected_snapshot_sha256 {
+        return Err(StoreError::InvalidStore(
+            "canonical snapshot checksum mismatch".into(),
+        ));
+    }
+    let library_id: String =
+        sqlx::query_scalar("SELECT value FROM store_meta WHERE key = 'library_id'")
+            .fetch_one(&mut *connection)
+            .await?;
+    let artifact = create_checkpoint(
+        &snapshot,
+        &library_id,
+        created_at.as_deref().unwrap_or("1970-01-01T00:00:00Z"),
+        coverage,
+    )?;
+    persist_checkpoint(&mut *connection, &artifact, "local").await?;
+    Ok(Some(PendingCheckpoint {
+        path: artifact.path,
+        checkpoint_id: artifact.checkpoint_id,
+        checkpoint_json: artifact.json,
+        batch_count: artifact.batch_count,
+    }))
+}
+
+async fn persist_checkpoint(
+    connection: &mut SqliteConnection,
+    artifact: &CheckpointArtifact,
+    origin: &str,
+) -> StoreResult<()> {
+    let coverage_json = serde_json::to_string(&artifact.coverage)?;
+    sqlx::query(
+        "INSERT INTO checkpoints \
+         (path, checkpoint_id, checkpoint_json, batch_count, coverage_json, created_at, \
+          origin, applied_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) \
+         ON CONFLICT(path) DO NOTHING",
+    )
+    .bind(&artifact.path)
+    .bind(&artifact.checkpoint_id)
+    .bind(&artifact.json)
+    .bind(
+        i64::try_from(artifact.batch_count)
+            .map_err(|_| StoreError::NumericRange("checkpoint batch count"))?,
+    )
+    .bind(&coverage_json)
+    .bind(&artifact.created_at)
+    .bind(origin)
+    .bind(now_rfc3339())
+    .execute(&mut *connection)
+    .await?;
+    let stored: String =
+        sqlx::query_scalar("SELECT checkpoint_json FROM checkpoints WHERE path = ?")
+            .bind(&artifact.path)
+            .fetch_one(&mut *connection)
+            .await?;
+    if stored.as_bytes() != artifact.json.as_bytes() {
+        return Err(StoreError::SyncIntegrity(
+            "checkpoint identity collision".into(),
+        ));
+    }
+    for (device_id, intervals) in &artifact.coverage {
+        for interval in intervals {
+            sqlx::query(
+                "INSERT OR IGNORE INTO checkpoint_coverage \
+                 (checkpoint_path, device_id, start_sequence, end_sequence) \
+                 VALUES (?, ?, ?, ?)",
+            )
+            .bind(&artifact.path)
+            .bind(device_id)
+            .bind(&interval.start)
+            .bind(&interval.end)
+            .execute(&mut *connection)
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+async fn select_checkpoint(
+    connection: &mut SqliteConnection,
+    artifact: &CheckpointArtifact,
+) -> StoreResult<()> {
+    let selected_count: Option<i64> = sqlx::query_scalar(
+        "SELECT c.batch_count FROM selected_checkpoint s \
+         JOIN checkpoints c ON c.path = s.checkpoint_path WHERE s.singleton = 1",
+    )
+    .fetch_optional(&mut *connection)
+    .await?;
+    if selected_count.is_some_and(|count| count > artifact.batch_count as i64) {
+        return Ok(());
+    }
+    sqlx::query(
+        "INSERT INTO selected_checkpoint (singleton, checkpoint_path, selected_at) \
+         VALUES (1, ?, ?) ON CONFLICT(singleton) DO UPDATE SET \
+         checkpoint_path = excluded.checkpoint_path, selected_at = excluded.selected_at",
+    )
+    .bind(&artifact.path)
+    .bind(now_rfc3339())
+    .execute(&mut *connection)
+    .await?;
+    Ok(())
+}
+
+async fn selected_coverage(
+    connection: &mut SqliteConnection,
+) -> StoreResult<CheckpointCoverage> {
+    let rows = sqlx::query(
+        "SELECT cc.device_id, cc.start_sequence, cc.end_sequence \
+         FROM checkpoint_coverage cc JOIN selected_checkpoint s \
+         ON s.checkpoint_path = cc.checkpoint_path WHERE s.singleton = 1 \
+         ORDER BY cc.device_id ASC, cc.start_sequence ASC",
+    )
+    .fetch_all(&mut *connection)
+    .await?;
+    let mut coverage = BTreeMap::<String, Vec<CoverageInterval>>::new();
+    for row in rows {
+        coverage
+            .entry(row.try_get("device_id")?)
+            .or_default()
+            .push(CoverageInterval {
+                start: row.try_get("start_sequence")?,
+                end: row.try_get("end_sequence")?,
+            });
+    }
+    Ok(coverage)
+}
+
+async fn selected_checkpoint_created_at(
+    connection: &mut SqliteConnection,
+) -> StoreResult<Option<String>> {
+    Ok(sqlx::query_scalar(
+        "SELECT c.created_at FROM checkpoints c JOIN selected_checkpoint s \
+         ON s.checkpoint_path = c.path WHERE s.singleton = 1",
+    )
+    .fetch_optional(&mut *connection)
+    .await?)
+}
+
+async fn checkpoint_covers<'e, E>(
+    executor: E,
+    device_id: &str,
+    sequence: &str,
+) -> StoreResult<bool>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+{
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM checkpoint_coverage cc JOIN selected_checkpoint s \
+         ON s.checkpoint_path = cc.checkpoint_path WHERE s.singleton = 1 \
+         AND cc.device_id = ? AND cc.start_sequence <= ? AND cc.end_sequence >= ?",
+    )
+    .bind(device_id)
+    .bind(sequence)
+    .bind(sequence)
+    .fetch_one(executor)
+    .await?;
+    Ok(count > 0)
+}
+
+async fn store_is_pristine(connection: &mut SqliteConnection) -> StoreResult<bool> {
+    let count: i64 = sqlx::query_scalar(
+        "SELECT (SELECT COUNT(*) FROM batches) + (SELECT COUNT(*) FROM items) + \
+         (SELECT COUNT(*) FROM import_rows) + (SELECT COUNT(*) FROM outbox)",
+    )
+    .fetch_one(&mut *connection)
+    .await?;
+    Ok(count == 0)
+}
+
+fn merge_coverage(mut intervals: Vec<(String, u64, u64)>) -> StoreResult<CheckpointCoverage> {
+    intervals.sort();
+    let mut merged = BTreeMap::<String, Vec<(u64, u64)>>::new();
+    for (device_id, start, end) in intervals {
+        let device = merged.entry(device_id).or_default();
+        if let Some((_, previous_end)) = device.last_mut()
+            && start <= previous_end.saturating_add(1)
+        {
+            *previous_end = (*previous_end).max(end);
+            continue;
+        }
+        device.push((start, end));
+    }
+    merged
+        .into_iter()
+        .map(|(device_id, intervals)| {
+            let intervals = intervals
+                .into_iter()
+                .map(|(start, end)| CoverageInterval::new(start, end).map_err(StoreError::from))
+                .collect::<StoreResult<Vec<_>>>()?;
+            Ok((device_id, intervals))
+        })
+        .collect()
+}
+
+fn parse_sequence(value: &str) -> StoreResult<u64> {
+    value
+        .parse::<u64>()
+        .ok()
+        .filter(|sequence| *sequence > 0 && value.len() == 20)
+        .ok_or_else(|| StoreError::InvalidStore("invalid batch sequence".into()))
+}
+
+fn decoded_base64_len(value: &str) -> StoreResult<u64> {
+    let bytes = STANDARD
+        .decode(value)
+        .map_err(|_| StoreError::InvalidStore("stored update payload is not Base64".into()))?;
+    u64::try_from(bytes.len())
+        .map_err(|_| StoreError::NumericRange("decoded update payload bytes"))
 }
 
 async fn observe_remote(

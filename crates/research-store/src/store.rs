@@ -116,7 +116,7 @@ impl V2Store {
     pub async fn item(&self, item_id: &str) -> StoreResult<StoredItem> {
         let row = sqlx::query_as::<_, ItemRow>(
             "SELECT item_id, url, title, excerpt, favorite, language, saved_at, note, \
-             lifecycle_state FROM items WHERE item_id = ?",
+             lifecycle_state, captured_document_json FROM items WHERE item_id = ?",
         )
         .bind(item_id)
         .fetch_optional(&self.pool)
@@ -141,7 +141,8 @@ impl V2Store {
 
         let mut builder = QueryBuilder::<Sqlite>::new(
             "SELECT i.item_id, i.url, i.title, i.excerpt, i.favorite, i.language, \
-             i.saved_at, i.note, i.lifecycle_state FROM items i WHERE 1 = 1",
+             i.saved_at, i.note, i.lifecycle_state, i.captured_document_json \
+             FROM items i WHERE 1 = 1",
         );
         append_list_filters(&mut builder, &query);
         builder
@@ -203,7 +204,7 @@ impl V2Store {
 
         let mut builder = QueryBuilder::<Sqlite>::new(
             "SELECT i.item_id, i.url, i.title, i.excerpt, i.favorite, i.language, \
-             i.saved_at, i.note, i.lifecycle_state \
+             i.saved_at, i.note, i.lifecycle_state, i.captured_document_json \
              FROM item_search JOIN items i ON i.item_id = item_search.item_id \
              WHERE item_search MATCH ",
         );
@@ -322,7 +323,8 @@ impl V2Store {
                 "canonical snapshot checksum mismatch".into(),
             ));
         }
-        Library::from_snapshot(&snapshot, fresh_peer_id())?;
+        let device_id = self.meta("device_id").await?;
+        Library::from_snapshot(&snapshot, peer_id_for_device(&device_id)?)?;
         Ok(())
     }
 
@@ -357,6 +359,10 @@ impl V2Store {
                 favorite: row.favorite,
                 language: row.language,
                 saved_at,
+                captured_document: row
+                    .captured_document_json
+                    .map(|json| serde_json::from_str(&json))
+                    .transpose()?,
                 tags,
                 state: row.lifecycle_state,
             });
@@ -376,6 +382,7 @@ struct ItemRow {
     saved_at: i64,
     note: String,
     lifecycle_state: String,
+    captured_document_json: Option<String>,
 }
 
 fn append_list_filters(builder: &mut QueryBuilder<Sqlite>, query: &ListQuery) {
@@ -459,11 +466,22 @@ pub(crate) fn now_rfc3339() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
 }
 
-pub(crate) fn fresh_peer_id() -> u64 {
-    let uuid = Uuid::now_v7();
+/// Derive the durable Loro replica identity from this installation's device UUID.
+///
+/// The device UUID is already persistent and unique. Reusing its random low
+/// bits keeps a native replica on one Loro peer across snapshot restores instead
+/// of widening every causal frontier by one peer per mutation.
+pub(crate) fn peer_id_for_device(device_id: &str) -> StoreResult<u64> {
+    let uuid = Uuid::parse_str(device_id)
+        .map_err(|_| StoreError::InvalidStore("device ID is not a UUID".into()))?;
     let mut bytes = [0_u8; 8];
     bytes.copy_from_slice(&uuid.as_bytes()[8..]);
-    u64::from_be_bytes(bytes).max(1)
+    let peer_id = u64::from_be_bytes(bytes);
+    Ok(match peer_id {
+        0 => 1,
+        u64::MAX => u64::MAX - 1,
+        value => value,
+    })
 }
 
 pub(crate) fn sha256_hex(bytes: &[u8]) -> String {

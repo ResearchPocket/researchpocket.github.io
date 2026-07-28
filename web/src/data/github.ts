@@ -8,6 +8,7 @@ const GET_RETRY_DELAY_MS = 250;
 export const GENESIS_PATH = "sync/v1/library.json";
 export const OPS_PREFIX = "sync/v1/ops/";
 export const PACKS_PREFIX = `${OPS_PREFIX}packs/`;
+export const CONTENT_PREFIX = "sync/v2/content/sha256/";
 
 export interface GitHubRemote {
   owner: string;
@@ -160,7 +161,10 @@ export class GitHubClient {
         validateReservedDirectory(path, entry);
         if (entry.type === "tree" && protocolTreeRelevant(path)) {
           stack.push([entry.sha, path]);
-        } else if (path.startsWith("sync/v1/")) {
+        } else if (
+          path.startsWith("sync/v1/") ||
+          path.startsWith(CONTENT_PREFIX)
+        ) {
           insertProtocolBlob(protocol, path, entry);
         }
       }
@@ -334,7 +338,10 @@ function collectProtocolEntries(entries: TreeEntry[], prefix: string): ProtocolT
   for (const entry of entries) {
     const path = joinPath(prefix, entry.path);
     validateReservedDirectory(path, entry);
-    if (path.startsWith("sync/v1/") && entry.type !== "tree") {
+    if (
+      (path.startsWith("sync/v1/") || path.startsWith(CONTENT_PREFIX)) &&
+      entry.type !== "tree"
+    ) {
       insertProtocolBlob(protocol, path, entry);
     }
   }
@@ -363,7 +370,16 @@ function insertProtocolBlob(
 }
 
 function validateReservedDirectory(path: string, entry: TreeEntry): void {
-  if ((path === "sync" || path === "sync/v1") && entry.type !== "tree") {
+  if (
+    [
+      "sync",
+      "sync/v1",
+      "sync/v2",
+      "sync/v2/content",
+      "sync/v2/content/sha256",
+    ].includes(path) &&
+    entry.type !== "tree"
+  ) {
     throw new GitHubSyncError(
       "The reserved synchronization path is not a directory.",
       "integrity",
@@ -372,7 +388,17 @@ function validateReservedDirectory(path: string, entry: TreeEntry): void {
 }
 
 function protocolTreeRelevant(path: string): boolean {
-  return path === "sync" || path === "sync/v1" || path.startsWith("sync/v1/");
+  return (
+    [
+      "sync",
+      "sync/v1",
+      "sync/v2",
+      "sync/v2/content",
+      "sync/v2/content/sha256",
+    ].includes(path) ||
+    path.startsWith("sync/v1/") ||
+    path.startsWith(CONTENT_PREFIX)
+  );
 }
 
 function joinPath(prefix: string, path: string): string {

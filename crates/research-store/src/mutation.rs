@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::enrichment::queue_enrichment_on_connection;
 use crate::import::persist_item_projection;
-use crate::store::{fresh_peer_id, now_rfc3339, sha256_hex};
+use crate::store::{now_rfc3339, peer_id_for_device, sha256_hex};
 use crate::{
     CreateItemRequest, EditItemRequest, EnrichmentProvider, OptionalTextUpdate, StoreError,
     StoreResult, StoredItem, V2Store,
@@ -266,7 +266,7 @@ where
         ));
     }
 
-    let library = Library::from_snapshot(&snapshot, fresh_peer_id())?;
+    let library = Library::from_snapshot(&snapshot, peer_id_for_device(&device_id)?)?;
     let before = library.version();
     let before_projection = library.canonical_projection()?;
     let prefix = format!("{device_id}/{sequence_text}/mutation/{item_id}");
@@ -361,6 +361,10 @@ fn stored_item(
         favorite: item.favorite.value,
         language: item.language.value.clone(),
         saved_at,
+        captured_document: item
+            .captured_document
+            .as_ref()
+            .and_then(|reference| reference.value.clone()),
         tags: item.tags.clone(),
         state: state.to_owned(),
     })

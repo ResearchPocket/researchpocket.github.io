@@ -5,7 +5,8 @@ use research_store::{
 };
 
 #[tokio::test]
-async fn explicit_reenrichment_replaces_only_an_enrichment_owned_excerpt() {
+async fn firecrawl_reenrichment_replaces_captured_content_without_overwriting_authored_excerpt()
+{
     let directory = tempfile::tempdir().expect("library temp directory");
     let store = V2Store::init(directory.path().join("library"))
         .await
@@ -44,6 +45,20 @@ async fn explicit_reenrichment_replaces_only_an_enrichment_owned_excerpt() {
         .await
         .expect("apply initial enrichment");
     assert!(first.applied_excerpt);
+    assert!(first.item.excerpt.is_none());
+    let first_reference = first
+        .item
+        .captured_document
+        .as_ref()
+        .expect("captured reference");
+    assert_eq!(
+        store
+            .captured_document_markdown(&first_reference.sha256)
+            .await
+            .expect("read content")
+            .as_deref(),
+        Some("Short metadata description")
+    );
 
     let requeued = store
         .queue_item_enrichment(&item.id, EnrichmentProvider::Firecrawl)
@@ -67,8 +82,18 @@ async fn explicit_reenrichment_replaces_only_an_enrichment_owned_excerpt() {
         )
         .await
         .expect("replace enrichment-owned excerpt");
+    assert!(replaced.item.excerpt.is_none());
+    let replaced_reference = replaced
+        .item
+        .captured_document
+        .as_ref()
+        .expect("replacement reference");
     assert_eq!(
-        replaced.item.excerpt.as_deref(),
+        store
+            .captured_document_markdown(&replaced_reference.sha256)
+            .await
+            .expect("read replacement")
+            .as_deref(),
         Some("# Complete page\n\nPreserved Markdown")
     );
 
@@ -84,8 +109,8 @@ async fn explicit_reenrichment_replaces_only_an_enrichment_owned_excerpt() {
         .queue_item_enrichment(&item.id, EnrichmentProvider::Firecrawl)
         .await
         .expect("requeue after authored edit");
-    assert!(!protected.target_excerpt);
-    assert_eq!(protected.status, EnrichmentStatus::Skipped);
+    assert!(protected.target_excerpt);
+    assert_eq!(protected.status, EnrichmentStatus::Pending);
 
     let forced = store
         .queue_item_enrichment_replacing_excerpt(&item.id, EnrichmentProvider::Firecrawl)
@@ -145,7 +170,23 @@ async fn explicit_reenrichment_replaces_only_an_enrichment_owned_excerpt() {
         .await
         .expect("replace unchanged authored excerpt explicitly");
     assert!(replacement.applied_excerpt);
-    assert_eq!(replacement.item.excerpt.as_deref(), Some("# Fresh parse"));
+    assert_eq!(
+        replacement.item.excerpt.as_deref(),
+        Some("Newer authored context")
+    );
+    let fresh_reference = replacement
+        .item
+        .captured_document
+        .as_ref()
+        .expect("fresh captured reference");
+    assert_eq!(
+        store
+            .captured_document_markdown(&fresh_reference.sha256)
+            .await
+            .expect("read fresh parse")
+            .as_deref(),
+        Some("# Fresh parse")
+    );
 }
 
 #[tokio::test]

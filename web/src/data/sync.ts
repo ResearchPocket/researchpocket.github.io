@@ -1,11 +1,5 @@
-import initWasm, {
-  createOperationPack,
-  createSyncGenesis,
-  unpackOperationPack,
-  validateSyncGenesis,
-} from "../generated/research_domain";
-
 import {
+  CONTENT_PREFIX,
   GENESIS_PATH,
   GitHubClient,
   GitHubSyncError,
@@ -16,8 +10,11 @@ import {
   type ProtocolTree,
   type RepositoryInfo,
 } from "./github.ts";
+import { domainCore } from "./domain.ts";
 import {
   libraryRepository,
+  type BrowserCheckpointCandidate,
+  type CapturedDocumentReference,
   type PendingSyncBatch,
   type RemoteEnvelopeInput,
   type RemoteOperationPackInput,
@@ -79,19 +76,23 @@ interface PendingUpload {
   packed: boolean;
 }
 
+interface CheckpointDescriptor {
+  path: string;
+  blobSha: string;
+  json: string;
+  batchCount: number;
+  checkpointId: string;
+}
+
 const MAX_UPLOAD_ATTEMPTS = 4;
 const PERIODIC_SYNC_MS = 60_000;
 const LOCAL_CHANGE_SYNC_DELAY_MS = 5_000;
 const MAX_PACK_MEMBERS = 1_000;
 const MAX_PACK_BYTES = 20 * 1024 * 1024;
 const PACK_JSON_OVERHEAD_BYTES = 1_024;
-
-let wasmPromise: Promise<unknown> | undefined;
-
-function ensureWasm(): Promise<unknown> {
-  wasmPromise ??= initWasm();
-  return wasmPromise;
-}
+const CHECKPOINTS_PREFIX = "sync/v1/checkpoints/";
+const MAX_REMOTE_APPLY_MEMBERS = 32;
+const MAX_REMOTE_APPLY_BYTES = 2 * 1024 * 1024;
 
 class BrowserSyncService {
   private state: BrowserSyncState = {
@@ -132,6 +133,40 @@ class BrowserSyncService {
         void this.requestSync("periodic refresh");
       }
     }, PERIODIC_SYNC_MS);
+  }
+
+  async loadCapturedDocument(
+    reference: CapturedDocumentReference,
+  ): Promise<string> {
+    const cached = await libraryRepository.capturedDocument(reference);
+    if (cached !== null) return cached;
+    const configuration = await libraryRepository.syncConfiguration();
+    if (!configuration) {
+      throw new GitHubSyncError(
+        "Connect private sync before loading captured page content.",
+        "configuration",
+      );
+    }
+    const path = capturedDocumentPath(reference.sha256);
+    const client = new GitHubClient(this.requireToken());
+    const remote = remoteFrom(configuration);
+    const tree = await client.discover(remote);
+    const blobSha = tree.blobs.get(path);
+    if (!blobSha) {
+      throw new GitHubSyncError(
+        "The captured page content referenced by this save is missing.",
+        "integrity",
+      );
+    }
+    const markdown = await client.downloadText(remote, blobSha);
+    const validated = await domainCore.call(
+      "validateCapturedContent",
+      path,
+      markdown,
+      JSON.stringify(reference),
+    );
+    await libraryRepository.storeCapturedDocument(reference, path, validated);
+    return validated;
   }
 
   /**
@@ -381,8 +416,7 @@ class BrowserSyncService {
       const remoteGenesisSha = tree.blobs.get(GENESIS_PATH);
       if (remoteGenesisSha) {
         const genesisJson = await client.downloadText(remote, remoteGenesisSha);
-        await ensureWasm();
-        const remoteLibraryId = validatedGenesisLibraryId(genesisJson);
+        const remoteLibraryId = await validatedGenesisLibraryId(genesisJson);
         await libraryRepository.adoptRemoteLibraryIfPristine(remoteLibraryId);
         await libraryRepository.recordRemoteObservation(GENESIS_PATH, remoteGenesisSha);
         return;
@@ -399,8 +433,11 @@ class BrowserSyncService {
       }
 
       const identity = await libraryRepository.syncIdentity();
-      await ensureWasm();
-      const genesisJson = createSyncGenesis(identity.libraryId, identity.createdAt);
+      const genesisJson = await domainCore.call(
+        "createSyncGenesis",
+        identity.libraryId,
+        identity.createdAt,
+      );
       const put = await client.putNew(
         remote,
         GENESIS_PATH,
@@ -439,6 +476,11 @@ class BrowserSyncService {
     }
     this.patch({ status: "Confirming the synchronized library…" });
     pull = addPullStats(pull, await this.pullRemote(client, remote));
+    const checkpoint = await libraryRepository.checkpointCandidate(false);
+    if (checkpoint) {
+      this.patch({ status: "Publishing a fast-restore checkpoint…" });
+      await this.ensureCheckpointUploaded(client, remote, checkpoint);
+    }
     const pending = (await libraryRepository.pendingSyncBatches()).length;
     const result: SyncCycleResult = {
       ...pull,
@@ -461,6 +503,7 @@ class BrowserSyncService {
   private async pullRemote(client: GitHubClient, remote: GitHubRemote): Promise<PullStats> {
     const tree = await client.discover(remote);
     await this.validateRemoteGenesis(client, remote, tree);
+    await this.restoreBestCheckpoint(client, remote, tree);
     const operations = [...tree.blobs.entries()]
       .filter(([path]) => path.startsWith(OPS_PREFIX))
       .sort(([left], [right]) => left.localeCompare(right));
@@ -476,9 +519,21 @@ class BrowserSyncService {
         );
       }
     }
-    const inputs: RemoteEnvelopeInput[] = [];
-    const packs: RemoteOperationPackInput[] = [];
     let downloaded = 0;
+    let applied = 0;
+    let directInputs: RemoteEnvelopeInput[] = [];
+    let directBytes = 0;
+    const pendingBefore = (await libraryRepository.pendingSyncBatches()).length;
+    const flushDirectInputs = async (): Promise<void> => {
+      if (directInputs.length === 0) return;
+      const chunk = directInputs;
+      directInputs = [];
+      directBytes = 0;
+      this.patch({
+        status: `Applying ${chunk.length} downloaded remote change${chunk.length === 1 ? "" : "s"}…`,
+      });
+      applied += await this.applyRemoteUpdates(chunk);
+    };
     const progressStep = Math.max(1, Math.ceil(unseen.length / 20));
     for (const [index, [path, blobSha]] of unseen.entries()) {
       if (index === 0 || index + 1 === unseen.length || index % progressStep === 0) {
@@ -488,19 +543,34 @@ class BrowserSyncService {
       }
       const json = await client.downloadText(remote, blobSha);
       if (path.startsWith(PACKS_PREFIX)) {
+        await flushDirectInputs();
         const pack = await unpackRemotePack(path, blobSha, json);
-        packs.push(pack);
+        this.patch({
+          status: `Applying downloaded remote pack ${index + 1} of ${unseen.length}…`,
+        });
+        applied += await this.applyRemoteUpdates([], [pack]);
         downloaded += 1;
       } else {
-        inputs.push({ path, blobSha, envelopeJson: json });
+        const bytes = new TextEncoder().encode(json).byteLength;
+        if (
+          directInputs.length > 0 &&
+          (directInputs.length >= MAX_REMOTE_APPLY_MEMBERS ||
+            directBytes + bytes > MAX_REMOTE_APPLY_BYTES)
+        ) {
+          await flushDirectInputs();
+        }
+        directInputs.push({ path, blobSha, envelopeJson: json });
+        directBytes += bytes;
         downloaded += 1;
+        if (
+          directInputs.length >= MAX_REMOTE_APPLY_MEMBERS ||
+          directBytes >= MAX_REMOTE_APPLY_BYTES
+        ) {
+          await flushDirectInputs();
+        }
       }
     }
-    if (unseen.length > 0) {
-      this.patch({ status: "Applying downloaded remote changes…" });
-    }
-    const pendingBefore = (await libraryRepository.pendingSyncBatches()).length;
-    const applied = await this.applyRemoteUpdates(inputs, packs);
+    await flushDirectInputs();
     if ((await libraryRepository.deferredSyncCount()) > 0) {
       throw new GitHubSyncError(
         "Remote updates are missing a causal predecessor. No local changes were uploaded.",
@@ -537,8 +607,7 @@ class BrowserSyncService {
     }
     if (!observation) {
       const genesisJson = await client.downloadText(remote, sha);
-      await ensureWasm();
-      const remoteLibraryId = validatedGenesisLibraryId(genesisJson);
+      const remoteLibraryId = await validatedGenesisLibraryId(genesisJson);
       const local = await libraryRepository.syncIdentity();
       if (remoteLibraryId !== local.libraryId) {
         throw new GitHubSyncError(
@@ -548,6 +617,126 @@ class BrowserSyncService {
       }
       await libraryRepository.recordRemoteObservation(GENESIS_PATH, sha);
     }
+  }
+
+  private async restoreBestCheckpoint(
+    client: GitHubClient,
+    remote: GitHubRemote,
+    tree: ProtocolTree,
+  ): Promise<void> {
+    if (!(await libraryRepository.syncIdentity()).pristine) return;
+    const checkpoints = [...tree.blobs.entries()]
+      .filter(([path]) => path.startsWith(CHECKPOINTS_PREFIX))
+      .sort(([left], [right]) => left.localeCompare(right));
+    const candidates: CheckpointDescriptor[] = [];
+    for (const [index, [path, blobSha]] of checkpoints.entries()) {
+      const observation = await libraryRepository.remoteObservation(path);
+      if (observation) {
+        if (observation.blobSha !== blobSha) {
+          throw new GitHubSyncError(
+            "An immutable remote checkpoint changed after it was observed.",
+            "integrity",
+          );
+        }
+        continue;
+      }
+      this.patch({
+        status: `Checking restore checkpoint ${index + 1} of ${checkpoints.length}…`,
+      });
+      const json = await client.downloadText(remote, blobSha);
+      try {
+        const identity = await libraryRepository.syncIdentity();
+        candidates.push(
+          parseCheckpointDescriptor(
+            path,
+            blobSha,
+            json,
+            await domainCore.call(
+              "validateCheckpoint",
+              path,
+              json,
+              identity.libraryId,
+            ),
+          ),
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const upgradeRequired =
+          /unsupported (?:protocol|domain schema|Loro codec|feature)/i.test(message);
+        throw new GitHubSyncError(
+          upgradeRequired
+            ? "This private library uses a newer checkpoint format. Upgrade ResearchPocket before syncing."
+            : "A remote library checkpoint is malformed or failed its content-address check.",
+          upgradeRequired ? "upgrade_required" : "integrity",
+        );
+      }
+    }
+    if (candidates.length === 0) return;
+    candidates.sort(
+      (left, right) =>
+        right.batchCount - left.batchCount ||
+        right.checkpointId.localeCompare(left.checkpointId),
+    );
+    const selected = candidates[0]!;
+    for (const candidate of candidates.slice(1)) {
+      await libraryRepository.recordRemoteObservation(
+        candidate.path,
+        candidate.blobSha,
+      );
+    }
+    this.patch({
+      status: `Restoring ${selected.batchCount} synchronized changes from checkpoint…`,
+    });
+    const restored = await libraryRepository.receiveRemoteCheckpoint(
+      selected.path,
+      selected.blobSha,
+      selected.json,
+    );
+    if (!restored.restored) {
+      throw new GitHubSyncError(
+        "The browser library changed while its restore checkpoint was being selected.",
+        "local_state",
+      );
+    }
+  }
+
+  private async ensureCheckpointUploaded(
+    client: GitHubClient,
+    remote: GitHubRemote,
+    checkpoint: BrowserCheckpointCandidate,
+  ): Promise<void> {
+    for (let attempt = 0; attempt < MAX_UPLOAD_ATTEMPTS; attempt += 1) {
+      const tree = await client.discover(remote);
+      const existingSha = tree.blobs.get(checkpoint.path);
+      if (existingSha) {
+        const existingJson = await client.downloadText(remote, existingSha);
+        await libraryRepository.receiveRemoteCheckpoint(
+          checkpoint.path,
+          existingSha,
+          existingJson,
+        );
+        return;
+      }
+      const put = await client.putNew(
+        remote,
+        checkpoint.path,
+        checkpoint.json,
+        remote.branch,
+      );
+      if (put.type === "created") {
+        await libraryRepository.receiveRemoteCheckpoint(
+          checkpoint.path,
+          put.blobSha,
+          checkpoint.json,
+        );
+        return;
+      }
+      await retryDelay(checkpoint.path, attempt);
+    }
+    throw new GitHubSyncError(
+      "Checkpoint publication remained contended after safe retries.",
+      "contention",
+    );
   }
 
   private async ensureUploaded(
@@ -690,9 +879,8 @@ async function buildPendingUploads(
   pending: PendingSyncBatch[],
 ): Promise<PendingUpload[]> {
   const chunks = chunkPendingBatches(pending);
-  if (chunks.some((chunk) => chunk.length > 1)) await ensureWasm();
-
-  return chunks.map((members) => {
+  const uploads: PendingUpload[] = [];
+  for (const members of chunks) {
     const first = members[0];
     if (!first) {
       throw new GitHubSyncError(
@@ -701,18 +889,22 @@ async function buildPendingUploads(
       );
     }
     if (members.length === 1) {
-      return {
+      uploads.push({
         path: first.path,
         json: first.envelopeJson,
         members,
         packed: false,
-      };
+      });
+      continue;
     }
 
     try {
       const expectedEnvelopes = members.map((member) => member.envelopeJson);
       const artifact = parseOperationPackArtifact(
-        createOperationPack(JSON.stringify(expectedEnvelopes)),
+        await domainCore.call(
+          "createOperationPack",
+          JSON.stringify(expectedEnvelopes),
+        ),
       );
       if (
         artifact.member_envelopes.length !== expectedEnvelopes.length ||
@@ -722,12 +914,12 @@ async function buildPendingUploads(
       ) {
         throw new Error("The shared domain core changed the queued envelope bytes.");
       }
-      return {
+      uploads.push({
         path: artifact.path,
         json: artifact.json,
         members,
         packed: true,
-      };
+      });
     } catch (error) {
       if (error instanceof GitHubSyncError) throw error;
       throw new GitHubSyncError(
@@ -735,7 +927,8 @@ async function buildPendingUploads(
         "local_state",
       );
     }
-  });
+  }
+  return uploads;
 }
 
 function chunkPendingBatches(pending: PendingSyncBatch[]): PendingSyncBatch[][] {
@@ -798,8 +991,9 @@ async function unpackRemotePack(
   json: string,
 ): Promise<RemoteOperationPackInput> {
   try {
-    await ensureWasm();
-    const artifact = parseOperationPackArtifact(unpackOperationPack(path, json));
+    const artifact = parseOperationPackArtifact(
+      await domainCore.call("unpackOperationPack", path, json),
+    );
     if (artifact.path !== path || artifact.json !== json) {
       throw new Error("The shared domain core changed the immutable pack bytes.");
     }
@@ -838,6 +1032,48 @@ function parseOperationPackArtifact(json: string): OperationPackArtifact {
   return value as OperationPackArtifact;
 }
 
+function parseCheckpointDescriptor(
+  path: string,
+  blobSha: string,
+  checkpointJson: string,
+  artifactJson: string,
+): CheckpointDescriptor {
+  const value = JSON.parse(artifactJson) as Partial<{
+    path: string;
+    json: string;
+    batch_count: number;
+    checkpoint_id: string;
+  }>;
+  if (
+    value.path !== path ||
+    value.json !== checkpointJson ||
+    typeof value.batch_count !== "number" ||
+    !Number.isSafeInteger(value.batch_count) ||
+    value.batch_count < 0 ||
+    typeof value.checkpoint_id !== "string" ||
+    !/^[0-9a-f]{64}$/.test(value.checkpoint_id)
+  ) {
+    throw new Error("The shared domain core returned an invalid checkpoint artifact.");
+  }
+  return {
+    path,
+    blobSha,
+    json: checkpointJson,
+    batchCount: value.batch_count,
+    checkpointId: value.checkpoint_id,
+  };
+}
+
+function capturedDocumentPath(sha256: string): string {
+  if (!/^[0-9a-f]{64}$/.test(sha256)) {
+    throw new GitHubSyncError(
+      "A save contains an invalid captured-document identity.",
+      "integrity",
+    );
+  }
+  return `${CONTENT_PREFIX}${sha256.slice(0, 2)}/${sha256}.md`;
+}
+
 function remoteFrom(configuration: SyncConfiguration): GitHubRemote {
   return {
     owner: configuration.owner,
@@ -873,9 +1109,9 @@ function normalizeError(error: unknown): GitHubSyncError {
   );
 }
 
-function validatedGenesisLibraryId(genesisJson: string): string {
+async function validatedGenesisLibraryId(genesisJson: string): Promise<string> {
   try {
-    return validateSyncGenesis(genesisJson);
+    return await domainCore.call("validateSyncGenesis", genesisJson);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const upgradeRequired = /unsupported (?:protocol|domain schema|Loro codec|feature)/i.test(

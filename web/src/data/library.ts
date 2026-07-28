@@ -1,14 +1,10 @@
-import initWasm, {
-  applyMutation,
-  applyRemoteEnvelopes,
-  initializeLibrary,
-  materializeLibrary,
-} from "../generated/research_domain";
-
 import {
   openBrowserDatabase,
   type BrowserDatabase,
+  type CapturedDocumentReference,
   type PersistedBatch,
+  type PersistedCheckpoint,
+  type PersistedCheckpointCoverage,
   type PersistedChangeField,
   type PersistedChangeKind,
   type PersistedChangeSummary,
@@ -20,6 +16,7 @@ import {
   type PersistedSyncConfiguration,
   type RemoteObservation,
 } from "./db";
+import { domainCore } from "./domain.ts";
 import {
   createUndoableChange,
   matchesUndoExpectation,
@@ -35,6 +32,7 @@ import {
 
 export type { UndoableChange } from "./undo.ts";
 export type { LibraryProfile } from "./profiles.ts";
+export type { CapturedDocumentReference } from "./db.ts";
 
 export type LibraryItem = PersistedItem;
 
@@ -107,6 +105,19 @@ export interface BrowserSyncIdentity {
   libraryId: string;
   deviceId: string;
   createdAt: string;
+  pristine: boolean;
+}
+
+export interface BrowserCheckpointCandidate {
+  path: string;
+  json: string;
+  checkpointId: string;
+  batchCount: number;
+}
+
+export interface BrowserCheckpointResult {
+  batchCount: number;
+  restored: boolean;
 }
 
 interface RawProjection {
@@ -120,6 +131,7 @@ interface RawProjection {
     favorite: boolean;
     language: string | null;
     saved_at: number;
+    captured_document?: CapturedDocumentReference;
     tags: string[];
     state: "active" | "deleted";
   }>;
@@ -127,7 +139,7 @@ interface RawProjection {
 
 interface MutationResult {
   snapshot: string;
-  projection: RawProjection;
+  item: RawProjection["items"][number];
   envelope: string;
 }
 
@@ -142,6 +154,21 @@ interface EnvelopeIdentity {
   device_id: string;
   sequence: string;
   payload_sha256: string;
+}
+
+interface EnvelopeDetails extends EnvelopeIdentity {
+  created_at: string;
+  payload: string;
+}
+
+interface CheckpointArtifact {
+  path: string;
+  json: string;
+  checkpoint_id: string;
+  created_at: string;
+  batch_count: number;
+  coverage: PersistedCheckpointCoverage;
+  snapshot_base64: string;
 }
 
 interface ValidatedRemoteMember {
@@ -164,13 +191,8 @@ const U64_MAX = 18_446_744_073_709_551_615n;
 
 /** Must track `DOMAIN_SCHEMA_VERSION` in the Rust core. */
 const DOMAIN_SCHEMA_VERSION = 3;
-
-let wasmPromise: Promise<unknown> | undefined;
-
-function ensureWasm(): Promise<unknown> {
-  wasmPromise ??= initWasm();
-  return wasmPromise;
-}
+const CHECKPOINT_BATCH_THRESHOLD = 100;
+const CHECKPOINT_PAYLOAD_THRESHOLD = 2 * 1024 * 1024;
 
 class LibraryRepository {
   private state: LibraryState = {
@@ -256,7 +278,6 @@ class LibraryRepository {
         return;
       }
       this.patchState({ loading: true, status: "Creating your offline library…", error: null });
-      await ensureWasm();
       const now = new Date().toISOString();
       const meta: PersistedLibraryMeta = {
         key: "library",
@@ -266,8 +287,10 @@ class LibraryRepository {
         nextSequence: "00000000000000000001",
         createdAt: now,
       };
-      const snapshot = initializeLibrary(meta.peerId);
-      const projection = parseProjection(materializeLibrary(snapshot, meta.peerId));
+      const snapshot = await domainCore.call("initializeLibrary", meta.peerId);
+      const projection = parseProjection(
+        await domainCore.call("materializeLibrary", snapshot, meta.peerId),
+      );
       const items = materializeProjection(projection);
       const transaction = database.transaction(["meta", "state", "items"], "readwrite");
       try {
@@ -340,10 +363,19 @@ class LibraryRepository {
     const database = await this.database();
     const meta = await database.get("meta", "library");
     if (!meta) throw new Error("Create the browser library before connecting sync.");
+    const counts = await Promise.all([
+      database.count("items"),
+      database.count("batches"),
+      database.count("outbox"),
+      database.count("deferred"),
+    ]);
     return {
       libraryId: meta.libraryId,
       deviceId: meta.deviceId,
       createdAt: meta.createdAt,
+      pristine:
+        meta.nextSequence === "00000000000000000001" &&
+        counts.every((count) => count === 0),
     };
   }
 
@@ -391,7 +423,17 @@ class LibraryRepository {
     let adopted = false;
     await this.write(async (database) => {
       const transaction = database.transaction(
-        ["meta", "items", "batches", "outbox", "deferred", "remoteObservations"],
+        [
+          "meta",
+          "items",
+          "batches",
+          "outbox",
+          "deferred",
+          "remoteObservations",
+          "checkpoints",
+          "selectedCheckpoint",
+          "capturedDocuments",
+        ],
         "readwrite",
       );
       try {
@@ -408,6 +450,9 @@ class LibraryRepository {
           transaction.objectStore("outbox").count(),
           transaction.objectStore("deferred").count(),
           transaction.objectStore("remoteObservations").count(),
+          transaction.objectStore("checkpoints").count(),
+          transaction.objectStore("selectedCheckpoint").count(),
+          transaction.objectStore("capturedDocuments").count(),
         ]);
         if (
           meta.nextSequence !== "00000000000000000001" ||
@@ -450,6 +495,52 @@ class LibraryRepository {
 
   async remoteObservation(path: string): Promise<RemoteObservation | null> {
     return (await (await this.database()).get("remoteObservations", path)) ?? null;
+  }
+
+  async capturedDocument(
+    reference: CapturedDocumentReference,
+  ): Promise<string | null> {
+    validateCapturedDocumentReference(reference);
+    const stored = await (await this.database()).get(
+      "capturedDocuments",
+      reference.sha256,
+    );
+    if (!stored) return null;
+    if (
+      stored.byteLength !== reference.byte_length ||
+      new TextEncoder().encode(stored.markdown).byteLength !== reference.byte_length
+    ) {
+      throw new Error("Stored captured Markdown does not match its item reference.");
+    }
+    return stored.markdown;
+  }
+
+  async storeCapturedDocument(
+    reference: CapturedDocumentReference,
+    path: string,
+    markdown: string,
+  ): Promise<void> {
+    validateCapturedDocumentReference(reference);
+    const byteLength = new TextEncoder().encode(markdown).byteLength;
+    if (
+      path !== capturedDocumentPath(reference.sha256) ||
+      byteLength !== reference.byte_length
+    ) {
+      throw new Error("Captured Markdown does not match its immutable reference.");
+    }
+    await this.write(async (database) => {
+      const existing = await database.get("capturedDocuments", reference.sha256);
+      if (existing && existing.markdown !== markdown) {
+        throw new Error("A captured-document identity has conflicting bytes.");
+      }
+      await database.put("capturedDocuments", {
+        sha256: reference.sha256,
+        path,
+        markdown,
+        byteLength,
+        storedAt: new Date().toISOString(),
+      });
+    });
   }
 
   async recordRemoteObservation(path: string, blobSha: string): Promise<void> {
@@ -499,6 +590,172 @@ class LibraryRepository {
     return (await this.database()).count("deferred");
   }
 
+  async checkpointCandidate(
+    force = false,
+  ): Promise<BrowserCheckpointCandidate | null> {
+    let candidate: BrowserCheckpointCandidate | null = null;
+    await this.write(async (database) => {
+      if ((await database.count("deferred")) !== 0) return;
+      const persisted = await readPersisted(database);
+      const selected = await selectedCheckpoint(database);
+      const selectedCoverage = selected?.coverage ?? {};
+      const intervals: Array<[string, bigint, bigint]> = [];
+      for (const [deviceId, ranges] of Object.entries(selectedCoverage)) {
+        for (const range of ranges) {
+          intervals.push([
+            deviceId,
+            parseSequence(range.start),
+            parseSequence(range.end),
+          ]);
+        }
+      }
+
+      let tailBatches = 0;
+      let tailPayloadBytes = 0;
+      let createdAt = selected?.createdAt ?? "1970-01-01T00:00:00Z";
+      for (const batch of await database.getAll("batches")) {
+        const details = parseEnvelopeDetails(batch.envelopeJson);
+        intervals.push([
+          details.device_id,
+          parseSequence(details.sequence),
+          parseSequence(details.sequence),
+        ]);
+        if (details.created_at > createdAt) createdAt = details.created_at;
+        if (!coverageContains(selectedCoverage, details.device_id, details.sequence)) {
+          tailBatches += 1;
+          tailPayloadBytes += decodedBase64Length(details.payload);
+        }
+      }
+
+      if (
+        !force &&
+        tailBatches < CHECKPOINT_BATCH_THRESHOLD &&
+        tailPayloadBytes < CHECKPOINT_PAYLOAD_THRESHOLD
+      ) {
+        return;
+      }
+      if (intervals.length === 0) return;
+
+      const artifact = parseCheckpointArtifact(
+        await domainCore.call(
+          "createCheckpoint",
+          persisted.snapshot.snapshot,
+          persisted.meta.libraryId,
+          createdAt,
+          JSON.stringify(mergeCoverage(intervals)),
+        ),
+      );
+      if (artifact.snapshot_base64 !== persisted.snapshot.snapshot) {
+        throw new Error("The domain core changed the checkpoint snapshot bytes.");
+      }
+      await persistCheckpoint(database, artifact, "local");
+      candidate = {
+        path: artifact.path,
+        json: artifact.json,
+        checkpointId: artifact.checkpoint_id,
+        batchCount: artifact.batch_count,
+      };
+    });
+    return candidate;
+  }
+
+  async receiveRemoteCheckpoint(
+    path: string,
+    blobSha: string,
+    checkpointJson: string,
+  ): Promise<BrowserCheckpointResult> {
+    validateBlobSha(blobSha);
+    const result = await this.write(async (database) => {
+      const persisted = await readPersisted(database);
+      const artifact = parseCheckpointArtifact(
+        await domainCore.call(
+          "validateCheckpoint",
+          path,
+          checkpointJson,
+          persisted.meta.libraryId,
+        ),
+      );
+      if (artifact.path !== path || artifact.json !== checkpointJson) {
+        throw new Error("The domain core changed immutable checkpoint bytes.");
+      }
+      const observation = await database.get("remoteObservations", path);
+      if (observation && observation.blobSha !== blobSha) {
+        throw new Error("An immutable remote checkpoint changed its Git object identity.");
+      }
+      const counts = await Promise.all([
+        database.count("items"),
+        database.count("batches"),
+        database.count("outbox"),
+        database.count("deferred"),
+      ]);
+      const pristine =
+        persisted.meta.nextSequence === "00000000000000000001" &&
+        counts.every((count) => count === 0);
+      const restored =
+        pristine || persisted.snapshot.snapshot === artifact.snapshot_base64;
+      const items = pristine
+        ? materializeProjection(
+            parseProjection(
+              await domainCore.call(
+                "materializeLibrary",
+                artifact.snapshot_base64,
+                persisted.meta.peerId,
+              ),
+            ),
+          )
+        : [];
+      const now = new Date().toISOString();
+      const transaction = database.transaction(
+        [
+          "state",
+          "items",
+          "checkpoints",
+          "selectedCheckpoint",
+          "remoteObservations",
+        ],
+        "readwrite",
+      );
+      try {
+        const checkpoints = transaction.objectStore("checkpoints");
+        await persistCheckpointStore(checkpoints, artifact, "remote", now);
+        if (pristine) {
+          await transaction.objectStore("state").put({
+            key: "canonical",
+            snapshot: artifact.snapshot_base64,
+            updatedAt: now,
+          });
+          await replaceItems(transaction.objectStore("items"), items);
+        }
+        if (restored) {
+          const selected = await selectedCheckpointFromStores(
+            transaction.objectStore("selectedCheckpoint"),
+            checkpoints,
+          );
+          if (!selected || selected.batchCount <= artifact.batch_count) {
+            await transaction.objectStore("selectedCheckpoint").put({
+              key: "selected",
+              checkpointPath: artifact.path,
+              selectedAt: now,
+            });
+          }
+        }
+        await transaction.objectStore("remoteObservations").put({
+          path,
+          blobSha,
+          observedAt: now,
+        });
+        await transaction.done;
+      } catch (error) {
+        abortTransaction(transaction);
+        throw error;
+      }
+      return { batchCount: artifact.batch_count, restored };
+    });
+    if (result.restored) await this.afterCommit("Library checkpoint restored");
+    else this.channel.postMessage({ type: "changed" });
+    return result;
+  }
+
   async recordSyncSuccess(): Promise<void> {
     await this.recordSyncResult(null);
   }
@@ -516,6 +773,8 @@ class LibraryRepository {
     await this.write(async (database) => {
       const persisted = await readPersisted(database);
       const artifacts = validateRemoteArtifacts(inputs, packs, persisted.meta.libraryId);
+      const checkpoint = await selectedCheckpoint(database);
+      const coverage = checkpoint?.coverage ?? {};
       const newMembers: ValidatedRemoteMember[] = [];
       const newMemberPaths = new Set<string>();
       for (const artifact of artifacts) {
@@ -528,7 +787,12 @@ class LibraryRepository {
           if (existing && existing.envelopeJson !== member.envelopeJson) {
             throw new Error("An immutable remote update changed after it was observed.");
           }
-          if (!existing && !newMemberPaths.has(member.path)) {
+          const covered = coverageContains(
+            coverage,
+            member.identity.device_id,
+            member.identity.sequence,
+          );
+          if (!existing && !covered && !newMemberPaths.has(member.path)) {
             newMembers.push(member);
             newMemberPaths.add(member.path);
           }
@@ -548,18 +812,23 @@ class LibraryRepository {
           envelopeJson: entry.envelopeJson,
         })),
       ];
-      await ensureWasm();
-      const result = JSON.parse(
-        applyRemoteEnvelopes(
-          persisted.snapshot.snapshot,
-          persisted.meta.peerId,
-          persisted.meta.libraryId,
-          JSON.stringify(combined.map((entry) => entry.envelopeJson)),
-        ),
-      ) as RemoteApplyResult;
+      const result =
+        combined.length === 0
+          ? null
+          : (JSON.parse(
+              await domainCore.call(
+                "applyRemoteEnvelopes",
+                persisted.snapshot.snapshot,
+                persisted.meta.peerId,
+                persisted.meta.libraryId,
+                JSON.stringify(combined.map((entry) => entry.envelopeJson)),
+              ),
+            ) as RemoteApplyResult);
       const now = new Date().toISOString();
-      const items = materializeProjection(result.projection);
-      const pendingRecords = materializeDeferred(result.pending_indices, combined);
+      const items = result ? materializeProjection(result.projection) : [];
+      const pendingRecords = result
+        ? materializeDeferred(result.pending_indices, combined)
+        : [];
       const newBatchRecords = newMembers.map((member) =>
         batchRecord(
           member.path,
@@ -574,12 +843,16 @@ class LibraryRepository {
         "readwrite",
       );
       try {
-        await transaction.objectStore("state").put({
-          key: "canonical",
-          snapshot: result.snapshot,
-          updatedAt: now,
-        });
-        await replaceItems(transaction.objectStore("items"), items);
+        if (result) {
+          await transaction.objectStore("state").put({
+            key: "canonical",
+            snapshot: result.snapshot,
+            updatedAt: now,
+          });
+        }
+        for (const item of items) {
+          await transaction.objectStore("items").put(item);
+        }
         await transaction.objectStore("deferred").clear();
         for (const record of pendingRecords) {
           await transaction.objectStore("deferred").put(record);
@@ -625,10 +898,10 @@ class LibraryRepository {
       }
       const normalizedMutation = normalizeMutation(mutation, beforeItem, targetTags);
       if (!normalizedMutation) return;
-      await ensureWasm();
       const now = new Date().toISOString();
       const result = JSON.parse(
-        applyMutation(
+        await domainCore.call(
+          "applyMutation",
           persisted.snapshot.snapshot,
           persisted.meta.peerId,
           persisted.meta.libraryId,
@@ -651,9 +924,8 @@ class LibraryRepository {
         ...persisted.meta,
         nextSequence: incrementSequence(persisted.meta.nextSequence),
       };
-      const items = materializeProjection(result.projection);
-      const afterItem = items.find((item) => item.id === itemId);
-      if (!afterItem) {
+      const afterItem = materializeItem(result.item);
+      if (afterItem.id !== itemId) {
         throw new Error("The domain core omitted the changed item from its projection.");
       }
       const summary = summarizeMutation(normalizedMutation, beforeItem, afterItem);
@@ -677,7 +949,7 @@ class LibraryRepository {
           snapshot: result.snapshot,
           updatedAt: now,
         });
-        await replaceItems(transaction.objectStore("items"), items);
+        await transaction.objectStore("items").put(afterItem);
         await transaction.objectStore("batches").add(batch);
         await transaction.objectStore("outbox").add(outbox);
         await transaction.done;
@@ -750,7 +1022,9 @@ class LibraryRepository {
     }
   }
 
-  private async write(operation: (database: BrowserDatabase) => Promise<void>): Promise<void> {
+  private async write<T>(
+    operation: (database: BrowserDatabase) => Promise<T>,
+  ): Promise<T> {
     const execute = async () => operation(await this.database());
     try {
       if (this.closed) {
@@ -761,7 +1035,7 @@ class LibraryRepository {
           "Safe library writes require a browser with cross-tab Web Locks support.",
         );
       }
-      await this.track(navigator.locks.request(this.names.writeLock, execute));
+      return await this.track(navigator.locks.request(this.names.writeLock, execute));
     } catch (error) {
       this.patchState({ error: safeError(error), status: "Change was not saved" });
       throw error;
@@ -794,6 +1068,77 @@ async function readPersisted(database: BrowserDatabase): Promise<{
   ]);
   if (!meta || !snapshot) throw new Error("The browser library is incomplete.");
   return { meta, snapshot };
+}
+
+async function selectedCheckpoint(
+  database: BrowserDatabase,
+): Promise<PersistedCheckpoint | null> {
+  const selected = await database.get("selectedCheckpoint", "selected");
+  if (!selected) return null;
+  return (await database.get("checkpoints", selected.checkpointPath)) ?? null;
+}
+
+type CheckpointStore = {
+  get(key: string): Promise<PersistedCheckpoint | undefined>;
+  put(value: PersistedCheckpoint): Promise<unknown>;
+};
+
+type SelectedCheckpointStore = {
+  get(key: "selected"): Promise<
+    { key: "selected"; checkpointPath: string; selectedAt: string } | undefined
+  >;
+};
+
+async function selectedCheckpointFromStores(
+  selectedStore: SelectedCheckpointStore,
+  checkpointStore: CheckpointStore,
+): Promise<PersistedCheckpoint | null> {
+  const selected = await selectedStore.get("selected");
+  if (!selected) return null;
+  return (await checkpointStore.get(selected.checkpointPath)) ?? null;
+}
+
+async function persistCheckpoint(
+  database: BrowserDatabase,
+  artifact: CheckpointArtifact,
+  origin: "local" | "remote",
+): Promise<void> {
+  const transaction = database.transaction("checkpoints", "readwrite");
+  try {
+    await persistCheckpointStore(
+      transaction.objectStore("checkpoints"),
+      artifact,
+      origin,
+      new Date().toISOString(),
+    );
+    await transaction.done;
+  } catch (error) {
+    abortTransaction(transaction);
+    throw error;
+  }
+}
+
+async function persistCheckpointStore(
+  store: CheckpointStore,
+  artifact: CheckpointArtifact,
+  origin: "local" | "remote",
+  now: string,
+): Promise<void> {
+  const existing = await store.get(artifact.path);
+  if (existing && existing.checkpointJson !== artifact.json) {
+    throw new Error("An immutable checkpoint identity has conflicting bytes.");
+  }
+  if (existing) return;
+  await store.put({
+    path: artifact.path,
+    checkpointId: artifact.checkpoint_id,
+    checkpointJson: artifact.json,
+    batchCount: artifact.batch_count,
+    coverage: artifact.coverage,
+    createdAt: artifact.created_at,
+    origin,
+    appliedAt: now,
+  });
 }
 
 async function replaceItems(
@@ -860,6 +1205,39 @@ function validateBlobSha(value: string): void {
   }
 }
 
+function materializeCapturedDocumentReference(
+  value: CapturedDocumentReference | undefined,
+): CapturedDocumentReference | null {
+  if (value === undefined) return null;
+  validateCapturedDocumentReference(value);
+  return structuredClone(value);
+}
+
+function validateCapturedDocumentReference(
+  value: CapturedDocumentReference,
+): void {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !/^[0-9a-f]{64}$/.test(value.sha256) ||
+    !Number.isSafeInteger(value.byte_length) ||
+    value.byte_length <= 0 ||
+    value.byte_length > 4 * 1024 * 1024 ||
+    value.media_type !== "text/markdown; charset=utf-8" ||
+    typeof value.provenance !== "object" ||
+    value.provenance === null ||
+    value.provenance.provider !== "firecrawl" ||
+    typeof value.provenance.source_url !== "string" ||
+    typeof value.provenance.captured_at !== "string"
+  ) {
+    throw new Error("The domain core returned an invalid captured-document reference.");
+  }
+}
+
+function capturedDocumentPath(sha256: string): string {
+  return `sync/v2/content/sha256/${sha256.slice(0, 2)}/${sha256}.md`;
+}
+
 function materializeItem(item: RawProjection["items"][number]): PersistedItem {
   if (!Number.isSafeInteger(item.saved_at)) {
     throw new Error("The domain core returned an invalid saved time.");
@@ -878,6 +1256,9 @@ function materializeItem(item: RawProjection["items"][number]): PersistedItem {
     language: item.language,
     savedAt: savedAt.toISOString(),
     savedAtUnix: item.saved_at,
+    capturedDocument: materializeCapturedDocumentReference(
+      item.captured_document,
+    ),
     tags: [...item.tags],
     deleted: item.state === "deleted",
   };
@@ -1099,6 +1480,161 @@ function parseEnvelope(envelopeJson: string): EnvelopeIdentity {
     throw new Error("The domain core returned a malformed immutable envelope.");
   }
   return value as EnvelopeIdentity;
+}
+
+function parseEnvelopeDetails(envelopeJson: string): EnvelopeDetails {
+  const value = JSON.parse(envelopeJson) as Partial<EnvelopeDetails>;
+  parseEnvelope(envelopeJson);
+  if (
+    typeof value.created_at !== "string" ||
+    typeof value.payload !== "string"
+  ) {
+    throw new Error("An immutable envelope is missing checkpoint metadata.");
+  }
+  return value as EnvelopeDetails;
+}
+
+function parseCheckpointArtifact(json: string): CheckpointArtifact {
+  const value = JSON.parse(json) as Partial<CheckpointArtifact>;
+  if (
+    typeof value.path !== "string" ||
+    !/^sync\/v1\/checkpoints\/[0-9a-f]{64}\.json$/.test(value.path) ||
+    typeof value.json !== "string" ||
+    typeof value.checkpoint_id !== "string" ||
+    !/^[0-9a-f]{64}$/.test(value.checkpoint_id) ||
+    !value.path.endsWith(`/${value.checkpoint_id}.json`) ||
+    typeof value.created_at !== "string" ||
+    typeof value.batch_count !== "number" ||
+    !Number.isSafeInteger(value.batch_count) ||
+    value.batch_count < 0 ||
+    typeof value.snapshot_base64 !== "string" ||
+    !isCheckpointCoverage(value.coverage)
+  ) {
+    throw new Error("The domain core returned an invalid checkpoint artifact.");
+  }
+  const covered = coverageSize(value.coverage);
+  if (covered !== BigInt(value.batch_count)) {
+    throw new Error("The checkpoint batch count does not match its coverage.");
+  }
+  return value as CheckpointArtifact;
+}
+
+function isCheckpointCoverage(
+  value: unknown,
+): value is PersistedCheckpointCoverage {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  for (const [deviceId, intervals] of Object.entries(value)) {
+    if (deviceId.length === 0 || !Array.isArray(intervals) || intervals.length === 0) {
+      return false;
+    }
+    let previousEnd = 0n;
+    for (const [index, interval] of intervals.entries()) {
+      if (typeof interval !== "object" || interval === null) return false;
+      const candidate = interval as Partial<{ start: string; end: string }>;
+      if (
+        typeof candidate.start !== "string" ||
+        typeof candidate.end !== "string"
+      ) {
+        return false;
+      }
+      let start: bigint;
+      let end: bigint;
+      try {
+        start = parseSequence(candidate.start);
+        end = parseSequence(candidate.end);
+      } catch {
+        return false;
+      }
+      if (start > end || (index > 0 && start <= previousEnd)) return false;
+      previousEnd = end;
+    }
+  }
+  return true;
+}
+
+function coverageContains(
+  coverage: PersistedCheckpointCoverage,
+  deviceId: string,
+  sequence: string,
+): boolean {
+  const target = parseSequence(sequence);
+  return (coverage[deviceId] ?? []).some(
+    (interval) =>
+      parseSequence(interval.start) <= target &&
+      target <= parseSequence(interval.end),
+  );
+}
+
+function coverageSize(coverage: PersistedCheckpointCoverage): bigint {
+  let count = 0n;
+  for (const intervals of Object.values(coverage)) {
+    for (const interval of intervals) {
+      count += parseSequence(interval.end) - parseSequence(interval.start) + 1n;
+    }
+  }
+  return count;
+}
+
+function mergeCoverage(
+  intervals: Array<[string, bigint, bigint]>,
+): PersistedCheckpointCoverage {
+  const ordered = [...intervals].sort(
+    ([leftDevice, leftStart], [rightDevice, rightStart]) =>
+      leftDevice.localeCompare(rightDevice) ||
+      (leftStart < rightStart ? -1 : leftStart > rightStart ? 1 : 0),
+  );
+  const merged = new Map<string, Array<[bigint, bigint]>>();
+  for (const [deviceId, start, end] of ordered) {
+    const ranges = merged.get(deviceId) ?? [];
+    const previous = ranges.at(-1);
+    if (previous && start <= previous[1] + 1n) {
+      previous[1] = previous[1] > end ? previous[1] : end;
+    } else {
+      ranges.push([start, end]);
+    }
+    merged.set(deviceId, ranges);
+  }
+  return Object.fromEntries(
+    [...merged.entries()].map(([deviceId, ranges]) => [
+      deviceId,
+      ranges.map(([start, end]) => ({
+        start: formatSequence(start),
+        end: formatSequence(end),
+      })),
+    ]),
+  );
+}
+
+function parseSequence(value: string): bigint {
+  if (!/^\d{20}$/.test(value)) {
+    throw new Error("A synchronization sequence is not a canonical u64.");
+  }
+  const sequence = BigInt(value);
+  if (sequence === 0n || sequence > U64_MAX) {
+    throw new Error("A synchronization sequence is outside the supported range.");
+  }
+  return sequence;
+}
+
+function formatSequence(value: bigint): string {
+  if (value === 0n || value > U64_MAX) {
+    throw new Error("A synchronization sequence is outside the supported range.");
+  }
+  return value.toString().padStart(20, "0");
+}
+
+function decodedBase64Length(value: string): number {
+  if (
+    value.length === 0 ||
+    value.length % 4 !== 0 ||
+    !/^[A-Za-z0-9+/]*={0,2}$/.test(value)
+  ) {
+    throw new Error("An immutable envelope has a malformed Base64 payload.");
+  }
+  const padding = value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0;
+  return (value.length / 4) * 3 - padding;
 }
 
 function batchRecord(
@@ -1423,6 +1959,24 @@ class LibraryWorkspace {
     return (await this.instance()).remoteObservation(path);
   }
 
+  async capturedDocument(
+    reference: CapturedDocumentReference,
+  ): Promise<string | null> {
+    return (await this.instance()).capturedDocument(reference);
+  }
+
+  async storeCapturedDocument(
+    reference: CapturedDocumentReference,
+    path: string,
+    markdown: string,
+  ): Promise<void> {
+    return (await this.instance()).storeCapturedDocument(
+      reference,
+      path,
+      markdown,
+    );
+  }
+
   async recordRemoteObservation(path: string, blobSha: string): Promise<void> {
     return (await this.instance()).recordRemoteObservation(path, blobSha);
   }
@@ -1437,6 +1991,24 @@ class LibraryWorkspace {
 
   async deferredSyncCount(): Promise<number> {
     return (await this.instance()).deferredSyncCount();
+  }
+
+  async checkpointCandidate(
+    force = false,
+  ): Promise<BrowserCheckpointCandidate | null> {
+    return (await this.instance()).checkpointCandidate(force);
+  }
+
+  async receiveRemoteCheckpoint(
+    path: string,
+    blobSha: string,
+    checkpointJson: string,
+  ): Promise<BrowserCheckpointResult> {
+    return (await this.instance()).receiveRemoteCheckpoint(
+      path,
+      blobSha,
+      checkpointJson,
+    );
   }
 
   async recordSyncSuccess(): Promise<void> {

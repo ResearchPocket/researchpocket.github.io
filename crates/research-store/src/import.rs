@@ -14,7 +14,7 @@ use sqlx::{Connection, Row, SqliteConnection};
 use tempfile::TempDir;
 use uuid::Uuid;
 
-use crate::store::{fresh_peer_id, now_rfc3339, sha256_hex};
+use crate::store::{now_rfc3339, peer_id_for_device, sha256_hex};
 use crate::{
     ImportRejection, ImportResult, SourceBundleReceipt, SourceFileReceipt, StoreError,
     StoreResult, V2Store,
@@ -555,7 +555,7 @@ async fn commit_import(
             "canonical snapshot checksum mismatch".into(),
         ));
     }
-    let library = Library::from_snapshot(&snapshot, fresh_peer_id())?;
+    let library = Library::from_snapshot(&snapshot, peer_id_for_device(&device_id)?)?;
     let before = library.version();
 
     let mut imported = 0_u64;
@@ -769,17 +769,24 @@ pub(crate) async fn persist_item_projection(
     };
     let lifecycle_generation = i64::try_from(item.lifecycle.generation)
         .map_err(|_| StoreError::NumericRange("lifecycle generation"))?;
+    let captured_document = item
+        .captured_document
+        .as_ref()
+        .and_then(|reference| reference.value.as_ref())
+        .map(serde_json::to_string)
+        .transpose()?;
     sqlx::query(
         "INSERT INTO items \
          (item_id, url, title, excerpt, favorite, language, saved_at, note, \
-          lifecycle_state, lifecycle_generation) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
+          lifecycle_state, lifecycle_generation, captured_document_json) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
          ON CONFLICT(item_id) DO UPDATE SET \
          url = excluded.url, title = excluded.title, excerpt = excluded.excerpt, \
          favorite = excluded.favorite, language = excluded.language, \
          saved_at = excluded.saved_at, note = excluded.note, \
          lifecycle_state = excluded.lifecycle_state, \
-         lifecycle_generation = excluded.lifecycle_generation",
+         lifecycle_generation = excluded.lifecycle_generation, \
+         captured_document_json = excluded.captured_document_json",
     )
     .bind(item_id)
     .bind(&item.url.value)
@@ -791,6 +798,7 @@ pub(crate) async fn persist_item_projection(
     .bind(&item.note)
     .bind(lifecycle_state)
     .bind(lifecycle_generation)
+    .bind(captured_document)
     .execute(&mut *connection)
     .await?;
     sqlx::query("DELETE FROM item_tags WHERE item_id = ?")

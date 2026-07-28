@@ -9,8 +9,9 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-    CanonicalItem, CanonicalProjection, LifecycleRevision, LifecycleState, ScalarRevision,
-    ScalarView, UpdateEnvelope,
+    CanonicalItem, CanonicalProjection, CapturedDocumentRef, ITEM_AGGREGATES_FEATURE,
+    LifecycleRevision, LifecycleState, ScalarRevision, ScalarView, UpdateEnvelope,
+    captured::validate_captured_document_ref,
     identity::validate_uuid_v7,
     projection::{causal_heads, lifecycle_view, scalar_view},
 };
@@ -29,6 +30,7 @@ const EXCERPT: &str = "excerpt";
 const FAVORITE: &str = "favorite";
 const LANGUAGE: &str = "language";
 const SAVED_AT: &str = "saved_at";
+const CAPTURED_DOCUMENT: &str = "captured_document";
 
 pub type DomainResult<T> = Result<T, DomainError>;
 
@@ -126,6 +128,18 @@ impl Library {
 
     pub fn version(&self) -> VersionVector {
         self.doc.oplog_vv()
+    }
+
+    pub(crate) fn export_update(&self, from: &VersionVector) -> DomainResult<Vec<u8>> {
+        self.doc
+            .export(ExportMode::updates(from))
+            .map_err(loro_error)
+    }
+
+    pub(crate) fn import_update(&self, update: &[u8]) -> DomainResult<bool> {
+        LoroDoc::decode_import_blob_meta(update, true).map_err(loro_error)?;
+        let status = self.doc.import(update).map_err(loro_error)?;
+        Ok(status.pending.is_some())
     }
 
     pub fn create_item(&self, seed: &ItemSeed, operation_prefix: &str) -> DomainResult<()> {
@@ -307,6 +321,18 @@ impl Library {
         self.write_scalar(item_id, SAVED_AT, revision_id, value)
     }
 
+    pub fn write_captured_document(
+        &self,
+        item_id: &str,
+        revision_id: &str,
+        value: Option<&CapturedDocumentRef>,
+    ) -> DomainResult<()> {
+        if let Some(reference) = value {
+            validate_captured_document_ref(reference)?;
+        }
+        self.write_scalar(item_id, CAPTURED_DOCUMENT, revision_id, value.cloned())
+    }
+
     fn write_scalar<T>(
         &self,
         item_id: &str,
@@ -404,11 +430,22 @@ impl Library {
                 "envelope creation time cannot be blank".into(),
             ));
         }
-        let update = self
-            .doc
-            .export(ExportMode::updates(from))
-            .map_err(loro_error)?;
+        let update = self.export_update(from)?;
         UpdateEnvelope::new(library_id, device_id, sequence, from, created_at, &update)
+    }
+
+    pub fn export_item_aggregates_migration_barrier(
+        &self,
+        from: &VersionVector,
+        library_id: &str,
+        device_id: &str,
+        sequence: u64,
+        created_at: &str,
+    ) -> DomainResult<UpdateEnvelope> {
+        let mut envelope =
+            self.export_envelope(from, library_id, device_id, sequence, created_at)?;
+        envelope.required_features = vec![ITEM_AGGREGATES_FEATURE.to_owned()];
+        Ok(envelope)
     }
 
     pub fn import_envelope(&self, envelope: &UpdateEnvelope) -> DomainResult<()> {
@@ -416,10 +453,7 @@ impl Library {
     }
 
     pub fn import_envelope_has_pending(&self, envelope: &UpdateEnvelope) -> DomainResult<bool> {
-        let payload = envelope.verified_payload()?;
-        LoroDoc::decode_import_blob_meta(&payload, true).map_err(loro_error)?;
-        let status = self.doc.import(&payload).map_err(loro_error)?;
-        Ok(status.pending.is_some())
+        self.import_update(&envelope.verified_payload()?)
     }
 
     pub fn canonical_projection(&self) -> DomainResult<CanonicalProjection> {
@@ -435,6 +469,10 @@ impl Library {
             let favorite = project_scalar::<bool>(&scalars, FAVORITE)?;
             let language = project_scalar::<Option<String>>(&scalars, LANGUAGE)?;
             let saved_at = project_scalar::<i64>(&scalars, SAVED_AT)?;
+            let captured_document = project_optional_scalar::<Option<CapturedDocumentRef>>(
+                &scalars,
+                CAPTURED_DOCUMENT,
+            )?;
             let note = text_child(&item, NOTE)?.to_string();
             let tags = project_tags(map_child(&item, TAGS)?)?;
             let lifecycle = map_child(&item, LIFECYCLE)?;
@@ -449,6 +487,7 @@ impl Library {
                     favorite,
                     language,
                     saved_at,
+                    captured_document,
                     note,
                     tags,
                     lifecycle,
@@ -687,6 +726,19 @@ where
     let scalar = map_child(scalars, field)?;
     let revisions = map_child(&scalar, REVISIONS)?;
     scalar_view(read_records(&revisions)?)
+}
+
+fn project_optional_scalar<T>(
+    scalars: &LoroMap,
+    field: &str,
+) -> DomainResult<Option<ScalarView<T>>>
+where
+    T: Clone + DeserializeOwned,
+{
+    match scalars.get(field) {
+        Some(_) => project_scalar(scalars, field).map(Some),
+        None => Ok(None),
+    }
 }
 
 /// Reads the excerpt, falling back to the pre-schema-3 scalar register.

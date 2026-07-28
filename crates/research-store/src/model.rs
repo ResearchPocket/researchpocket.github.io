@@ -1,3 +1,4 @@
+use research_domain::CapturedDocumentRef;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Default)]
@@ -70,6 +71,8 @@ pub struct StoredItem {
     pub favorite: bool,
     pub language: Option<String>,
     pub saved_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub captured_document: Option<CapturedDocumentRef>,
     pub tags: Vec<String>,
     pub state: String,
 }
@@ -212,6 +215,28 @@ pub struct PendingBatch {
     pub payload_sha256: String,
     pub envelope_json: String,
     pub attempts: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PendingCheckpoint {
+    pub path: String,
+    pub checkpoint_id: String,
+    pub checkpoint_json: String,
+    pub batch_count: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PendingCapturedDocument {
+    pub path: String,
+    pub sha256: String,
+    pub markdown: String,
+    pub reference: CapturedDocumentRef,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RemoteCheckpointResult {
+    pub batch_count: u64,
+    pub restored: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
