@@ -6,7 +6,7 @@ use loro::VersionVector;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::{DomainError, DomainResult, identity::validate_uuid_v7};
+use crate::{DomainError, DomainResult, ITEM_AGGREGATES_FEATURE, identity::validate_uuid_v7};
 
 pub const PROTOCOL_VERSION: u8 = 1;
 pub const DOMAIN_SCHEMA_VERSION: u16 = 3;
@@ -127,7 +127,11 @@ impl UpdateEnvelope {
         if self.loro_codec != LORO_CODEC {
             return Err(DomainError::UnsupportedCodec(self.loro_codec.clone()));
         }
-        if let Some(feature) = self.required_features.first() {
+        if let Some(feature) = self
+            .required_features
+            .iter()
+            .find(|feature| feature.as_str() != ITEM_AGGREGATES_FEATURE)
+        {
             return Err(DomainError::UnsupportedFeature(feature.clone()));
         }
         let payload = STANDARD.decode(&self.payload)?;

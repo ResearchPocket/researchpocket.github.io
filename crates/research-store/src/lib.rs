@@ -1,5 +1,6 @@
 //! Durable, local-only persistence for a V2 ResearchPocket library.
 
+mod captured;
 mod enrichment;
 mod error;
 mod import;
@@ -14,8 +15,9 @@ pub use model::{
     CreateItemRequest, EditItemRequest, EnrichmentApplyResult, EnrichmentCandidates,
     EnrichmentClaim, EnrichmentJob, EnrichmentProvider, EnrichmentQueueCounts,
     EnrichmentStatus, ImportRejection, ImportResult, ListPage, ListQuery, ListResult,
-    OptionalTextUpdate, PendingBatch, RemoteBatchDisposition, RemoteBatchResult,
-    RemotePackResult, SearchQuery, SearchResult, SourceBundleReceipt, SourceFileReceipt,
-    StoreStatus, StoredItem, SyncConfiguration, SyncIdentity,
+    OptionalTextUpdate, PendingBatch, PendingCapturedDocument, PendingCheckpoint,
+    RemoteBatchDisposition, RemoteBatchResult, RemoteCheckpointResult, RemotePackResult,
+    SearchQuery, SearchResult, SourceBundleReceipt, SourceFileReceipt, StoreStatus, StoredItem,
+    SyncConfiguration, SyncIdentity,
 };
 pub use store::V2Store;

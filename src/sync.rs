@@ -8,10 +8,11 @@ use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, HeaderValue, USER_AGENT}
 use reqwest::{Client, Response, StatusCode, Url};
 use research_domain::{
     DomainError, LibraryGenesis, MAX_OPERATION_PACK_BYTES, MAX_OPERATION_PACK_MEMBERS,
-    OperationPackArtifact, create_operation_pack,
+    OperationPackArtifact, create_operation_pack, validate_checkpoint,
 };
 use research_store::{
-    PendingBatch, RemoteBatchDisposition, StoreError, SyncConfiguration, V2Store,
+    PendingBatch, PendingCapturedDocument, RemoteBatchDisposition, StoreError,
+    SyncConfiguration, V2Store,
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -22,6 +23,8 @@ const API_VERSION: &str = "2026-03-10";
 const GENESIS_PATH: &str = "sync/v1/library.json";
 const OPS_PREFIX: &str = "sync/v1/ops/";
 const PACKS_PREFIX: &str = "sync/v1/ops/packs/";
+const CHECKPOINTS_PREFIX: &str = "sync/v1/checkpoints/";
+const CONTENT_PREFIX: &str = "sync/v2/content/sha256/";
 const MAX_UPLOAD_ATTEMPTS: usize = 4;
 const PACK_JSON_OVERHEAD_ALLOWANCE: usize = 1_024;
 
@@ -447,6 +450,7 @@ async fn run_configured(
         .inspect_repository(&remote.owner, &remote.repository)
         .await?;
     let mut pull = pull_remote(store, client, remote).await?;
+    ensure_captured_documents_uploaded(store, client, remote).await?;
     let pending = prepare_uploads(store.pending_batches().await?)?;
     let mut uploaded = 0_u64;
     for upload in pending {
@@ -457,6 +461,7 @@ async fn run_configured(
         pull.add(race_pull);
     }
     pull.add(pull_remote(store, client, remote).await?);
+    ensure_checkpoint_uploaded(store, client, remote).await?;
     let pending = u64::try_from(store.pending_batches().await?.len())
         .map_err(|_| StoreError::NumericRange("pending sync batch count"))?;
     Ok(SyncCycleResult {
@@ -478,6 +483,7 @@ async fn pull_remote(
 ) -> Result<PullStats, SyncError> {
     let tree = client.discover(remote).await?;
     validate_remote_genesis(store, client, remote, &tree).await?;
+    maybe_restore_checkpoint(store, client, remote, &tree).await?;
     let operations = tree
         .blobs
         .iter()
@@ -514,6 +520,139 @@ async fn pull_remote(
         ));
     }
     Ok(stats)
+}
+
+async fn maybe_restore_checkpoint(
+    store: &V2Store,
+    client: &GitHubClient,
+    remote: &Remote,
+    tree: &ProtocolTree,
+) -> Result<(), SyncError> {
+    let identity = store.sync_identity().await?;
+    if !identity.pristine {
+        return Ok(());
+    }
+    let mut candidates = Vec::new();
+    for (path, sha) in tree
+        .blobs
+        .iter()
+        .filter(|(path, _)| path.starts_with(CHECKPOINTS_PREFIX))
+    {
+        let bytes = client.download_blob(remote, sha).await?;
+        let json = std::str::from_utf8(&bytes)
+            .map_err(|_| SyncError::RemoteData("checkpoint is not UTF-8 JSON".into()))?;
+        let artifact = validate_checkpoint(path, json, &identity.library_id)?;
+        candidates.push((
+            artifact.batch_count,
+            artifact.checkpoint_id,
+            path,
+            sha,
+            bytes,
+        ));
+    }
+    candidates.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
+    if let Some((_, _, path, sha, bytes)) = candidates.into_iter().next() {
+        store.receive_remote_checkpoint(path, sha, &bytes).await?;
+    }
+    Ok(())
+}
+
+async fn ensure_checkpoint_uploaded(
+    store: &V2Store,
+    client: &GitHubClient,
+    remote: &Remote,
+) -> Result<(), SyncError> {
+    let Some(checkpoint) = store.checkpoint_candidate(false).await? else {
+        return Ok(());
+    };
+    for attempt in 0..MAX_UPLOAD_ATTEMPTS {
+        let tree = client.discover(remote).await?;
+        if let Some(sha) = tree.blobs.get(&checkpoint.path) {
+            let bytes = client.download_blob(remote, sha).await?;
+            store
+                .receive_remote_checkpoint(&checkpoint.path, sha, &bytes)
+                .await?;
+            return Ok(());
+        }
+        match client
+            .put_new(
+                remote,
+                &checkpoint.path,
+                checkpoint.checkpoint_json.as_bytes(),
+                Some(&remote.branch),
+            )
+            .await?
+        {
+            PutResult::Created(sha) => {
+                store
+                    .receive_remote_checkpoint(
+                        &checkpoint.path,
+                        &sha,
+                        checkpoint.checkpoint_json.as_bytes(),
+                    )
+                    .await?;
+                return Ok(());
+            }
+            PutResult::Race | PutResult::Ambiguous(_) => {
+                retry_delay(&checkpoint.path, attempt).await;
+            }
+        }
+    }
+    Err(SyncError::Contention)
+}
+
+async fn ensure_captured_documents_uploaded(
+    store: &V2Store,
+    client: &GitHubClient,
+    remote: &Remote,
+) -> Result<(), SyncError> {
+    for document in store.pending_captured_documents().await? {
+        ensure_captured_document_uploaded(store, client, remote, &document).await?;
+    }
+    Ok(())
+}
+
+async fn ensure_captured_document_uploaded(
+    store: &V2Store,
+    client: &GitHubClient,
+    remote: &Remote,
+    document: &PendingCapturedDocument,
+) -> Result<(), SyncError> {
+    for attempt in 0..MAX_UPLOAD_ATTEMPTS {
+        let tree = client.discover(remote).await?;
+        if let Some(sha) = tree.blobs.get(&document.path) {
+            let bytes = client.download_blob(remote, sha).await?;
+            store
+                .confirm_captured_document(&document.reference, &document.path, sha, &bytes)
+                .await?;
+            return Ok(());
+        }
+        match client
+            .put_new(
+                remote,
+                &document.path,
+                document.markdown.as_bytes(),
+                Some(&remote.branch),
+            )
+            .await?
+        {
+            PutResult::Created(sha) => {
+                store
+                    .confirm_captured_document(
+                        &document.reference,
+                        &document.path,
+                        &sha,
+                        document.markdown.as_bytes(),
+                    )
+                    .await?;
+                return Ok(());
+            }
+            PutResult::Race | PutResult::Ambiguous(_) => {
+                retry_delay(&document.path, attempt).await;
+            }
+        }
+    }
+    Err(SyncError::Contention)
 }
 
 async fn validate_remote_genesis(
@@ -718,7 +857,7 @@ impl GitHubClient {
                 validate_reserved_directory(&path, &entry)?;
                 if entry.kind == "tree" && protocol_tree_relevant(&path) {
                     stack.push((entry.sha, path));
-                } else if path.starts_with("sync/v1/") {
+                } else if path.starts_with("sync/v1/") || path.starts_with(CONTENT_PREFIX) {
                     insert_protocol_blob(&mut protocol, &path, &entry)?;
                 }
             }
@@ -887,7 +1026,9 @@ fn collect_protocol_entries(
     for entry in entries {
         let path = join_path(prefix, &entry.path);
         validate_reserved_directory(&path, &entry)?;
-        if path.starts_with("sync/v1/") && entry.kind != "tree" {
+        if (path.starts_with("sync/v1/") || path.starts_with(CONTENT_PREFIX))
+            && entry.kind != "tree"
+        {
             insert_protocol_blob(&mut protocol, &path, &entry)?;
         }
     }
@@ -918,7 +1059,11 @@ fn insert_protocol_blob(
 }
 
 fn validate_reserved_directory(path: &str, entry: &TreeEntry) -> Result<(), SyncError> {
-    if matches!(path, "sync" | "sync/v1") && entry.kind != "tree" {
+    if matches!(
+        path,
+        "sync" | "sync/v1" | "sync/v2" | "sync/v2/content" | "sync/v2/content/sha256"
+    ) && entry.kind != "tree"
+    {
         return Err(SyncError::Integrity(
             "the reserved synchronization path is not a directory".into(),
         ));
@@ -927,7 +1072,11 @@ fn validate_reserved_directory(path: &str, entry: &TreeEntry) -> Result<(), Sync
 }
 
 fn protocol_tree_relevant(path: &str) -> bool {
-    matches!(path, "sync" | "sync/v1") || path.starts_with("sync/v1/")
+    matches!(
+        path,
+        "sync" | "sync/v1" | "sync/v2" | "sync/v2/content" | "sync/v2/content/sha256"
+    ) || path.starts_with("sync/v1/")
+        || path.starts_with(CONTENT_PREFIX)
 }
 
 fn join_path(prefix: &str, path: &str) -> String {

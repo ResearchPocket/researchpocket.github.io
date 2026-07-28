@@ -1,10 +1,11 @@
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
-use research_domain::{CanonicalItem, Library, LifecycleState};
+use research_domain::{CanonicalItem, Library, LifecycleState, create_captured_document};
 use sqlx::{FromRow, Row, SqliteConnection};
 use uuid::Uuid;
 
+use crate::captured::persist_captured_document;
 use crate::mutation::apply_item_mutation;
-use crate::store::{fresh_peer_id, now_rfc3339, sha256_hex};
+use crate::store::{now_rfc3339, peer_id_for_device, sha256_hex};
 use crate::{
     EnrichmentApplyResult, EnrichmentCandidates, EnrichmentClaim, EnrichmentJob,
     EnrichmentProvider, EnrichmentQueueCounts, EnrichmentStatus, StoreError, StoreResult,
@@ -248,7 +249,8 @@ async fn queue_enrichment_on_connection_with_options(
     let targets = EnrichmentTargets {
         title_revision: (item.title.value.is_none() && item.title.revisions.len() == 1)
             .then(|| item.title.winner.clone()),
-        excerpt_text: (replace_excerpt
+        excerpt_text: (provider == EnrichmentProvider::Firecrawl
+            || replace_excerpt
             || item.excerpt.is_empty()
             || applied_excerpt.as_deref() == Some(item.excerpt.as_str()))
         .then(|| item.excerpt.clone()),
@@ -325,16 +327,32 @@ async fn apply_enrichment_on_connection(
             && current_job.expected_title_revision.as_deref()
                 == Some(current_item.title.winner.as_str())
     });
-    let excerpt = candidate(candidates.excerpt).filter(|_| {
+    let fetched_context = candidate(candidates.excerpt).filter(|_| {
         current_job.expected_excerpt_text.as_deref() == Some(current_item.excerpt.as_str())
     });
+    let (excerpt, captured_document) = if current_job.job.provider
+        == EnrichmentProvider::Firecrawl
+    {
+        let artifact = fetched_context
+            .as_deref()
+            .map(|markdown| {
+                create_captured_document(markdown, "firecrawl", expected_url, &now_rfc3339())
+            })
+            .transpose()?;
+        (None, artifact)
+    } else {
+        (fetched_context, None)
+    };
+    if let Some(artifact) = &captured_document {
+        persist_captured_document(connection, artifact).await?;
+    }
     let language = candidate(candidates.language).filter(|_| {
         current_item.language.value.is_none()
             && current_job.expected_language_revision.as_deref()
                 == Some(current_item.language.winner.as_str())
     });
     let applied_title = title.is_some();
-    let applied_excerpt = excerpt.is_some();
+    let applied_excerpt = excerpt.is_some() || captured_document.is_some();
     // Remembered so a later re-queue can tell this excerpt came from a provider.
     let applied_excerpt_text = excerpt.clone();
     let applied_language = language.is_some();
@@ -345,6 +363,9 @@ async fn apply_enrichment_on_connection(
         let expected_title_revision = current_job.expected_title_revision.clone();
         let expected_excerpt_text = current_job.expected_excerpt_text.clone();
         let expected_language_revision = current_job.expected_language_revision.clone();
+        let captured_reference = captured_document
+            .as_ref()
+            .map(|artifact| artifact.reference.clone());
         apply_item_mutation(connection, item_id, move |library, projection, prefix| {
             let item = projection
                 .items
@@ -367,6 +388,13 @@ async fn apply_enrichment_on_connection(
                     return Err(StoreError::StaleEdit);
                 }
                 library.set_excerpt(&mutation_item_id, &item.excerpt, excerpt)?;
+            }
+            if let Some(reference) = &captured_reference {
+                library.write_captured_document(
+                    &mutation_item_id,
+                    &enrichment_revision_id(prefix, "captured-document"),
+                    Some(reference),
+                )?;
             }
             if let Some(language) = &language {
                 if item.language.value.is_some()
@@ -482,7 +510,8 @@ async fn stored_item_from_connection(
     item_id: &str,
 ) -> StoreResult<StoredItem> {
     let row = sqlx::query(
-        "SELECT url, title, excerpt, favorite, language, saved_at, note, lifecycle_state \
+        "SELECT url, title, excerpt, favorite, language, saved_at, note, lifecycle_state, \
+         captured_document_json \
          FROM items WHERE item_id = ?",
     )
     .bind(item_id)
@@ -509,6 +538,10 @@ async fn stored_item_from_connection(
         favorite: row.try_get("favorite")?,
         language: row.try_get("language")?,
         saved_at,
+        captured_document: row
+            .try_get::<Option<String>, _>("captured_document_json")?
+            .map(|json| serde_json::from_str(&json))
+            .transpose()?,
         tags,
         state: row.try_get("lifecycle_state")?,
     })
@@ -624,7 +657,11 @@ async fn canonical_item_from_connection(
             "canonical snapshot checksum mismatch".into(),
         ));
     }
-    Library::from_snapshot(&snapshot, fresh_peer_id())?
+    let device_id: String =
+        sqlx::query_scalar("SELECT value FROM store_meta WHERE key = 'device_id'")
+            .fetch_one(&mut *connection)
+            .await?;
+    Library::from_snapshot(&snapshot, peer_id_for_device(&device_id)?)?
         .canonical_projection()?
         .items
         .get(item_id)

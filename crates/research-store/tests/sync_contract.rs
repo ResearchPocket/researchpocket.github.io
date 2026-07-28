@@ -1,8 +1,173 @@
-use research_domain::create_operation_pack;
+use research_domain::{UpdateEnvelope, create_operation_pack};
 use research_store::{
     CreateItemRequest, EditItemRequest, ListQuery, OptionalTextUpdate, RemoteBatchDisposition,
     SearchQuery, StoreError, V2Store,
 };
+
+#[tokio::test]
+async fn checkpoint_bootstrap_restores_coverage_and_applies_only_the_tail() {
+    let root = tempfile::tempdir().expect("temporary test root");
+    let sender = V2Store::init(root.path().join("sender"))
+        .await
+        .expect("sender store");
+    let receiver = V2Store::init(root.path().join("receiver"))
+        .await
+        .expect("receiver store");
+    let identity = sender.sync_identity().await.expect("sender identity");
+    receiver
+        .adopt_library_id_if_pristine(&identity.library_id)
+        .await
+        .expect("adopt sender library");
+
+    let item = sender
+        .create_item(CreateItemRequest {
+            url: "https://example.com/checkpoint".into(),
+            title: Some("Checkpoint".into()),
+            excerpt: Some("bounded state".into()),
+            favorite: false,
+            language: Some("en".into()),
+            saved_at: Some(1_700_000_000),
+            note: String::new(),
+            tags: vec!["restore".into()],
+        })
+        .await
+        .expect("create checkpoint item");
+    sender
+        .edit_item(EditItemRequest {
+            item_id: item.id.clone(),
+            favorite: Some(true),
+            ..EditItemRequest::default()
+        })
+        .await
+        .expect("edit before checkpoint");
+    let covered = sender.pending_batches().await.expect("covered batches");
+    let checkpoint = sender
+        .checkpoint_candidate(true)
+        .await
+        .expect("build checkpoint")
+        .expect("checkpoint candidate");
+
+    let restored = receiver
+        .receive_remote_checkpoint(
+            &checkpoint.path,
+            &"a".repeat(40),
+            checkpoint.checkpoint_json.as_bytes(),
+        )
+        .await
+        .expect("restore checkpoint");
+    assert!(restored.restored);
+    assert_eq!(restored.batch_count, 2);
+    assert_eq!(
+        receiver
+            .list(ListQuery::default())
+            .await
+            .expect("restored projection"),
+        sender
+            .list(ListQuery::default())
+            .await
+            .expect("sender projection")
+    );
+
+    for batch in &covered {
+        assert!(
+            receiver
+                .batch_is_checkpoint_covered(&batch.device_id, &batch.sequence)
+                .await
+                .expect("coverage lookup")
+        );
+        let result = receiver
+            .receive_remote_batch(&batch.path, &"b".repeat(40), batch.envelope_json.as_bytes())
+            .await
+            .expect("covered operation is idempotent");
+        assert_eq!(result.disposition, RemoteBatchDisposition::AlreadyApplied);
+    }
+
+    sender
+        .edit_item(EditItemRequest {
+            item_id: item.id,
+            title: Some(OptionalTextUpdate::Set("After checkpoint".into())),
+            ..EditItemRequest::default()
+        })
+        .await
+        .expect("create uncovered tail");
+    let tail = sender
+        .pending_batches()
+        .await
+        .expect("tail outbox")
+        .into_iter()
+        .find(|batch| !covered.iter().any(|covered| covered.path == batch.path))
+        .expect("uncovered tail batch");
+    let applied = receiver
+        .receive_remote_batch(&tail.path, &"c".repeat(40), tail.envelope_json.as_bytes())
+        .await
+        .expect("apply uncovered tail");
+    assert_eq!(applied.disposition, RemoteBatchDisposition::Applied);
+    assert_eq!(
+        receiver
+            .item(
+                &sender
+                    .list(ListQuery::default())
+                    .await
+                    .expect("sender list")
+                    .items[0]
+                    .id
+            )
+            .await
+            .expect("receiver item")
+            .title
+            .as_deref(),
+        Some("After checkpoint")
+    );
+}
+
+#[tokio::test]
+async fn native_mutations_reuse_one_durable_loro_peer() {
+    let root = tempfile::tempdir().expect("temporary test root");
+    let store = V2Store::init(root.path().join("library"))
+        .await
+        .expect("initialize store");
+    let item = store
+        .create_item(CreateItemRequest {
+            url: "https://example.com/stable-peer".into(),
+            title: None,
+            excerpt: None,
+            favorite: false,
+            language: None,
+            saved_at: Some(1_700_000_000),
+            note: String::new(),
+            tags: Vec::new(),
+        })
+        .await
+        .expect("create item");
+    for favorite in [true, false] {
+        store
+            .edit_item(EditItemRequest {
+                item_id: item.id.clone(),
+                favorite: Some(favorite),
+                ..EditItemRequest::default()
+            })
+            .await
+            .expect("edit item");
+    }
+    let envelopes = store
+        .pending_batches()
+        .await
+        .expect("pending batches")
+        .into_iter()
+        .map(|batch| {
+            serde_json::from_str::<UpdateEnvelope>(&batch.envelope_json)
+                .expect("stored update envelope")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(envelopes.len(), 3);
+    assert!(envelopes[0].causal_frontier.is_empty());
+    assert_eq!(envelopes[1].causal_frontier.len(), 1);
+    assert_eq!(envelopes[2].causal_frontier.len(), 1);
+    assert_eq!(
+        envelopes[1].causal_frontier.keys().collect::<Vec<_>>(),
+        envelopes[2].causal_frontier.keys().collect::<Vec<_>>()
+    );
+}
 
 #[tokio::test]
 async fn one_operation_pack_applies_and_acknowledges_several_exact_updates() {

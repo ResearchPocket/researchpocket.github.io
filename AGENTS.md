@@ -35,8 +35,8 @@ Do not expand V2 into:
 - a multi-user collaboration or real-time team product;
 - a general notes/wiki application or a store for standalone notes;
 - a general-purpose webpage archive, file/PDF store, highlighting system, or
-  attachment manager beyond the bounded Firecrawl Markdown retained in an
-  item's existing excerpt register;
+  attachment manager beyond bounded content-addressed Firecrawl Markdown
+  referenced by an item;
 - a hosted account service or an application backend that must stay online;
 - a native mobile application;
 - end-to-end encrypted remote storage or encrypted sharing; or
@@ -230,8 +230,8 @@ an identical hash is an idempotent success; different content is an integrity
 error that must stop sync without discarding local data.
 
 Each installation receives its own device UUID and persists its next sequence
-before upload. Create immutable checkpoints after either 1,000 update batches or
-10 MiB of unapplied tail data. Checkpoints accelerate bootstrap but do not alter
+before upload. Create immutable checkpoints after either 100 update batches or
+2 MiB of unapplied tail data. Checkpoints accelerate bootstrap but do not alter
 merge semantics. V2 does not prune update history; secure erasure requires a
 documented repository-history rewrite or migration to a new data repository.
 

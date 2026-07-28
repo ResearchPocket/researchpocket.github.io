@@ -170,7 +170,7 @@ pub struct EnrichRunArgs {
     #[arg(long, value_enum, value_name = "PROVIDER")]
     pub provider: Option<EnrichmentProviderArg>,
 
-    /// Explicitly replace the current excerpt after re-parsing the saved URL
+    /// Force a fresh parse; retained name for compatibility (authored excerpt is preserved)
     #[arg(long, requires = "item_id")]
     pub replace_excerpt: bool,
 
@@ -361,7 +361,7 @@ pub enum OutputFormat {
 pub enum EnrichmentProviderArg {
     /// Fetch public HTML directly from this device
     Direct,
-    /// Send the URL to Firecrawl and retain bounded Markdown in the excerpt
+    /// Send the URL to Firecrawl and retain bounded private captured Markdown
     Firecrawl,
 }
 

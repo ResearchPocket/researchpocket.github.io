@@ -25,8 +25,28 @@ export interface PersistedItem {
   language: string | null;
   savedAt: string;
   savedAtUnix: number;
+  capturedDocument: CapturedDocumentReference | null;
   tags: string[];
   deleted: boolean;
+}
+
+export interface CapturedDocumentReference {
+  sha256: string;
+  byte_length: number;
+  media_type: string;
+  provenance: {
+    provider: string;
+    source_url: string;
+    captured_at: string;
+  };
+}
+
+export interface PersistedCapturedDocument {
+  sha256: string;
+  path: string;
+  markdown: string;
+  byteLength: number;
+  storedAt: string;
 }
 
 export interface PersistedBatch {
@@ -78,6 +98,33 @@ export interface RemoteObservation {
   observedAt: string;
 }
 
+export interface PersistedCoverageInterval {
+  start: string;
+  end: string;
+}
+
+export type PersistedCheckpointCoverage = Record<
+  string,
+  PersistedCoverageInterval[]
+>;
+
+export interface PersistedCheckpoint {
+  path: string;
+  checkpointId: string;
+  checkpointJson: string;
+  batchCount: number;
+  coverage: PersistedCheckpointCoverage;
+  createdAt: string;
+  origin: "local" | "remote";
+  appliedAt: string;
+}
+
+export interface PersistedSelectedCheckpoint {
+  key: "selected";
+  checkpointPath: string;
+  selectedAt: string;
+}
+
 export interface PersistedSyncConfiguration {
   key: "github";
   owner: string;
@@ -124,6 +171,18 @@ interface ResearchPocketBrowserDb extends DBSchema {
     key: string;
     value: RemoteObservation;
   };
+  checkpoints: {
+    key: string;
+    value: PersistedCheckpoint;
+  };
+  selectedCheckpoint: {
+    key: "selected";
+    value: PersistedSelectedCheckpoint;
+  };
+  capturedDocuments: {
+    key: string;
+    value: PersistedCapturedDocument;
+  };
   syncConfig: {
     key: "github";
     value: PersistedSyncConfiguration;
@@ -133,7 +192,7 @@ interface ResearchPocketBrowserDb extends DBSchema {
 export function openBrowserDatabase(
   name: string,
 ): Promise<IDBPDatabase<ResearchPocketBrowserDb>> {
-  return openDB<ResearchPocketBrowserDb>(name, 2, {
+  return openDB<ResearchPocketBrowserDb>(name, 4, {
     upgrade(database, oldVersion) {
       if (oldVersion < 1) {
         database.createObjectStore("meta", { keyPath: "key" });
@@ -152,6 +211,13 @@ export function openBrowserDatabase(
       }
       if (oldVersion < 2) {
         database.createObjectStore("syncConfig", { keyPath: "key" });
+      }
+      if (oldVersion < 3) {
+        database.createObjectStore("checkpoints", { keyPath: "path" });
+        database.createObjectStore("selectedCheckpoint", { keyPath: "key" });
+      }
+      if (oldVersion < 4) {
+        database.createObjectStore("capturedDocuments", { keyPath: "sha256" });
       }
     },
     blocked() {

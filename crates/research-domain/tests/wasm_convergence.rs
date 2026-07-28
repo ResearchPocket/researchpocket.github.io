@@ -111,7 +111,7 @@ fn browser_snapshot_boundary_preserves_the_mutation_and_replay_contract() {
             "state": "active"
         }]
     });
-    assert_eq!(restored["projection"], expected_projection);
+    assert_eq!(restored["item"], expected_projection["items"][0]);
 
     let replica = initialize_library("42").expect("replica snapshot");
     let child_only: Value = serde_json::from_str(
@@ -141,7 +141,10 @@ fn browser_snapshot_boundary_preserves_the_mutation_and_replay_contract() {
     )
     .expect("resolved result JSON");
     assert_eq!(resolved["pending_indices"], json!([]));
-    assert_eq!(resolved["projection"], edited["projection"]);
+    assert_eq!(
+        resolved["projection"],
+        json!({"schema_version": 3, "items": [edited["item"].clone()]})
+    );
 
     let created_envelope = created["envelope"].as_str().expect("created envelope");
     let exact_duplicate: Value = serde_json::from_str(
@@ -155,7 +158,10 @@ fn browser_snapshot_boundary_preserves_the_mutation_and_replay_contract() {
     )
     .expect("exact duplicate result JSON");
     assert_eq!(exact_duplicate["pending_indices"], json!([]));
-    assert_eq!(exact_duplicate["projection"], created["projection"]);
+    assert_eq!(
+        exact_duplicate["projection"],
+        json!({"schema_version": 3, "items": [created["item"].clone()]})
+    );
 
     let mut invalid_timestamp: Value =
         serde_json::from_str(created_envelope).expect("created envelope JSON");

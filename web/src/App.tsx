@@ -13,6 +13,7 @@ import {
 } from "./components/MarkdownDocument.tsx";
 import {
   type LibraryState,
+  type CapturedDocumentReference,
   type PendingSyncChange,
   type UndoableChange,
   libraryRepository,
@@ -48,6 +49,7 @@ interface LibraryItemView {
   favorite: boolean;
   deleted: boolean;
   savedAt: string;
+  capturedDocument?: CapturedDocumentReference | null;
 }
 
 type LifecycleFilter = "active" | "deleted" | "all";
@@ -2160,15 +2162,53 @@ function ReaderView({
     image: MarkdownImage;
     opener: HTMLButtonElement;
   } | null>(null);
+  const [capturedContext, setCapturedContext] = useState<string | null>(null);
+  const [capturedContextError, setCapturedContextError] = useState<string | null>(
+    null,
+  );
+  const [capturedContextLoading, setCapturedContextLoading] = useState(false);
   const imageCloseRef = useRef<HTMLButtonElement | null>(null);
   const label = item.title?.trim() || item.url;
-  const context = item.excerpt;
+  const context = capturedContext ?? item.excerpt;
   const hasContext = Boolean(context?.trim());
   const imagesAllowed = itemsWithImages.has(item.id);
 
   useEffect(() => {
     setExpandedImage(null);
   }, [item.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setCapturedContext(null);
+    setCapturedContextError(null);
+    const reference = item.capturedDocument;
+    if (!reference) {
+      setCapturedContextLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+    setCapturedContextLoading(true);
+    void browserSync.loadCapturedDocument(reference).then(
+      (markdown) => {
+        if (cancelled) return;
+        setCapturedContext(markdown);
+        setCapturedContextLoading(false);
+      },
+      (error: unknown) => {
+        if (cancelled) return;
+        setCapturedContextError(
+          error instanceof Error
+            ? error.message
+            : "Captured page content could not be loaded.",
+        );
+        setCapturedContextLoading(false);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [item.id, item.capturedDocument?.sha256]);
 
   useEffect(() => {
     if (expandedImage) imageCloseRef.current?.focus();
@@ -2235,6 +2275,12 @@ function ReaderView({
           {item.tags.length > 0 ? <p className="reader-tags">{item.tags.map((tag) => <span key={tag}>#{tag}</span>)}</p> : null}
           {item.note?.trim() ? <aside className="reader-note"><strong>Your note</strong><p>{item.note}</p></aside> : null}
           <div className="reader-body">
+            {capturedContextLoading ? (
+              <p role="status">Loading captured page content…</p>
+            ) : null}
+            {capturedContextError ? (
+              <p className="sync-error" role="alert">{capturedContextError}</p>
+            ) : null}
             {hasContext && context ? (
               <MarkdownDocument
                 imageBaseUrl={item.url}
@@ -2245,7 +2291,7 @@ function ReaderView({
                 }
                 source={context}
               />
-            ) : (
+            ) : capturedContextLoading ? null : (
               <p>This save has no extracted preview yet. Open the original to read the full page, or add a private note to keep the context that matters.</p>
             )}
             <p className="reader-source">ResearchPocket keeps the URL and your authored context locally. The original page remains at <a href={item.url} rel="noreferrer" target="_blank">{readHostname(item.url)}</a>.</p>
