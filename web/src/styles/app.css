@@ -2689,6 +2689,24 @@ kbd {
   color: var(--color-accent-strong);
 }
 
+.reader-markdown .katex-display {
+  display: block;
+  margin: 1em 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.125rem 0;
+  text-align: center;
+}
+
+.reader-markdown .katex-display math {
+  margin: 0 auto;
+}
+
+.reader-markdown .katex-error {
+  color: var(--color-danger);
+}
+
 .reader-markdown-image-placeholder {
   align-items: center;
   border: var(--rule) solid var(--color-border);

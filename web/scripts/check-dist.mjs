@@ -45,6 +45,15 @@ if (sourceMaps.length > 0) {
   );
 }
 
+const katexFonts = files.filter((file) =>
+  /KaTeX_[^/]*\.(?:ttf|woff2?)$/i.test(file),
+);
+if (katexFonts.length > 0) {
+  failures.push(
+    `MathML rendering must not ship KaTeX fonts: ${katexFonts.map((file) => relative(distRoot, file)).join(", ")}`,
+  );
+}
+
 const artifacts = files.map((file) => ({ file, bytes: readFileSync(file) }));
 const htmlArtifacts = artifacts.filter(({ file }) => extname(file) === ".html");
 const textExtensions = new Set([
@@ -61,6 +70,10 @@ const text = artifacts
   .filter(({ file }) => textExtensions.has(extname(file)))
   .map(({ bytes }) => bytes.toString("utf8"))
   .join("\n");
+
+if (!/\.katex-display\b/.test(text)) {
+  failures.push("The production build is missing KaTeX display styles");
+}
 
 for (const [name, pattern] of [
   ["source map reference", /sourceMappingURL=/i],

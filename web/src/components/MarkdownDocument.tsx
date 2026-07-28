@@ -1,6 +1,30 @@
 import { memo } from "react";
+import rehypeKatex from "rehype-katex";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import {
+  markdownMathMacros,
+  normalizeMarkdownMathDelimiters,
+  remarkBareMath,
+} from "./markdownMath.ts";
+
+interface MarkdownTreeNode {
+  children?: MarkdownTreeNode[];
+  properties?: Record<string, unknown>;
+}
+
+function removeKatexInlineStyles() {
+  return (tree: MarkdownTreeNode) => {
+    const visit = (node: MarkdownTreeNode) => {
+      if (node.properties && "style" in node.properties) {
+        delete node.properties.style;
+      }
+      node.children?.forEach(visit);
+    };
+    visit(tree);
+  };
+}
 
 export interface MarkdownImage {
   alt: string;
@@ -112,10 +136,17 @@ export const MarkdownDocument = memo(function MarkdownDocument({
     <div className={className}>
       <ReactMarkdown
         components={{ ...safeMarkdownComponents, ...components }}
-        remarkPlugins={[remarkGfm]}
+        rehypePlugins={[
+          [
+            rehypeKatex,
+            { macros: markdownMathMacros, output: "mathml" },
+          ],
+          removeKatexInlineStyles,
+        ]}
+        remarkPlugins={[remarkGfm, remarkMath, remarkBareMath]}
         skipHtml
       >
-        {source}
+        {normalizeMarkdownMathDelimiters(source)}
       </ReactMarkdown>
     </div>
   );
