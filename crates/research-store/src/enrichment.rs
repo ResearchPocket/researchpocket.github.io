@@ -268,14 +268,15 @@ async fn queue_enrichment_on_connection_with_options(
     let updated = sqlx::query(
         "INSERT INTO item_enrichment_jobs \
          (item_id, provider, status, attempts, target_title, target_excerpt, target_language, \
-          expected_title_revision, expected_excerpt_text, expected_language_revision, \
+          replace_excerpt, expected_title_revision, expected_excerpt_text, \
+          expected_language_revision, \
           queued_at, updated_at, next_attempt_at, last_attempt_at, completed_at, lease_token, \
           lease_expires_at, last_error_kind) \
-         VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, NULL, NULL) \
+         VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, NULL, NULL) \
          ON CONFLICT(item_id) DO UPDATE SET \
           provider = excluded.provider, status = excluded.status, attempts = 0, \
           target_title = excluded.target_title, target_excerpt = excluded.target_excerpt, \
-          target_language = excluded.target_language, \
+          target_language = excluded.target_language, replace_excerpt = excluded.replace_excerpt, \
           expected_title_revision = excluded.expected_title_revision, \
           expected_excerpt_text = excluded.expected_excerpt_text, \
           expected_language_revision = excluded.expected_language_revision, \
@@ -291,6 +292,7 @@ async fn queue_enrichment_on_connection_with_options(
     .bind(targets.title_revision.is_some())
     .bind(targets.excerpt_text.is_some())
     .bind(targets.language_revision.is_some())
+    .bind(replace_excerpt)
     .bind(&targets.title_revision)
     .bind(&targets.excerpt_text)
     .bind(&targets.language_revision)
@@ -339,7 +341,12 @@ async fn apply_enrichment_on_connection(
                 create_captured_document(markdown, "firecrawl", expected_url, &now_rfc3339())
             })
             .transpose()?;
-        (None, artifact)
+        let excerpt = if current_job.replace_excerpt {
+            fetched_context.clone()
+        } else {
+            None
+        };
+        (excerpt, artifact)
     } else {
         (fetched_context, None)
     };
@@ -352,11 +359,13 @@ async fn apply_enrichment_on_connection(
                 == Some(current_item.language.winner.as_str())
     });
     let applied_title = title.is_some();
-    let applied_excerpt = excerpt.is_some() || captured_document.is_some();
+    let applied_excerpt = excerpt.is_some();
+    let applied_captured_document = captured_document.is_some();
     // Remembered so a later re-queue can tell this excerpt came from a provider.
     let applied_excerpt_text = excerpt.clone();
     let applied_language = language.is_some();
-    let applied_any = applied_title || applied_excerpt || applied_language;
+    let applied_any =
+        applied_title || applied_excerpt || applied_captured_document || applied_language;
 
     let item = if applied_any {
         let mutation_item_id = item_id.to_owned();
@@ -449,6 +458,7 @@ async fn apply_enrichment_on_connection(
         job,
         applied_title,
         applied_excerpt,
+        applied_captured_document,
         applied_language,
     })
 }
@@ -629,7 +639,7 @@ async fn optional_enrichment_job_record(
 ) -> StoreResult<Option<EnrichmentJobRecord>> {
     sqlx::query_as::<_, EnrichmentJobRow>(
         "SELECT item_id, provider, status, attempts, target_title, target_excerpt, \
-         target_language, expected_title_revision, expected_excerpt_text, \
+         target_language, replace_excerpt, expected_title_revision, expected_excerpt_text, \
          expected_language_revision, queued_at, updated_at, next_attempt_at, last_attempt_at, \
          completed_at, lease_token, lease_expires_at, last_error_kind \
          FROM item_enrichment_jobs WHERE item_id = ?",
@@ -765,6 +775,7 @@ struct EnrichmentJobRow {
     target_title: bool,
     target_excerpt: bool,
     target_language: bool,
+    replace_excerpt: bool,
     expected_title_revision: Option<String>,
     expected_excerpt_text: Option<String>,
     expected_language_revision: Option<String>,
@@ -780,6 +791,7 @@ struct EnrichmentJobRow {
 
 struct EnrichmentJobRecord {
     job: EnrichmentJob,
+    replace_excerpt: bool,
     expected_title_revision: Option<String>,
     expected_excerpt_text: Option<String>,
     expected_language_revision: Option<String>,
@@ -817,6 +829,7 @@ impl TryFrom<EnrichmentJobRow> for EnrichmentJobRecord {
                 completed_at: row.completed_at,
                 last_error_kind: row.last_error_kind,
             },
+            replace_excerpt: row.replace_excerpt,
             expected_title_revision: row.expected_title_revision,
             expected_excerpt_text: row.expected_excerpt_text,
             expected_language_revision: row.expected_language_revision,
