@@ -38,6 +38,11 @@ input[type="checkbox"] {
   touch-action: manipulation;
 }
 
+button {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 button,
 a {
   -webkit-tap-highlight-color: transparent;

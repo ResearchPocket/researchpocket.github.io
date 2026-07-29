@@ -50,7 +50,9 @@ must have text labels. Color may reinforce state but may not be its only signal.
 
 The interface uses no animations or transitions. Feedback is immediate state,
 text, focus, or a native dialog. Functionality must not depend on hover, motion,
-or a pointer device.
+or a pointer device. A pressed control may change position by at most the
+`--control-press-offset` token while the pointer is down; reduced-motion mode
+keeps the non-positional surface cue and removes that offset.
 
 ### Self-hosted type, native controls
 
@@ -145,6 +147,23 @@ Primary buttons are reserved for the one committing action in a form or task.
 Secondary buttons cancel or remove temporary access. Text actions are suitable
 for record-level edit, restore, and delete controls. Controls use the compact
 system height, remain content-sized, and retain a visible focus outline.
+
+Button tactility takes interaction inspiration from the frontend of
+[Datastar](https://data-star.dev/), inspected on 2026-07-29. Its controls use a
+prominent lower/right inset edge at rest, then invert that edge and redistribute
+content padding while pressed. ResearchPocket adapts the interaction rather
+than the visual brand: a two-pixel internal edge flips from lower/right to
+upper/left, while the control settles by one pixel for a fine pointer and two
+pixels for a coarse pointer. The internal edge and positional offset never
+change layout dimensions.
+
+Pressed, disabled, focus-visible, selected, and hover states remain separate.
+Hover-only decoration is limited to devices with a fine pointer and real hover,
+so touch devices do not retain a sticky hover state after release. Disabled and
+busy controls never receive a pressed transform. Reduced-motion mode removes
+the positional offset while preserving the immediate edge and color change.
+This pattern uses native CSS only: no animation library, vibration, audio,
+decorative shadow, gradient, or third-party runtime asset.
 
 ### Fields
 
