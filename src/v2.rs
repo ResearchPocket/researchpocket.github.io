@@ -573,6 +573,9 @@ async fn attempt_enrichment(
             if applied.applied_excerpt {
                 applied_fields.push("excerpt");
             }
+            if applied.applied_captured_document {
+                applied_fields.push("captured_document");
+            }
             if applied.applied_language {
                 applied_fields.push("language");
             }

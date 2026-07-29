@@ -102,8 +102,9 @@ observed at queue time instead. A later human clear/edit and a concurrent
 unsynchronized human revision both win. `--title ""` and `--language ""` are
 authored values and are not replaced; `--excerpt ""` leaves the excerpt blank,
 which merged text cannot distinguish from unset, so enrichment may still fill
-it. Firecrawl is the exception: its full Markdown is stored separately as
-private captured content and never replaces the authored excerpt.
+it. Firecrawl stores its full Markdown separately as private captured content
+by default. It replaces the authored excerpt only when the owner explicitly
+passes `--replace-excerpt`.
 
 ### Direct public-HTML provider
 
@@ -145,16 +146,17 @@ proxy tier.
 Passing an item ID and `--provider firecrawl` refreshes its captured document.
 The authored excerpt remains untouched.
 
-The historical `--replace-excerpt` flag now means “force a fresh parse” for
-compatibility with existing scripts:
+Pass `--replace-excerpt` when the fresh parse should also replace the authored
+excerpt:
 
 ```sh
 research enrich run <item-id> --provider firecrawl --replace-excerpt
 ```
 
-The job records the current authored excerpt before network access. If that
-context changes while Firecrawl is running, the fetched result is skipped; a
-subsequent run can capture the page without replacing that context.
+The job records the current authored excerpt before network access and preserves
+that replacement intent across local retries. If the excerpt changes while
+Firecrawl is running, neither the captured document nor the excerpt is updated;
+a subsequent run may explicitly replace the newer excerpt.
 
 Store the key in a separate per-library file without placing it in process
 arguments or shell history:

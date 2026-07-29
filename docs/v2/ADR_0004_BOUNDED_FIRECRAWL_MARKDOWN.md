@@ -60,11 +60,12 @@ and field policy.
 
 ## Consequences
 
-ADR 0010 supersedes the storage-location part of this decision. New Firecrawl
-Markdown is now an immutable content-addressed `CapturedDocument`; the authored
-excerpt remains editable and is no longer replaced by Firecrawl. The bounds,
-normalization, private-by-default policy, and Reader safety decisions here
-remain in force.
+ADR 0010 supersedes the default storage-location part of this decision. New
+Firecrawl Markdown is now an immutable content-addressed `CapturedDocument`;
+the authored excerpt remains editable and is not replaced during ordinary
+enrichment. The explicit `--replace-excerpt` action remains the deliberate
+exception described above. The bounds, normalization, private-by-default
+policy, and Reader safety decisions here remain in force.
 
 - A private library, checkpoint, restore, export, and sync history may be much
   larger than a URL-and-metadata-only library.

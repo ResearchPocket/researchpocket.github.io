@@ -98,7 +98,11 @@ embed them.
 The authored excerpt remains an item field. Existing v1 excerpts remain
 lossless. Migration may externalize an excerpt only when durable enrichment
 provenance proves it is fetched content; ambiguous authored values remain
-excerpt text. New Firecrawl enrichment writes `CapturedDocument`, not excerpt.
+excerpt text. New Firecrawl enrichment writes `CapturedDocument`, not excerpt,
+by default. The owner's explicit `--replace-excerpt` action deliberately writes
+the fetched Markdown to both locations when the excerpt text observed before
+network access is still current. That intent is durable across enrichment
+retries.
 
 Captured documents use a private immutable path:
 

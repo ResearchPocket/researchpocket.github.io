@@ -170,7 +170,7 @@ pub struct EnrichRunArgs {
     #[arg(long, value_enum, value_name = "PROVIDER")]
     pub provider: Option<EnrichmentProviderArg>,
 
-    /// Force a fresh parse; retained name for compatibility (authored excerpt is preserved)
+    /// Force a fresh parse and replace the excerpt if it stays unchanged during the request
     #[arg(long, requires = "item_id")]
     pub replace_excerpt: bool,
 

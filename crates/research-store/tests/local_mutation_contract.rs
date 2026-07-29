@@ -5,8 +5,7 @@ use research_store::{
 };
 
 #[tokio::test]
-async fn firecrawl_reenrichment_replaces_captured_content_without_overwriting_authored_excerpt()
-{
+async fn firecrawl_reenrichment_replaces_excerpt_only_when_explicitly_requested() {
     let directory = tempfile::tempdir().expect("library temp directory");
     let store = V2Store::init(directory.path().join("library"))
         .await
@@ -44,7 +43,8 @@ async fn firecrawl_reenrichment_replaces_captured_content_without_overwriting_au
         )
         .await
         .expect("apply initial enrichment");
-    assert!(first.applied_excerpt);
+    assert!(!first.applied_excerpt);
+    assert!(first.applied_captured_document);
     assert!(first.item.excerpt.is_none());
     let first_reference = first
         .item
@@ -63,12 +63,12 @@ async fn firecrawl_reenrichment_replaces_captured_content_without_overwriting_au
     let requeued = store
         .queue_item_enrichment(&item.id, EnrichmentProvider::Firecrawl)
         .await
-        .expect("requeue enrichment-owned excerpt");
+        .expect("requeue captured content");
     assert!(requeued.target_excerpt);
     let second_claim = store
         .claim_item_enrichment(&item.id)
         .await
-        .expect("claim replacement enrichment");
+        .expect("claim captured-content refresh");
     let replaced = store
         .apply_item_enrichment(
             &item.id,
@@ -81,7 +81,9 @@ async fn firecrawl_reenrichment_replaces_captured_content_without_overwriting_au
             },
         )
         .await
-        .expect("replace enrichment-owned excerpt");
+        .expect("refresh captured content");
+    assert!(!replaced.applied_excerpt);
+    assert!(replaced.applied_captured_document);
     assert!(replaced.item.excerpt.is_none());
     let replaced_reference = replaced
         .item
@@ -143,6 +145,7 @@ async fn firecrawl_reenrichment_replaces_captured_content_without_overwriting_au
         .await
         .expect("complete stale replacement safely");
     assert!(!stale.applied_excerpt);
+    assert!(!stale.applied_captured_document);
     assert_eq!(
         stale.item.excerpt.as_deref(),
         Some("Newer authored context")
@@ -152,10 +155,22 @@ async fn firecrawl_reenrichment_replaces_captured_content_without_overwriting_au
         .queue_item_enrichment_replacing_excerpt(&item.id, EnrichmentProvider::Firecrawl)
         .await
         .expect("queue replacement of current revision");
-    let replacement_claim = store
+    let failed_replacement_claim = store
         .claim_item_enrichment(&item.id)
         .await
         .expect("claim current replacement");
+    store
+        .record_enrichment_failure(
+            &item.id,
+            &failed_replacement_claim.lease_token,
+            "request_timeout",
+        )
+        .await
+        .expect("record a retryable replacement failure");
+    let replacement_claim = store
+        .claim_item_enrichment(&item.id)
+        .await
+        .expect("reclaim replacement without losing its intent");
     let replacement = store
         .apply_item_enrichment(
             &item.id,
@@ -170,10 +185,8 @@ async fn firecrawl_reenrichment_replaces_captured_content_without_overwriting_au
         .await
         .expect("replace unchanged authored excerpt explicitly");
     assert!(replacement.applied_excerpt);
-    assert_eq!(
-        replacement.item.excerpt.as_deref(),
-        Some("Newer authored context")
-    );
+    assert!(replacement.applied_captured_document);
+    assert_eq!(replacement.item.excerpt.as_deref(), Some("# Fresh parse"));
     let fresh_reference = replacement
         .item
         .captured_document

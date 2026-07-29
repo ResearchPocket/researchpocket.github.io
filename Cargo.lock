@@ -2763,7 +2763,7 @@ dependencies = [
 
 [[package]]
 name = "research"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "base64",
  "chrono",
@@ -2793,7 +2793,7 @@ dependencies = [
 
 [[package]]
 name = "research-domain"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "base64",
  "chrono",
@@ -2809,7 +2809,7 @@ dependencies = [
 
 [[package]]
 name = "research-store"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "base64",
  "chrono",

@@ -65,7 +65,7 @@ accept one, install [Rust](https://www.rust-lang.org/tools/install) and build th
 matching release tag from source instead of weakening system-wide security:
 
 ```sh
-git clone --branch v2.1.0 --depth 1 \
+git clone --branch v2.1.1 --depth 1 \
   https://github.com/ResearchPocket/researchpocket.github.io.git
 cd researchpocket.github.io
 cargo build --locked --release

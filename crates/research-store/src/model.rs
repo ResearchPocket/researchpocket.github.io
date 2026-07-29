@@ -141,6 +141,7 @@ pub struct EnrichmentApplyResult {
     pub job: EnrichmentJob,
     pub applied_title: bool,
     pub applied_excerpt: bool,
+    pub applied_captured_document: bool,
     pub applied_language: bool,
 }
 
