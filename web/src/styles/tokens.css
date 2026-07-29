@@ -65,6 +65,21 @@
   --color-focus: color-mix(in srgb, var(--accent) 62%, var(--text));
   --color-inverse: var(--background);
   --color-inverse-surface: var(--primary);
+  --color-control-edge: color-mix(
+    in srgb,
+    var(--color-border-strong) 78%,
+    var(--color-canvas)
+  );
+  --color-control-pressed: color-mix(
+    in srgb,
+    var(--color-accent) 18%,
+    var(--color-surface-raised)
+  );
+  --color-control-primary-pressed: color-mix(
+    in srgb,
+    var(--color-accent) 18%,
+    var(--color-inverse-surface)
+  );
 
   --font-size-xs: 0.75rem;
   --font-size-sm: 0.8125rem;
@@ -84,6 +99,8 @@
   --space-8: 2.5rem;
 
   --control-height: 2.5rem;
+  --control-press-depth: 0.125rem;
+  --control-press-offset: 0.0625rem;
   --measure: 72ch;
   --page-width: 100rem;
   --rule: 1px;
@@ -93,6 +110,7 @@
 @media (pointer: coarse) {
   :root {
     --control-height: 2.75rem;
+    --control-press-offset: 0.125rem;
   }
 }
 
