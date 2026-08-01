@@ -86,6 +86,9 @@ for (const [name, pattern] of [
 for (const [name, pattern] of [
   ["unsafe-inline CSP source", /unsafe-inline/i],
   ["development CSP nonce", /nonce-[a-z0-9]+/i],
+  // Firefox fetches modulepreload under default-src, which is 'none' here, so
+  // a preload link takes the page down instead of speeding it up.
+  ["a modulepreload link this CSP cannot fetch", /rel="modulepreload"/i],
 ]) {
   const matchingFiles = htmlArtifacts
     .filter(({ bytes }) => pattern.test(bytes.toString("utf8")))
