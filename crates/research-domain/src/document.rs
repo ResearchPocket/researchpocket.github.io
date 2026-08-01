@@ -345,39 +345,15 @@ impl Library {
     where
         T: Clone + DeserializeOwned + Serialize,
     {
-        let revisions = self.scalar_revisions_mut(item_id, field)?;
-        let existing = read_records::<ScalarRevision<T>>(&revisions)?;
-        let revision = ScalarRevision {
-            parents: causal_heads(&existing, |revision| &revision.parents),
-            value,
-        };
-        insert_immutable_record(&revisions, revision_id, &revision)
+        write_entity_scalar(&self.item_mut(item_id)?, field, revision_id, value)
     }
 
     pub fn add_tag(&self, item_id: &str, tag: &str, add_dot: &str) -> DomainResult<()> {
-        let tag = validate_tag(tag)?;
-        let tags = self
-            .item_mut(item_id)?
-            .ensure_mergeable_map(TAGS)
-            .map_err(loro_error)?;
-        let state = tags.ensure_mergeable_map(&tag).map_err(loro_error)?;
-        let adds = state.ensure_mergeable_map(ADDS).map_err(loro_error)?;
-        insert_boolean_dot(&adds, add_dot)
+        add_entity_tag(&self.item_mut(item_id)?, tag, add_dot)
     }
 
     pub fn remove_tag(&self, item_id: &str, tag: &str) -> DomainResult<()> {
-        let tag = validate_tag(tag)?;
-        let tags = self
-            .item_mut(item_id)?
-            .ensure_mergeable_map(TAGS)
-            .map_err(loro_error)?;
-        let state = tags.ensure_mergeable_map(&tag).map_err(loro_error)?;
-        let adds = state.ensure_mergeable_map(ADDS).map_err(loro_error)?;
-        let removes = state.ensure_mergeable_map(REMOVES).map_err(loro_error)?;
-        for add_dot in map_keys(&adds) {
-            insert_boolean_dot(&removes, &add_dot)?;
-        }
-        Ok(())
+        remove_entity_tag(&self.item_mut(item_id)?, tag)
     }
 
     pub fn transition_lifecycle(
@@ -386,37 +362,7 @@ impl Library {
         revision_id: &str,
         state: LifecycleState,
     ) -> DomainResult<()> {
-        let revisions = self.lifecycle_revisions_mut(item_id)?;
-        let existing = read_records::<LifecycleRevision>(&revisions)?;
-        let parents = causal_heads(&existing, |revision| &revision.parents);
-        if !existing.is_empty() {
-            let visible = lifecycle_view(existing.clone())?;
-            match (visible.state, state) {
-                (LifecycleState::Active, LifecycleState::Active) => {
-                    return Err(DomainError::InvalidState(
-                        "restore requires an observed deleted lifecycle head".into(),
-                    ));
-                }
-                (LifecycleState::Deleted, LifecycleState::Deleted) => {
-                    return Err(DomainError::InvalidState(
-                        "delete requires an observed active lifecycle head".into(),
-                    ));
-                }
-                _ => {}
-            }
-        }
-        let generation = parents
-            .iter()
-            .filter_map(|parent| existing.get(parent))
-            .map(|revision| revision.generation)
-            .max()
-            .map_or(0, |generation| generation + 1);
-        let revision = LifecycleRevision {
-            generation,
-            parents,
-            state,
-        };
-        insert_immutable_record(&revisions, revision_id, &revision)
+        transition_entity_lifecycle(&self.item_mut(item_id)?, revision_id, state)
     }
 
     pub fn export_envelope(
@@ -479,7 +425,7 @@ impl Library {
             let tags = project_tags(map_child(&item, TAGS)?)?;
             let lifecycle = map_child(&item, LIFECYCLE)?;
             let lifecycle_revisions = map_child(&lifecycle, REVISIONS)?;
-            let lifecycle = lifecycle_view(read_records(&lifecycle_revisions)?)?;
+            let lifecycle = lifecycle_view(read_entity_records(&lifecycle_revisions)?)?;
             projected.insert(
                 item_id,
                 CanonicalItem {
@@ -503,22 +449,15 @@ impl Library {
     }
 
     fn item_mut(&self, item_id: &str) -> DomainResult<LoroMap> {
-        self.doc
-            .get_map(ITEMS)
-            .ensure_mergeable_map(item_id)
-            .map_err(loro_error)
+        entity_mut(&self.doc, ITEMS, item_id)
     }
 
     fn note_mut(&self, item_id: &str) -> DomainResult<LoroText> {
-        self.item_mut(item_id)?
-            .ensure_mergeable_text(NOTE)
-            .map_err(loro_error)
+        entity_text_mut(&self.item_mut(item_id)?, NOTE)
     }
 
     fn excerpt_mut(&self, item_id: &str) -> DomainResult<LoroText> {
-        self.item_mut(item_id)?
-            .ensure_mergeable_text(EXCERPT)
-            .map_err(loro_error)
+        entity_text_mut(&self.item_mut(item_id)?, EXCERPT)
     }
 
     /// Reads the excerpt container without creating it, so that merely looking
@@ -532,24 +471,114 @@ impl Library {
             )),
         }
     }
+}
 
-    fn scalar_revisions_mut(&self, item_id: &str, field: &str) -> DomainResult<LoroMap> {
-        self.item_mut(item_id)?
-            .ensure_mergeable_map(SCALARS)
-            .map_err(loro_error)?
-            .ensure_mergeable_map(field)
-            .map_err(loro_error)?
-            .ensure_mergeable_map(REVISIONS)
-            .map_err(loro_error)
-    }
+/// Operations shared by every entity a library holds.
+///
+/// An entity is one `LoroMap` carrying causal scalar registers, add-wins tag
+/// sets, lifecycle generations, and character-level text. Items live under one
+/// root and zen documents under another, but the convergence rules are the
+/// same, so they are written once here rather than per root.
+pub(crate) fn entity_mut(doc: &LoroDoc, root: &str, entity_id: &str) -> DomainResult<LoroMap> {
+    doc.get_map(root)
+        .ensure_mergeable_map(entity_id)
+        .map_err(loro_error)
+}
 
-    fn lifecycle_revisions_mut(&self, item_id: &str) -> DomainResult<LoroMap> {
-        self.item_mut(item_id)?
-            .ensure_mergeable_map(LIFECYCLE)
-            .map_err(loro_error)?
-            .ensure_mergeable_map(REVISIONS)
-            .map_err(loro_error)
+pub(crate) fn entity_text_mut(entity: &LoroMap, field: &str) -> DomainResult<LoroText> {
+    entity.ensure_mergeable_text(field).map_err(loro_error)
+}
+
+pub(crate) fn write_entity_scalar<T>(
+    entity: &LoroMap,
+    field: &str,
+    revision_id: &str,
+    value: T,
+) -> DomainResult<()>
+where
+    T: Clone + DeserializeOwned + Serialize,
+{
+    let revisions = entity
+        .ensure_mergeable_map(SCALARS)
+        .map_err(loro_error)?
+        .ensure_mergeable_map(field)
+        .map_err(loro_error)?
+        .ensure_mergeable_map(REVISIONS)
+        .map_err(loro_error)?;
+    let existing = read_entity_records::<ScalarRevision<T>>(&revisions)?;
+    let revision = ScalarRevision {
+        parents: causal_heads(&existing, |revision| &revision.parents),
+        value,
+    };
+    insert_immutable_record(&revisions, revision_id, &revision)
+}
+
+pub(crate) fn add_entity_tag(entity: &LoroMap, tag: &str, add_dot: &str) -> DomainResult<()> {
+    let tag = validate_tag(tag)?;
+    let state = entity
+        .ensure_mergeable_map(TAGS)
+        .map_err(loro_error)?
+        .ensure_mergeable_map(&tag)
+        .map_err(loro_error)?;
+    let adds = state.ensure_mergeable_map(ADDS).map_err(loro_error)?;
+    insert_boolean_dot(&adds, add_dot)
+}
+
+pub(crate) fn remove_entity_tag(entity: &LoroMap, tag: &str) -> DomainResult<()> {
+    let tag = validate_tag(tag)?;
+    let state = entity
+        .ensure_mergeable_map(TAGS)
+        .map_err(loro_error)?
+        .ensure_mergeable_map(&tag)
+        .map_err(loro_error)?;
+    let adds = state.ensure_mergeable_map(ADDS).map_err(loro_error)?;
+    let removes = state.ensure_mergeable_map(REMOVES).map_err(loro_error)?;
+    for add_dot in map_keys(&adds) {
+        insert_boolean_dot(&removes, &add_dot)?;
     }
+    Ok(())
+}
+
+pub(crate) fn transition_entity_lifecycle(
+    entity: &LoroMap,
+    revision_id: &str,
+    state: LifecycleState,
+) -> DomainResult<()> {
+    let revisions = entity
+        .ensure_mergeable_map(LIFECYCLE)
+        .map_err(loro_error)?
+        .ensure_mergeable_map(REVISIONS)
+        .map_err(loro_error)?;
+    let existing = read_entity_records::<LifecycleRevision>(&revisions)?;
+    let parents = causal_heads(&existing, |revision| &revision.parents);
+    if !existing.is_empty() {
+        let visible = lifecycle_view(existing.clone())?;
+        match (visible.state, state) {
+            (LifecycleState::Active, LifecycleState::Active) => {
+                return Err(DomainError::InvalidState(
+                    "restore requires an observed deleted lifecycle head".into(),
+                ));
+            }
+            (LifecycleState::Deleted, LifecycleState::Deleted) => {
+                return Err(DomainError::InvalidState(
+                    "delete requires an observed active lifecycle head".into(),
+                ));
+            }
+            _ => {}
+        }
+    }
+    let generation = parents
+        .iter()
+        .filter_map(|parent| existing.get(parent))
+        .map(|revision| revision.generation)
+        .max()
+        .map_or(0, |generation| generation + 1);
+    let revision = LifecycleRevision {
+        generation,
+        parents,
+        state,
+    };
+    insert_immutable_record(&revisions, revision_id, &revision)
 }
 
 impl Default for Library {
@@ -558,7 +587,7 @@ impl Default for Library {
     }
 }
 
-fn loro_error(error: impl std::fmt::Display) -> DomainError {
+pub(crate) fn loro_error(error: impl std::fmt::Display) -> DomainError {
     DomainError::Loro(error.to_string())
 }
 
@@ -681,7 +710,9 @@ fn insert_immutable_record<T: serde::Serialize>(
     map.insert(id, encoded).map_err(loro_error)
 }
 
-fn read_records<T: DeserializeOwned>(map: &LoroMap) -> DomainResult<BTreeMap<String, T>> {
+pub(crate) fn read_entity_records<T: DeserializeOwned>(
+    map: &LoroMap,
+) -> DomainResult<BTreeMap<String, T>> {
     let mut raw = Vec::new();
     map.for_each(|key, value| {
         raw.push((key.to_owned(), value.get_deep_value().to_json_value()));
@@ -696,14 +727,14 @@ fn read_records<T: DeserializeOwned>(map: &LoroMap) -> DomainResult<BTreeMap<Str
         .collect()
 }
 
-fn map_keys(map: &LoroMap) -> Vec<String> {
+pub(crate) fn map_keys(map: &LoroMap) -> Vec<String> {
     let mut keys = Vec::new();
     map.for_each(|key, _| keys.push(key.to_owned()));
     keys.sort();
     keys
 }
 
-fn map_child(parent: &LoroMap, key: &str) -> DomainResult<LoroMap> {
+pub(crate) fn map_child(parent: &LoroMap, key: &str) -> DomainResult<LoroMap> {
     match parent.get(key) {
         Some(ValueOrContainer::Container(Container::Map(map))) => Ok(map),
         _ => Err(DomainError::InvalidState(format!(
@@ -712,7 +743,7 @@ fn map_child(parent: &LoroMap, key: &str) -> DomainResult<LoroMap> {
     }
 }
 
-fn text_child(parent: &LoroMap, key: &str) -> DomainResult<LoroText> {
+pub(crate) fn text_child(parent: &LoroMap, key: &str) -> DomainResult<LoroText> {
     match parent.get(key) {
         Some(ValueOrContainer::Container(Container::Text(text))) => Ok(text),
         _ => Err(DomainError::InvalidState(format!(
@@ -721,13 +752,13 @@ fn text_child(parent: &LoroMap, key: &str) -> DomainResult<LoroText> {
     }
 }
 
-fn project_scalar<T>(scalars: &LoroMap, field: &str) -> DomainResult<ScalarView<T>>
+pub(crate) fn project_scalar<T>(scalars: &LoroMap, field: &str) -> DomainResult<ScalarView<T>>
 where
     T: Clone + DeserializeOwned,
 {
     let scalar = map_child(scalars, field)?;
     let revisions = map_child(&scalar, REVISIONS)?;
-    scalar_view(read_records(&revisions)?)
+    scalar_view(read_entity_records(&revisions)?)
 }
 
 fn project_optional_scalar<T>(
@@ -760,7 +791,7 @@ fn project_excerpt(item: &LoroMap, scalars: &LoroMap) -> DomainResult<String> {
     }
 }
 
-fn project_tags(tags: LoroMap) -> DomainResult<Vec<String>> {
+pub(crate) fn project_tags(tags: LoroMap) -> DomainResult<Vec<String>> {
     let mut visible = Vec::new();
     for tag in map_keys(&tags) {
         let state = map_child(&tags, &tag)?;
