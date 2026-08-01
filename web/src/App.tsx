@@ -1276,7 +1276,7 @@ export function App() {
         </main>
         <nav aria-label="Mobile actions" className="mobile-actions">
           <button className="primary-button" onClick={(event) => openCapture(event.currentTarget)} type="button">＋ Save a link</button>
-          <button className="secondary-button" onClick={() => { setOpenZen(null); navigateToView("zen"); }} type="button">Zen {zenDocuments.length}</button>
+          <button className="secondary-button" onClick={() => { setOpenZen(null); navigateToView("zen"); }} type="button">Zen</button>
           <button className="secondary-button" onClick={() => navigateToView("settings")} type="button">Settings</button>
         </nav>
       </div>
