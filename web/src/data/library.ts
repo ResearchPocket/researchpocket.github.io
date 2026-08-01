@@ -14,6 +14,7 @@ import {
   type PersistedOutbox,
   type PersistedSnapshot,
   type PersistedSyncConfiguration,
+  type PersistedZenDocument,
   type RemoteObservation,
 } from "./db";
 import { domainCore } from "./domain.ts";
@@ -1042,6 +1043,160 @@ class LibraryRepository {
     }
   }
 
+  /** Workspace index. Reads metadata only — never a document body. */
+  async listZenDocuments(): Promise<PersistedZenDocument[]> {
+    const database = await this.database();
+    const documents = await database.getAll("zenDocuments");
+    return documents
+      .filter((document) => !document.deleted)
+      .sort(
+        (left, right) =>
+          right.editedAt.localeCompare(left.editedAt) ||
+          left.documentId.localeCompare(right.documentId),
+      );
+  }
+
+  /** Reads one document body. The only call that loads body bytes. */
+  async zenDocument(documentId: string): Promise<ZenDocumentView> {
+    const database = await this.database();
+    const replica = await database.get("zenReplicas", documentId);
+    if (!replica) throw new Error("That document is no longer in this library.");
+    const meta = await database.get("meta", "library");
+    if (!meta) throw new Error("This library is still opening.");
+    return JSON.parse(
+      await domainCore.call(
+        "zenDocumentView",
+        replica.snapshot,
+        meta.peerId,
+        documentId,
+      ),
+    ) as ZenDocumentView;
+  }
+
+  async createZenDocument(input: {
+    title: string | null;
+    body: string;
+    tags: string[];
+  }): Promise<string> {
+    const documentId = uuidV7();
+    await this.commitZenMutation(documentId, {
+      type: "create",
+      document_id: documentId,
+      title: input.title,
+      body: input.body,
+      created_at: Math.floor(Date.now() / 1000),
+      tags: input.tags,
+    });
+    return documentId;
+  }
+
+  async setZenTitle(documentId: string, title: string | null): Promise<void> {
+    await this.commitZenMutation(documentId, { type: "set_title", title });
+  }
+
+  async setZenBody(documentId: string, body: string): Promise<void> {
+    await this.commitZenMutation(documentId, { type: "set_body", body });
+  }
+
+  async addZenTag(documentId: string, tag: string): Promise<void> {
+    await this.commitZenMutation(documentId, { type: "add_tag", tag });
+  }
+
+  async removeZenTag(documentId: string, tag: string): Promise<void> {
+    await this.commitZenMutation(documentId, { type: "remove_tag", tag });
+  }
+
+  async deleteZenDocument(documentId: string): Promise<void> {
+    await this.commitZenMutation(documentId, { type: "delete" });
+  }
+
+  async restoreZenDocument(documentId: string): Promise<void> {
+    await this.commitZenMutation(documentId, { type: "restore" });
+  }
+
+  /**
+   * Applies one zen mutation and commits replica, index, and queue together.
+   *
+   * Only the edited document's replica is loaded, so a keystroke never costs
+   * anything proportional to the rest of the workspace.
+   */
+  private async commitZenMutation(
+    documentId: string,
+    mutation: Record<string, unknown>,
+  ): Promise<void> {
+    await this.write(async (database) => {
+      const meta = await database.get("meta", "library");
+      if (!meta) throw new Error("This library is still opening.");
+      const replica = await database.get("zenReplicas", documentId);
+      if (!replica && mutation.type !== "create") {
+        throw new Error("That document is no longer in this library.");
+      }
+      const now = new Date().toISOString();
+      const result = JSON.parse(
+        await domainCore.call(
+          "applyZenMutation",
+          replica?.snapshot ?? "",
+          meta.peerId,
+          meta.libraryId,
+          meta.deviceId,
+          meta.nextSequence,
+          now,
+          documentId,
+          JSON.stringify(mutation),
+        ),
+      ) as ZenMutationResult;
+
+      const path = `sync/v2/ops/zen/${documentId}/${meta.deviceId}/${meta.nextSequence}.json`;
+      const summary = result.summary;
+      const transaction = database.transaction(
+        ["meta", "zenReplicas", "zenDocuments", "aggregateBatches", "aggregateOutbox"],
+        "readwrite",
+      );
+      try {
+        await transaction.objectStore("meta").put({
+          ...meta,
+          nextSequence: incrementSequence(meta.nextSequence),
+        });
+        await transaction
+          .objectStore("zenReplicas")
+          .put({ documentId, snapshot: result.snapshot, updatedAt: now });
+        await transaction.objectStore("zenDocuments").put({
+          documentId,
+          title: summary.title,
+          byteLength: summary.byte_length,
+          todoTotal: summary.todo_total,
+          todoDone: summary.todo_done,
+          createdAt: summary.created_at,
+          editedAt: now,
+          tags: summary.tags,
+          deleted: summary.lifecycle_state === "deleted",
+        });
+        await transaction.objectStore("aggregateBatches").add({
+          path,
+          aggregateKind: "zen_document",
+          aggregateId: documentId,
+          deviceId: meta.deviceId,
+          sequence: meta.nextSequence,
+          payloadSha256: JSON.parse(result.envelope).payload_sha256 as string,
+          envelopeJson: result.envelope,
+          origin: "local" as const,
+          appliedAt: now,
+        });
+        await transaction.objectStore("aggregateOutbox").add({
+          path,
+          enqueuedAt: now,
+          attempts: 0,
+          lastErrorKind: null,
+        });
+        await transaction.done;
+      } catch (error) {
+        abortTransaction(transaction);
+        throw error;
+      }
+    });
+    this.channel.postMessage({ type: "changed" });
+  }
+
   private async afterCommit(status: string): Promise<void> {
     this.channel.postMessage({ type: "changed" });
     await this.load();
@@ -1781,6 +1936,32 @@ export interface SyncBridge {
   quiesce(): Promise<void>;
 }
 
+export interface ZenSummary {
+  document_id: string;
+  title: string | null;
+  created_at: number;
+  byte_length: number;
+  todo_total: number;
+  todo_done: number;
+  tags: string[];
+  lifecycle_state: "active" | "deleted";
+}
+
+export interface ZenDocumentView {
+  document_id: string;
+  title: { value: string | null };
+  created_at: { value: number };
+  body: string;
+  tags: string[];
+  lifecycle: { state: "active" | "deleted" };
+}
+
+interface ZenMutationResult {
+  snapshot: string;
+  summary: ZenSummary;
+  envelope: string;
+}
+
 const OPENING_STATE: LibraryState = {
   initialized: false,
   loading: true,
@@ -2024,6 +2205,46 @@ class LibraryWorkspace {
     packs: RemoteOperationPackInput[] = [],
   ): Promise<number> {
     return (await this.instance()).applyRemote(inputs, packs);
+  }
+
+  async listZenDocuments(): Promise<PersistedZenDocument[]> {
+    return (await this.instance()).listZenDocuments();
+  }
+
+  async zenDocument(documentId: string): Promise<ZenDocumentView> {
+    return (await this.instance()).zenDocument(documentId);
+  }
+
+  async createZenDocument(input: {
+    title: string | null;
+    body: string;
+    tags: string[];
+  }): Promise<string> {
+    return (await this.instance()).createZenDocument(input);
+  }
+
+  async setZenTitle(documentId: string, title: string | null): Promise<void> {
+    return (await this.instance()).setZenTitle(documentId, title);
+  }
+
+  async setZenBody(documentId: string, body: string): Promise<void> {
+    return (await this.instance()).setZenBody(documentId, body);
+  }
+
+  async addZenTag(documentId: string, tag: string): Promise<void> {
+    return (await this.instance()).addZenTag(documentId, tag);
+  }
+
+  async removeZenTag(documentId: string, tag: string): Promise<void> {
+    return (await this.instance()).removeZenTag(documentId, tag);
+  }
+
+  async deleteZenDocument(documentId: string): Promise<void> {
+    return (await this.instance()).deleteZenDocument(documentId);
+  }
+
+  async restoreZenDocument(documentId: string): Promise<void> {
+    return (await this.instance()).restoreZenDocument(documentId);
   }
 }
 

@@ -12,10 +12,16 @@ import {
   type MarkdownImage,
 } from "./components/MarkdownDocument.tsx";
 import {
+  ZenWorkspace,
+  type ZenMentionTarget,
+} from "./components/ZenWorkspace.tsx";
+import type { PersistedZenDocument } from "./data/db";
+import {
   type LibraryState,
   type CapturedDocumentReference,
   type PendingSyncChange,
   type UndoableChange,
+  type ZenDocumentView,
   libraryRepository,
 } from "./data/library.ts";
 import {
@@ -56,7 +62,7 @@ type LifecycleFilter = "active" | "deleted" | "all";
 type SearchScope = "all" | "title" | "url" | "context" | "tags";
 type SortMode = "recent" | "oldest" | "title";
 type TagMatchMode = "any" | "all";
-type WorkspaceView = "library" | "settings" | "sync";
+type WorkspaceView = "library" | "settings" | "sync" | "zen";
 type Density = "comfortable" | "compact";
 
 interface ThemeColors {
@@ -208,6 +214,11 @@ export function App() {
   const [announcement, setAnnouncement] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
   const [undoNotice, setUndoNotice] = useState<UndoNotice | null>(null);
+  const [zenDocuments, setZenDocuments] = useState<PersistedZenDocument[]>([]);
+  const [openZen, setOpenZen] = useState<{
+    documentId: string;
+    view: ZenDocumentView;
+  } | null>(null);
   const [profiles, setProfiles] = useState<LibraryProfile[]>([]);
   const [activeProfileId, setActiveProfileId] = useState<string | null>(null);
   const captureOpenerRef = useRef<HTMLButtonElement | null>(null);
@@ -238,6 +249,16 @@ export function App() {
       unsubscribeProfile();
     };
   }, []);
+
+  // The workspace index is metadata only, so refreshing it on entry is cheap
+  // no matter how large the documents are.
+  useEffect(() => {
+    if (view !== "zen" || !libraryState.initialized) return;
+    void libraryRepository
+      .listZenDocuments()
+      .then(setZenDocuments)
+      .catch(() => setZenDocuments([]));
+  }, [view, libraryState.initialized]);
 
   useEffect(() => {
     try {
@@ -467,6 +488,79 @@ export function App() {
       window.history.pushState(window.history.state, "", nextUrl);
     }
     setView(nextView);
+  }
+
+  async function refreshZenDocuments() {
+    setZenDocuments(await libraryRepository.listZenDocuments());
+  }
+
+  async function openZenDocument(documentId: string) {
+    try {
+      setOpenZen({
+        documentId,
+        view: await libraryRepository.zenDocument(documentId),
+      });
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : "That document could not be opened.");
+    }
+  }
+
+  async function createZenDocument(title: string) {
+    await runZen(async () => {
+      const documentId = await libraryRepository.createZenDocument({
+        title: title.trim() || null,
+        body: "",
+        tags: [],
+      });
+      await refreshZenDocuments();
+      await openZenDocument(documentId);
+    });
+  }
+
+  async function saveZenBody(documentId: string, body: string) {
+    await runZen(async () => {
+      await libraryRepository.setZenBody(documentId, body);
+      await refreshZenDocuments();
+      await openZenDocument(documentId);
+    });
+  }
+
+  async function saveZenTitle(documentId: string, title: string | null) {
+    await runZen(async () => {
+      await libraryRepository.setZenTitle(documentId, title);
+      await refreshZenDocuments();
+      await openZenDocument(documentId);
+    });
+  }
+
+  async function removeZenDocument(documentId: string) {
+    await runZen(async () => {
+      await libraryRepository.deleteZenDocument(documentId);
+      setOpenZen(null);
+      await refreshZenDocuments();
+    });
+  }
+
+  /** Shared busy/error handling so every zen action reports the same way. */
+  async function runZen(action: () => Promise<void>) {
+    setBusyAction("zen");
+    setLocalError(null);
+    try {
+      await action();
+    } catch (error) {
+      setLocalError(
+        error instanceof Error ? error.message : "That change was not saved.",
+      );
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  /** Mentions resolve against the loaded library, so deletes stay visible. */
+  function resolveZenMention(itemId: string): ZenMentionTarget | null {
+    const item = items.find((candidate) => candidate.id === itemId);
+    if (!item) return null;
+    return { title: item.title ?? null, url: item.url, deleted: item.deleted };
   }
 
   async function refreshProfiles() {
@@ -719,9 +813,6 @@ export function App() {
               rp
             </span>
             <p className="brand-name">ResearchPocket</p>
-            {view === "library" ? null : (
-              <p className="brand-context">← library</p>
-            )}
           </button>
 
           <div className="masthead-actions">
@@ -768,6 +859,7 @@ export function App() {
 
       <div className="workspace-layout">
         <aside className="tag-rail">
+          {view === "library" && (
           <nav aria-label="Library views" className="rail-nav">
             <button
               aria-current={view === "library" && filter === "active" && !favoriteOnly ? "page" : undefined}
@@ -807,7 +899,26 @@ export function App() {
               <span>Archive</span><small>{deletedCount}</small>
             </button>
           </nav>
+          )}
 
+          <div className="rail-tags">
+            <div className="rail-heading">
+              <p>Zen</p>
+            </div>
+            <nav aria-label="Zen" className="rail-nav">
+              <button
+                aria-current={view === "zen" ? "page" : undefined}
+                onClick={() => navigateToView("zen")}
+                type="button"
+              >
+                <span>Documents</span>
+                <small>{zenDocuments.length}</small>
+              </button>
+            </nav>
+          </div>
+
+          {view === "library" && (
+          <>
           <div className="rail-tags">
             <div className="rail-heading">
               <p>Tags</p>
@@ -838,6 +949,8 @@ export function App() {
           >
             Tags{selectedTags.length > 0 ? ` · ${selectedTags.length}` : ""}
           </button>
+          </>
+          )}
 
           <nav aria-label="Workspace utilities" className="rail-utilities">
             <button onClick={() => navigateToView("sync")} type="button">
@@ -880,6 +993,20 @@ export function App() {
           onThemeChange={setTheme}
           profiles={profiles}
           theme={theme}
+        />
+
+        <ZenWorkspace
+          busy={busyAction !== null}
+          documents={zenDocuments}
+          hidden={view !== "zen"}
+          onClose={() => setOpenZen(null)}
+          onCreate={(title) => void createZenDocument(title)}
+          onDelete={(documentId) => void removeZenDocument(documentId)}
+          onOpen={(documentId) => void openZenDocument(documentId)}
+          onSaveBody={(documentId, body) => void saveZenBody(documentId, body)}
+          onSaveTitle={(documentId, title) => void saveZenTitle(documentId, title)}
+          open={openZen}
+          resolveMention={resolveZenMention}
         />
 
           <section
@@ -3161,6 +3288,7 @@ function readWorkspaceView(): WorkspaceView {
   ) {
     return "sync";
   }
+  if (window.location.hash === "#zen") return "zen";
   return window.location.hash === "#settings" ? "settings" : "library";
 }
 

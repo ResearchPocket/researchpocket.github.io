@@ -4902,3 +4902,358 @@ kbd {
     text-align: left;
   }
 }
+
+/* ---- Zen workspace ------------------------------------------------------ */
+
+.zen-glyph {
+  color: var(--color-text-muted);
+  font-size: 14px;
+  text-align: center;
+  width: 18px;
+}
+
+.zen-open {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.zen-open:hover {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.2em;
+}
+
+.zen-todo-count {
+  color: var(--color-text-muted);
+}
+
+.zen-editor {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.zen-toolbar {
+  align-items: center;
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  gap: 12px;
+  min-height: 44px;
+  padding: 0 20px;
+}
+
+.zen-breadcrumb {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  font-size: 13px;
+  min-width: 0;
+}
+
+.zen-breadcrumb button {
+  background: transparent;
+  border: 0;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font: inherit;
+  min-height: 32px;
+  padding: 0;
+}
+
+.zen-breadcrumb button:hover {
+  color: var(--color-text);
+}
+
+.zen-breadcrumb-current {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zen-budget {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  margin-left: auto;
+}
+
+.zen-mode {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  display: flex;
+}
+
+.zen-mode button {
+  background: transparent;
+  border: 0;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  min-height: 30px;
+  padding: 0 10px;
+}
+
+.zen-mode button + button {
+  border-left: 1px solid var(--color-border);
+}
+
+.zen-mode button[aria-pressed="true"] {
+  background: var(--color-surface-raised);
+  color: var(--color-accent);
+}
+
+.zen-canvas {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.zen-reader,
+.zen-edit {
+  margin: 0 auto;
+  max-width: 760px;
+  padding: 36px 24px 64px;
+}
+
+.zen-reader h1 {
+  font-size: 26px;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.zen-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 0;
+}
+
+.zen-tags span {
+  color: var(--color-accent);
+  font-size: 12px;
+}
+
+.zen-prose {
+  line-height: 1.75;
+  margin-top: 20px;
+  overflow-wrap: anywhere;
+}
+
+.zen-prose blockquote {
+  border-left: 3px solid var(--color-border-strong);
+  color: var(--color-text-muted);
+  margin: 0 0 14px;
+  padding-left: 16px;
+}
+
+.zen-mention-host {
+  color: var(--color-text-muted);
+}
+
+.zen-mention-deleted {
+  color: var(--color-text-muted);
+  text-decoration: line-through;
+}
+
+.zen-mention-badge,
+.zen-mention-unresolved {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  color: var(--color-text-muted);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  margin-left: 6px;
+  padding: 0 4px;
+  text-transform: uppercase;
+}
+
+.zen-mention-unresolved {
+  border-style: dashed;
+  text-transform: none;
+}
+
+.zen-title-input {
+  background: transparent;
+  border: 0;
+  color: var(--color-text);
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  outline: 0;
+  padding: 0;
+  width: 100%;
+}
+
+.zen-hint {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  margin: 8px 0 0;
+}
+
+.zen-body-input {
+  background: transparent;
+  border: 0;
+  caret-color: var(--color-accent);
+  color: var(--color-text-reader);
+  line-height: 1.75;
+  margin-top: 16px;
+  min-height: 480px;
+  outline: 0;
+  padding: 0;
+  resize: none;
+  width: 100%;
+}
+
+.zen-error {
+  color: var(--color-danger);
+  font-size: 12px;
+}
+
+.zen-footer {
+  align-items: center;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  display: flex;
+  font-size: 12px;
+  gap: 16px;
+  min-height: 36px;
+  padding: 0 20px;
+}
+
+.zen-heading-row {
+  align-items: end;
+  display: flex;
+  gap: var(--space-4);
+  justify-content: space-between;
+}
+
+.zen-title {
+  align-items: baseline;
+  display: flex;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.zen-title h2 {
+  font-size: var(--font-size-xl);
+  font-weight: 750;
+  letter-spacing: -0.025em;
+  margin: 0;
+  white-space: nowrap;
+}
+
+.zen-count {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  margin: 0;
+}
+
+.zen-heading-row select {
+  inline-size: auto;
+}
+
+.zen-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.zen-row {
+  align-items: center;
+  border-bottom: var(--rule) solid var(--color-border);
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: 1.125rem minmax(0, 1fr) auto;
+  min-block-size: 3.75rem;
+  padding: var(--space-2) 0;
+}
+
+.zen-row-copy {
+  display: grid;
+  gap: 0.1875rem;
+  min-width: 0;
+}
+
+.zen-row-copy h3 {
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zen-row-meta {
+  align-items: center;
+  color: var(--color-text-muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: var(--font-size-xs);
+  gap: 0.375rem;
+  margin: 0;
+  min-width: 0;
+}
+
+.zen-row-tags {
+  color: var(--color-accent);
+  display: inline-flex;
+  gap: 0.1875rem;
+}
+
+.zen-row-actions {
+  display: flex;
+  gap: 0.1875rem;
+}
+
+.zen-row-actions button {
+  background: transparent;
+  border: var(--rule) solid transparent;
+  border-radius: var(--radius);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  block-size: 2rem;
+  inline-size: 2rem;
+  padding: 0;
+}
+
+.zen-row-actions button:hover:not(:disabled) {
+  border-color: var(--color-border);
+  color: var(--color-text);
+}
+
+/* Task lists render as rows, not bulleted list items with a stray marker. */
+.zen-prose ul.contains-task-list {
+  list-style: none;
+  padding-inline-start: 0;
+}
+
+.zen-prose li.zen-todo {
+  align-items: flex-start;
+  display: flex;
+  gap: 0.5rem;
+  list-style: none;
+  min-block-size: 1.75rem;
+}
+
+.zen-prose li.zen-todo > input[type="checkbox"] {
+  accent-color: var(--color-accent);
+  block-size: 1rem;
+  cursor: pointer;
+  flex: 0 0 auto;
+  inline-size: 1rem;
+  margin: 0.3125rem 0 0;
+}
+
+.zen-prose li.zen-todo p {
+  margin: 0;
+}

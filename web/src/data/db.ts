@@ -136,6 +136,56 @@ export interface PersistedSyncConfiguration {
   lastErrorAt: string | null;
 }
 
+/**
+ * One aggregate-scoped operation awaiting upload.
+ *
+ * Kept out of the protocol-v1 `batches`/`outbox` stores so the v1 uploader
+ * cannot mistake a v2 envelope for one of its own.
+ */
+export interface PersistedAggregateBatch {
+  path: string;
+  aggregateKind: string;
+  aggregateId: string;
+  deviceId: string;
+  sequence: string;
+  payloadSha256: string;
+  envelopeJson: string;
+  origin: "local" | "remote";
+  appliedAt: string;
+}
+
+export interface PersistedAggregateOutbox {
+  path: string;
+  enqueuedAt: string;
+  attempts: number;
+  lastErrorKind: string | null;
+}
+
+/** One zen document's CRDT replica. Read only when a document is opened. */
+export interface PersistedZenReplica {
+  documentId: string;
+  snapshot: string;
+  updatedAt: string;
+}
+
+/**
+ * List-shaped zen metadata.
+ *
+ * Deliberately carries no body: the workspace index must stay proportional to
+ * the number of documents rather than their size.
+ */
+export interface PersistedZenDocument {
+  documentId: string;
+  title: string | null;
+  byteLength: number;
+  todoTotal: number;
+  todoDone: number;
+  createdAt: number;
+  editedAt: string;
+  tags: string[];
+  deleted: boolean;
+}
+
 interface ResearchPocketBrowserDb extends DBSchema {
   meta: {
     key: "library";
@@ -187,12 +237,31 @@ interface ResearchPocketBrowserDb extends DBSchema {
     key: "github";
     value: PersistedSyncConfiguration;
   };
+  zenDocuments: {
+    key: string;
+    value: PersistedZenDocument;
+    indexes: {
+      "by-edited-at": [string, string];
+    };
+  };
+  zenReplicas: {
+    key: string;
+    value: PersistedZenReplica;
+  };
+  aggregateBatches: {
+    key: string;
+    value: PersistedAggregateBatch;
+  };
+  aggregateOutbox: {
+    key: string;
+    value: PersistedAggregateOutbox;
+  };
 }
 
 export function openBrowserDatabase(
   name: string,
 ): Promise<IDBPDatabase<ResearchPocketBrowserDb>> {
-  return openDB<ResearchPocketBrowserDb>(name, 4, {
+  return openDB<ResearchPocketBrowserDb>(name, 5, {
     upgrade(database, oldVersion) {
       if (oldVersion < 1) {
         database.createObjectStore("meta", { keyPath: "key" });
@@ -218,6 +287,15 @@ export function openBrowserDatabase(
       }
       if (oldVersion < 4) {
         database.createObjectStore("capturedDocuments", { keyPath: "sha256" });
+      }
+      if (oldVersion < 5) {
+        const zen = database.createObjectStore("zenDocuments", {
+          keyPath: "documentId",
+        });
+        zen.createIndex("by-edited-at", ["editedAt", "documentId"]);
+        database.createObjectStore("zenReplicas", { keyPath: "documentId" });
+        database.createObjectStore("aggregateBatches", { keyPath: "path" });
+        database.createObjectStore("aggregateOutbox", { keyPath: "path" });
       }
     },
     blocked() {
