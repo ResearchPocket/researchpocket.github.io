@@ -9,6 +9,7 @@ mod model;
 mod mutation;
 mod store;
 mod sync;
+mod zen;
 
 pub use aggregate::AggregateMigrationReceipt;
 pub use enrichment::ENRICHMENT_MAX_ATTEMPTS;
@@ -23,3 +24,4 @@ pub use model::{
     SyncConfiguration, SyncIdentity,
 };
 pub use store::V2Store;
+pub use zen::{CreateZenDocumentRequest, EditZenDocumentRequest, zen_aggregate_kind};
