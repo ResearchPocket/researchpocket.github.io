@@ -1,4 +1,5 @@
 import {
+  Fragment,
   type SubmitEvent,
   type ReactNode,
   useDeferredValue,
@@ -12,10 +13,16 @@ import {
   type MarkdownImage,
 } from "./components/MarkdownDocument.tsx";
 import {
+  ZenWorkspace,
+  type ZenMentionTarget,
+} from "./components/ZenWorkspace.tsx";
+import type { PersistedZenDocument } from "./data/db";
+import {
   type LibraryState,
   type CapturedDocumentReference,
   type PendingSyncChange,
   type UndoableChange,
+  type ZenDocumentView,
   libraryRepository,
 } from "./data/library.ts";
 import {
@@ -56,7 +63,7 @@ type LifecycleFilter = "active" | "deleted" | "all";
 type SearchScope = "all" | "title" | "url" | "context" | "tags";
 type SortMode = "recent" | "oldest" | "title";
 type TagMatchMode = "any" | "all";
-type WorkspaceView = "library" | "settings" | "sync";
+type WorkspaceView = "library" | "settings" | "sync" | "zen";
 type Density = "comfortable" | "compact";
 
 interface ThemeColors {
@@ -208,6 +215,11 @@ export function App() {
   const [announcement, setAnnouncement] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
   const [undoNotice, setUndoNotice] = useState<UndoNotice | null>(null);
+  const [zenDocuments, setZenDocuments] = useState<PersistedZenDocument[]>([]);
+  const [openZen, setOpenZen] = useState<{
+    documentId: string;
+    view: ZenDocumentView;
+  } | null>(null);
   const [profiles, setProfiles] = useState<LibraryProfile[]>([]);
   const [activeProfileId, setActiveProfileId] = useState<string | null>(null);
   const captureOpenerRef = useRef<HTMLButtonElement | null>(null);
@@ -238,6 +250,17 @@ export function App() {
       unsubscribeProfile();
     };
   }, []);
+
+  // Loaded for every view, not just Zen: the command palette and the mobile
+  // navigation both surface documents from anywhere. The index is metadata
+  // only, so this stays cheap no matter how large the documents are.
+  useEffect(() => {
+    if (!libraryState.initialized) return;
+    void libraryRepository
+      .listZenDocuments()
+      .then(setZenDocuments)
+      .catch(() => setZenDocuments([]));
+  }, [view, libraryState.initialized]);
 
   useEffect(() => {
     try {
@@ -467,6 +490,79 @@ export function App() {
       window.history.pushState(window.history.state, "", nextUrl);
     }
     setView(nextView);
+  }
+
+  async function refreshZenDocuments() {
+    setZenDocuments(await libraryRepository.listZenDocuments());
+  }
+
+  async function openZenDocument(documentId: string) {
+    try {
+      setOpenZen({
+        documentId,
+        view: await libraryRepository.zenDocument(documentId),
+      });
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : "That document could not be opened.");
+    }
+  }
+
+  async function createZenDocument(title: string) {
+    await runZen(async () => {
+      const documentId = await libraryRepository.createZenDocument({
+        title: title.trim() || null,
+        body: "",
+        tags: [],
+      });
+      await refreshZenDocuments();
+      await openZenDocument(documentId);
+    });
+  }
+
+  async function saveZenBody(documentId: string, body: string) {
+    await runZen(async () => {
+      await libraryRepository.setZenBody(documentId, body);
+      await refreshZenDocuments();
+      await openZenDocument(documentId);
+    });
+  }
+
+  async function saveZenTitle(documentId: string, title: string | null) {
+    await runZen(async () => {
+      await libraryRepository.setZenTitle(documentId, title);
+      await refreshZenDocuments();
+      await openZenDocument(documentId);
+    });
+  }
+
+  async function removeZenDocument(documentId: string) {
+    await runZen(async () => {
+      await libraryRepository.deleteZenDocument(documentId);
+      setOpenZen(null);
+      await refreshZenDocuments();
+    });
+  }
+
+  /** Shared busy/error handling so every zen action reports the same way. */
+  async function runZen(action: () => Promise<void>) {
+    setBusyAction("zen");
+    setLocalError(null);
+    try {
+      await action();
+    } catch (error) {
+      setLocalError(
+        error instanceof Error ? error.message : "That change was not saved.",
+      );
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  /** Mentions resolve against the loaded library, so deletes stay visible. */
+  function resolveZenMention(itemId: string): ZenMentionTarget | null {
+    const item = items.find((candidate) => candidate.id === itemId);
+    if (!item) return null;
+    return { title: item.title ?? null, url: item.url, deleted: item.deleted };
   }
 
   async function refreshProfiles() {
@@ -719,9 +815,6 @@ export function App() {
               rp
             </span>
             <p className="brand-name">ResearchPocket</p>
-            {view === "library" ? null : (
-              <p className="brand-context">← library</p>
-            )}
           </button>
 
           <div className="masthead-actions">
@@ -748,13 +841,18 @@ export function App() {
                 </select>
               </div>
             ) : null}
-            <div className="local-status" role="status">
+            <button
+              aria-label={`Sync — ${formatHeaderStatus(libraryState.status, libraryState.pendingCount)}`}
+              className="local-status"
+              onClick={() => navigateToView("sync")}
+              type="button"
+            >
               <span aria-hidden="true" className="status-dot" />
               <span className="status-label">local</span>
-              <span className="status-copy">
+              <span aria-live="polite" className="status-copy" role="status">
                 {formatHeaderStatus(libraryState.status, libraryState.pendingCount)}
               </span>
-            </div>
+            </button>
             <button
               className="command-trigger"
               onClick={() => setCommandOpen(true)}
@@ -768,6 +866,7 @@ export function App() {
 
       <div className="workspace-layout">
         <aside className="tag-rail">
+          {view === "library" && (
           <nav aria-label="Library views" className="rail-nav">
             <button
               aria-current={view === "library" && filter === "active" && !favoriteOnly ? "page" : undefined}
@@ -807,7 +906,26 @@ export function App() {
               <span>Archive</span><small>{deletedCount}</small>
             </button>
           </nav>
+          )}
 
+          <div className="rail-tags">
+            <div className="rail-heading">
+              <p>Zen</p>
+            </div>
+            <nav aria-label="Zen" className="rail-nav">
+              <button
+                aria-current={view === "zen" ? "page" : undefined}
+                onClick={() => navigateToView("zen")}
+                type="button"
+              >
+                <span>Documents</span>
+                <small>{zenDocuments.length}</small>
+              </button>
+            </nav>
+          </div>
+
+          {view === "library" && (
+          <>
           <div className="rail-tags">
             <div className="rail-heading">
               <p>Tags</p>
@@ -838,6 +956,8 @@ export function App() {
           >
             Tags{selectedTags.length > 0 ? ` · ${selectedTags.length}` : ""}
           </button>
+          </>
+          )}
 
           <nav aria-label="Workspace utilities" className="rail-utilities">
             <button onClick={() => navigateToView("sync")} type="button">
@@ -880,6 +1000,20 @@ export function App() {
           onThemeChange={setTheme}
           profiles={profiles}
           theme={theme}
+        />
+
+        <ZenWorkspace
+          busy={busyAction !== null}
+          documents={zenDocuments}
+          hidden={view !== "zen"}
+          onClose={() => setOpenZen(null)}
+          onCreate={(title) => void createZenDocument(title)}
+          onDelete={(documentId) => void removeZenDocument(documentId)}
+          onOpen={(documentId) => void openZenDocument(documentId)}
+          onSaveBody={(documentId, body) => void saveZenBody(documentId, body)}
+          onSaveTitle={(documentId, title) => void saveZenTitle(documentId, title)}
+          open={openZen}
+          resolveMention={resolveZenMention}
         />
 
           <section
@@ -1142,7 +1276,7 @@ export function App() {
         </main>
         <nav aria-label="Mobile actions" className="mobile-actions">
           <button className="primary-button" onClick={(event) => openCapture(event.currentTarget)} type="button">＋ Save a link</button>
-          <button className="secondary-button" onClick={() => navigateToView("sync")} type="button">Sync {libraryState.pendingCount}</button>
+          <button className="secondary-button" onClick={() => { setOpenZen(null); navigateToView("zen"); }} type="button">Zen</button>
           <button className="secondary-button" onClick={() => navigateToView("settings")} type="button">Settings</button>
         </nav>
       </div>
@@ -1224,14 +1358,30 @@ export function App() {
             setCommandOpen(false);
             setCapturing(true);
           }}
+          onNewZenDocument={() => {
+            setCommandOpen(false);
+            navigateToView("zen");
+            void createZenDocument("");
+          }}
           onOpenItem={(item) => {
             openReader(item);
             setCommandOpen(false);
+          }}
+          onOpenZenDocument={(documentId) => {
+            setCommandOpen(false);
+            navigateToView("zen");
+            void openZenDocument(documentId);
+          }}
+          onOpenZenWorkspace={() => {
+            setCommandOpen(false);
+            setOpenZen(null);
+            navigateToView("zen");
           }}
           onSwitchLibrary={(profileId) => {
             setCommandOpen(false);
             void switchLibrary(profileId);
           }}
+          zenDocuments={zenDocuments}
           onSync={() => {
             navigateToView("sync");
             setCommandOpen(false);
@@ -1971,6 +2121,15 @@ function QuickAdd({
   );
 }
 
+interface CommandOption {
+  key: string;
+  group: string;
+  primary: string;
+  detail?: string;
+  hint?: string;
+  run(): void;
+}
+
 function CommandPalette({
   items,
   libraries,
@@ -1978,10 +2137,14 @@ function CommandPalette({
   onFilterTag,
   onNewLibrary,
   onNewSave,
+  onNewZenDocument,
   onOpenItem,
+  onOpenZenDocument,
+  onOpenZenWorkspace,
   onSwitchLibrary,
   onSync,
   tags,
+  zenDocuments,
 }: {
   items: LibraryItemView[];
   libraries: LibraryProfile[];
@@ -1989,56 +2152,118 @@ function CommandPalette({
   onFilterTag: (tag: string) => void;
   onNewSave: () => void;
   onNewLibrary: () => void;
+  onNewZenDocument: () => void;
   onOpenItem: (item: LibraryItemView) => void;
+  onOpenZenDocument: (documentId: string) => void;
+  onOpenZenWorkspace: () => void;
   onSwitchLibrary: (profileId: string) => void;
   onSync: () => void;
   tags: { count: number; tag: string }[];
+  zenDocuments: PersistedZenDocument[];
 }) {
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const normalized = query.trim().toLocaleLowerCase();
-  const matchingTags = tags
-    .filter(({ tag }) => !normalized || tag.toLocaleLowerCase().includes(normalized))
-    .slice(0, 5);
-  const matchingItems = items
-    .filter((item) =>
-      !normalized || [item.title, item.url, ...item.tags]
-        .filter(Boolean)
-        .some((value) => value!.toLocaleLowerCase().includes(normalized)),
-    )
-    .slice(0, 6);
-  const matchingLibraries = libraries
-    .filter((profile) => !normalized || profile.name.toLocaleLowerCase().includes(normalized))
-    .slice(0, 4);
-  const optionCount =
-    matchingTags.length + matchingItems.length + matchingLibraries.length + 3;
 
-  function runOption(index: number) {
-    if (index < matchingTags.length) {
-      onFilterTag(matchingTags[index]!.tag);
-      return;
-    }
-
-    const itemIndex = index - matchingTags.length;
-    if (itemIndex < matchingItems.length) {
-      onOpenItem(matchingItems[itemIndex]!);
-      return;
-    }
-
-    const libraryIndex = itemIndex - matchingItems.length;
-    if (libraryIndex < matchingLibraries.length) {
-      onSwitchLibrary(matchingLibraries[libraryIndex]!.id);
-      return;
-    }
-
-    if (libraryIndex === matchingLibraries.length) onSync();
-    else if (libraryIndex === matchingLibraries.length + 1) onNewSave();
-    else onNewLibrary();
-  }
+  // One flat list drives selection, keyboard movement, and rendering. Offsets
+  // per section used to be recomputed in four places, so every new kind of
+  // result was a chance to mis-index one of them.
+  const options: CommandOption[] = [
+    ...tags
+      .filter(({ tag }) => !normalized || tag.toLocaleLowerCase().includes(normalized))
+      .slice(0, 5)
+      .map(({ count, tag }) => ({
+        key: `tag-${tag}`,
+        group: "Tags",
+        primary: `#${tag}`,
+        detail: pluralize(count, "save"),
+        hint: "↵ filter library",
+        run: () => onFilterTag(tag),
+      })),
+    ...items
+      .filter((item) =>
+        !normalized || [item.title, item.url, ...item.tags]
+          .filter(Boolean)
+          .some((value) => value!.toLocaleLowerCase().includes(normalized)),
+      )
+      .slice(0, 6)
+      .map((item) => ({
+        key: `item-${item.id}`,
+        group: "Saves",
+        primary: item.title?.trim() || item.url,
+        detail: readHostname(item.url),
+        hint: item.tags.map((tag) => `#${tag}`).join(" "),
+        run: () => onOpenItem(item),
+      })),
+    ...zenDocuments
+      .filter(
+        (document) =>
+          !normalized ||
+          (document.title ?? "").toLocaleLowerCase().includes(normalized) ||
+          document.tags.some((tag) => tag.toLocaleLowerCase().includes(normalized)),
+      )
+      .slice(0, 5)
+      .map((document) => ({
+        key: `zen-${document.documentId}`,
+        group: "Documents",
+        primary: document.title?.trim() || "Untitled document",
+        detail:
+          document.todoTotal > 0
+            ? `${document.todoDone}/${document.todoTotal} todos`
+            : "document",
+        hint: "↵ open document",
+        run: () => onOpenZenDocument(document.documentId),
+      })),
+    ...libraries
+      .filter((profile) => !normalized || profile.name.toLocaleLowerCase().includes(normalized))
+      .slice(0, 4)
+      .map((profile) => ({
+        key: `library-${profile.id}`,
+        group: "Libraries",
+        primary: profile.name,
+        hint: "↵ open library",
+        run: () => onSwitchLibrary(profile.id),
+      })),
+    {
+      key: "action-sync",
+      group: "Actions",
+      primary: "Sync",
+      hint: "open status",
+      run: onSync,
+    },
+    {
+      key: "action-save",
+      group: "Actions",
+      primary: "Save a URL",
+      hint: "new save",
+      run: onNewSave,
+    },
+    {
+      key: "action-zen",
+      group: "Actions",
+      primary: "Zen",
+      hint: "open documents",
+      run: onOpenZenWorkspace,
+    },
+    {
+      key: "action-zen-new",
+      group: "Actions",
+      primary: "New document",
+      hint: "prose, lists, todos",
+      run: onNewZenDocument,
+    },
+    {
+      key: "action-library",
+      group: "Actions",
+      primary: "New library",
+      hint: "create and open",
+      run: onNewLibrary,
+    },
+  ];
 
   function moveSelection(offset: number) {
-    setActiveIndex((current) => (current + offset + optionCount) % optionCount);
+    setActiveIndex((current) => (current + offset + options.length) % options.length);
   }
 
   useEffect(() => {
@@ -2073,7 +2298,7 @@ function CommandPalette({
           aria-activedescendant={`command-option-${activeIndex}`}
           aria-controls="command-results"
           aria-expanded="true"
-          aria-label="Search saves, tags, and commands"
+          aria-label="Search saves, documents, and commands"
           onChange={(event) => {
             setQuery(event.target.value);
             setActiveIndex(0);
@@ -2095,41 +2320,35 @@ function CommandPalette({
               moveSelection(-1);
             } else if (event.key === "Enter" && !event.nativeEvent.isComposing) {
               event.preventDefault();
-              runOption(activeIndex);
+              options[activeIndex]?.run();
             }
           }}
-          placeholder="Search saves, tags, and commands"
+          placeholder="Search saves, documents, and commands"
           role="combobox"
           value={query}
         />
       </div>
       <div className="command-results" id="command-results" role="listbox">
-        {matchingTags.length > 0 ? <p role="presentation">Tags</p> : null}
-        {matchingTags.map(({ count, tag }, index) => (
-          <button aria-selected={activeIndex === index} className={activeIndex === index ? "command-selected" : undefined} id={`command-option-${index}`} key={tag} onClick={() => onFilterTag(tag)} onPointerEnter={() => setActiveIndex(index)} role="option" type="button">
-            <span>#{tag}</span><small>{pluralize(count, "save")}</small><em>↵ filter library</em>
-          </button>
+        {options.map((option, index) => (
+          <Fragment key={option.key}>
+            {index === 0 || options[index - 1]!.group !== option.group ? (
+              <p role="presentation">{option.group}</p>
+            ) : null}
+            <button
+              aria-selected={activeIndex === index}
+              className={activeIndex === index ? "command-selected" : undefined}
+              id={`command-option-${index}`}
+              onClick={option.run}
+              onPointerEnter={() => setActiveIndex(index)}
+              role="option"
+              type="button"
+            >
+              <span>{option.primary}</span>
+              {option.detail ? <small>{option.detail}</small> : null}
+              {option.hint ? <em>{option.hint}</em> : null}
+            </button>
+          </Fragment>
         ))}
-        {matchingItems.length > 0 ? <p role="presentation">Saves</p> : null}
-        {matchingItems.map((item, itemIndex) => {
-          const index = matchingTags.length + itemIndex;
-          return <button aria-selected={activeIndex === index} className={activeIndex === index ? "command-selected" : undefined} id={`command-option-${index}`} key={item.id} onClick={() => onOpenItem(item)} onPointerEnter={() => setActiveIndex(index)} role="option" type="button">
-            <strong>{item.title?.trim() || item.url}</strong>
-            <small>{readHostname(item.url)}</small>
-            <em>{item.tags.map((tag) => `#${tag}`).join(" ")}</em>
-          </button>;
-        })}
-        {matchingLibraries.length > 0 ? <p role="presentation">Libraries</p> : null}
-        {matchingLibraries.map((profile, libraryIndex) => {
-          const index = matchingTags.length + matchingItems.length + libraryIndex;
-          return <button aria-selected={activeIndex === index} className={activeIndex === index ? "command-selected" : undefined} id={`command-option-${index}`} key={profile.id} onClick={() => onSwitchLibrary(profile.id)} onPointerEnter={() => setActiveIndex(index)} role="option" type="button">
-            <span>{profile.name}</span><em>↵ open library</em>
-          </button>;
-        })}
-        <p role="presentation">Actions</p>
-        <button aria-selected={activeIndex === optionCount - 3} className={activeIndex === optionCount - 3 ? "command-selected" : undefined} id={`command-option-${optionCount - 3}`} onClick={onSync} onPointerEnter={() => setActiveIndex(optionCount - 3)} role="option" type="button"><span>Sync</span><em>open status</em></button>
-        <button aria-selected={activeIndex === optionCount - 2} className={activeIndex === optionCount - 2 ? "command-selected" : undefined} id={`command-option-${optionCount - 2}`} onClick={onNewSave} onPointerEnter={() => setActiveIndex(optionCount - 2)} role="option" type="button"><span>Save a URL</span><em>new save</em></button>
-        <button aria-selected={activeIndex === optionCount - 1} className={activeIndex === optionCount - 1 ? "command-selected" : undefined} id={`command-option-${optionCount - 1}`} onClick={onNewLibrary} onPointerEnter={() => setActiveIndex(optionCount - 1)} role="option" type="button"><span>New library</span><em>create and open</em></button>
       </div>
       <footer className="command-footer"><span><b>Ctrl P/N · ↑↓</b> navigate</span><span><b>↵</b> select</span><span><b>esc</b> close</span></footer>
     </dialog>
@@ -3161,6 +3380,7 @@ function readWorkspaceView(): WorkspaceView {
   ) {
     return "sync";
   }
+  if (window.location.hash === "#zen") return "zen";
   return window.location.hash === "#settings" ? "settings" : "library";
 }
 
