@@ -16,6 +16,16 @@ pub const ITEM_AGGREGATES_FEATURE: &str = "item-aggregates-v2";
 pub const AGGREGATE_GENESIS_PATH: &str = "sync/v2/library.json";
 pub const AGGREGATE_OPS_ROOT: &str = "sync/v2/ops/";
 pub const AGGREGATE_CHECKPOINTS_ROOT: &str = "sync/v2/checkpoints/";
+pub const AGGREGATE_CATALOGUE_PREFIX: &str = "sync/v2/catalogue/";
+
+/// Location of a catalogue.
+///
+/// Genesis binds the catalogue by hash rather than by name, so the artifact is
+/// addressed by that same hash. A catalogue is immutable like every other v2
+/// object: a new library state produces a new path, never a rewrite.
+pub fn aggregate_catalogue_path(catalogue_sha256: &str) -> String {
+    format!("{AGGREGATE_CATALOGUE_PREFIX}{catalogue_sha256}.json")
+}
 pub const ITEM_OPS_PREFIX: &str = "sync/v2/ops/items/";
 pub const ITEM_CHECKPOINTS_PREFIX: &str = "sync/v2/checkpoints/items/";
 
@@ -395,6 +405,13 @@ pub struct AggregateCatalogue {
 }
 
 impl AggregateCatalogue {
+    /// Content-addressed location of this catalogue's exact serialized bytes.
+    pub fn path(&self) -> DomainResult<String> {
+        Ok(aggregate_catalogue_path(&sha256_hex(
+            serde_json::to_string(self)?.as_bytes(),
+        )))
+    }
+
     /// Validates a catalogue before any of its aggregates are trusted.
     ///
     /// Entries are required to be strictly ascending by `(kind, aggregate_id)`
@@ -408,7 +425,7 @@ impl AggregateCatalogue {
         validate_uuid_v7(expected_library_id, "expected library ID")?;
         if self.library_id != expected_library_id {
             return Err(DomainError::Integrity {
-                path: AGGREGATE_GENESIS_PATH.to_owned(),
+                path: self.path()?,
                 expected: expected_library_id.to_owned(),
                 actual: self.library_id.clone(),
             });
@@ -427,6 +444,8 @@ impl AggregateCatalogue {
             let expected_path = entry
                 .aggregate_kind
                 .checkpoint_path(&entry.aggregate_id, &entry.snapshot_sha256)?;
+            // Anchored on the entry's own checkpoint path, so a mismatch names
+            // the object a reader would go fetch.
             if entry.checkpoint_path != expected_path {
                 return Err(DomainError::Integrity {
                     path: entry.checkpoint_path.clone(),
@@ -468,21 +487,24 @@ impl AggregateGenesis {
         if self.protocol_version != AGGREGATE_PROTOCOL_VERSION {
             return Err(DomainError::UnsupportedProtocol(self.protocol_version));
         }
-        if !self
-            .required_features
-            .iter()
-            .any(|feature| feature == ITEM_AGGREGATES_FEATURE)
-        {
-            return Err(DomainError::UnsupportedFeature(
-                "missing-item-aggregates-v2".into(),
-            ));
-        }
+        // Unknown features are reported before exactness so a newer writer
+        // always surfaces as "upgrade", never as "malformed".
         if let Some(unknown) = self
             .required_features
             .iter()
             .find(|feature| feature.as_str() != ITEM_AGGREGATES_FEATURE)
         {
             return Err(DomainError::UnsupportedFeature(unknown.clone()));
+        }
+        if self.required_features.is_empty() {
+            return Err(DomainError::UnsupportedFeature(
+                "missing-item-aggregates-v2".into(),
+            ));
+        }
+        if self.required_features != [ITEM_AGGREGATES_FEATURE] {
+            return Err(DomainError::InvalidState(
+                "genesis required features are not canonical".into(),
+            ));
         }
         validate_uuid_v7(&self.library_id, "genesis library ID")?;
         validate_uuid_v7(expected_library_id, "expected library ID")?;
@@ -838,6 +860,17 @@ mod tests {
             genesis.validate(LIBRARY, &future),
             Err(DomainError::Integrity { .. })
         ));
+        let mut duplicated = genesis.clone();
+        duplicated
+            .required_features
+            .push(ITEM_AGGREGATES_FEATURE.to_owned());
+        assert!(
+            matches!(
+                duplicated.validate(LIBRARY, &migration.catalogue_json),
+                Err(DomainError::InvalidState(_))
+            ),
+            "a non-canonical feature list must not validate"
+        );
 
         let aggregate =
             ItemAggregate::from_canonical(ITEM, &item(), CHECKPOINT, 52).expect("aggregate");

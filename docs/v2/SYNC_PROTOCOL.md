@@ -447,7 +447,14 @@ ordering, lifecycle state, and content-addressed checkpoint path; it contains no
 captured-document bytes. Entries are strictly ascending by `(kind,
 aggregate_id)`, so the artifact is byte-identical for a given library state and
 one aggregate cannot be defined twice. Genesis binds the catalogue by SHA-256
-over its exact bytes.
+over its exact bytes, and the catalogue is addressed by that same hash:
+
+```text
+sync/v2/catalogue/<sha256>.json
+```
+
+A catalogue is immutable like every other v2 object. A new library state
+produces a new path; a catalogue is never rewritten in place.
 
 An unrecognized `aggregate_kind` is a recognized protocol object a client cannot
 implement, not a malformed one. Clients parse it, then fail closed with an
