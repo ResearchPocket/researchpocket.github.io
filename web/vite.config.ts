@@ -39,6 +39,13 @@ export default defineConfig(({ command }) => {
     base: "./",
     build: {
       manifest: "asset-manifest.json",
+      // Firefox fetches <link rel="modulepreload"> under default-src, which is
+      // 'none' here, so preloading breaks the page it is meant to speed up.
+      // The polyfill is worse: it is also a static import of every entry, so a
+      // blocked fetch takes the whole module graph down. Nothing this app
+      // needs — WASM, Web Locks, IndexedDB — exists in a browser that lacks
+      // modulepreload, so there is nothing to gain by keeping either.
+      modulePreload: false,
       rollupOptions: {
         input: {
           app: "app/index.html",
