@@ -120,6 +120,71 @@ async fn checkpoint_bootstrap_restores_coverage_and_applies_only_the_tail() {
     );
 }
 
+/// A device that edits while its own checkpoint uploads must still select it.
+///
+/// The tail is measured from the selected checkpoint, so failing to select here
+/// would mint and upload another full snapshot on every later sync, growing the
+/// data repository without bound.
+#[tokio::test]
+async fn a_self_created_checkpoint_is_selected_after_a_concurrent_local_edit() {
+    let root = tempfile::tempdir().expect("temporary test root");
+    let store = V2Store::init(root.path().join("library"))
+        .await
+        .expect("store");
+    let item = store
+        .create_item(CreateItemRequest {
+            url: "https://example.com/racing-edit".into(),
+            title: Some("Before checkpoint".into()),
+            excerpt: None,
+            favorite: false,
+            language: None,
+            saved_at: None,
+            note: String::new(),
+            tags: Vec::new(),
+        })
+        .await
+        .expect("create item");
+    let covered = store.pending_batches().await.expect("covered batches");
+    let checkpoint = store
+        .checkpoint_candidate(true)
+        .await
+        .expect("build checkpoint")
+        .expect("checkpoint candidate");
+
+    // The edit lands between building the checkpoint and confirming its upload,
+    // so canonical state no longer equals the checkpoint snapshot.
+    store
+        .edit_item(EditItemRequest {
+            item_id: item.id,
+            title: Some(OptionalTextUpdate::Set("During upload".into())),
+            ..EditItemRequest::default()
+        })
+        .await
+        .expect("edit during upload");
+
+    let confirmed = store
+        .receive_remote_checkpoint(
+            &checkpoint.path,
+            &"d".repeat(40),
+            checkpoint.checkpoint_json.as_bytes(),
+        )
+        .await
+        .expect("confirm own checkpoint");
+    assert!(
+        !confirmed.restored,
+        "a non-pristine store must not replace its own newer state"
+    );
+    for batch in &covered {
+        assert!(
+            store
+                .batch_is_checkpoint_covered(&batch.device_id, &batch.sequence)
+                .await
+                .expect("coverage lookup"),
+            "the checkpoint must be selected so its coverage counts as covered"
+        );
+    }
+}
+
 #[tokio::test]
 async fn native_mutations_reuse_one_durable_loro_peer() {
     let root = tempfile::tempdir().expect("temporary test root");

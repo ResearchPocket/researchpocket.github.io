@@ -190,12 +190,6 @@ impl V2Store {
             .execute(&mut *connection)
             .await?;
         let result = async {
-            let state = sqlx::query(
-                "SELECT snapshot_sha256 FROM canonical_state WHERE singleton = 1",
-            )
-            .fetch_one(&mut *connection)
-            .await?;
-            let current_snapshot_sha256: String = state.try_get("snapshot_sha256")?;
             let pristine = store_is_pristine(&mut connection).await?;
             let restored = if pristine {
                 let library = Library::from_snapshot(&snapshot, peer_id)?;
@@ -221,10 +215,12 @@ impl V2Store {
                 .await?;
                 true
             } else {
-                current_snapshot_sha256 == artifact.checkpoint_id
+                false
             };
             persist_checkpoint(&mut connection, &artifact, "remote").await?;
-            if restored {
+            if restored
+                || coverage_is_locally_applied(&mut connection, &artifact.coverage).await?
+            {
                 select_checkpoint(&mut connection, &artifact).await?;
             }
             observe_remote(&mut connection, path, blob_sha).await?;
@@ -834,6 +830,66 @@ async fn select_checkpoint(
     .execute(&mut *connection)
     .await?;
     Ok(())
+}
+
+/// True when every operation this checkpoint covers has already been applied
+/// here.
+///
+/// Selection only decides which operations a later pull may skip, so a
+/// checkpoint whose coverage this replica already contains is safe to select
+/// even when local state has moved past it. Requiring the canonical snapshot to
+/// equal the checkpoint instead would leave a self-created checkpoint
+/// unselected whenever a concurrent local edit landed while it uploaded. The
+/// tail is measured from the selected checkpoint, so it would never reset and
+/// every later sync would mint and upload another full snapshot.
+async fn coverage_is_locally_applied(
+    connection: &mut SqliteConnection,
+    coverage: &CheckpointCoverage,
+) -> StoreResult<bool> {
+    let mut intervals = Vec::new();
+    for (device_id, ranges) in selected_coverage(&mut *connection).await? {
+        for range in &ranges {
+            let (start, end) = interval_bounds(range)?;
+            intervals.push((device_id.clone(), start, end));
+        }
+    }
+    let rows = sqlx::query("SELECT device_id, sequence FROM batches")
+        .fetch_all(&mut *connection)
+        .await?;
+    for row in rows {
+        let device_id: String = row.try_get("device_id")?;
+        let sequence: String = row.try_get("sequence")?;
+        let sequence = parse_sequence(&sequence)?;
+        intervals.push((device_id, sequence, sequence));
+    }
+    let applied = merge_coverage(intervals)?;
+    for (device_id, ranges) in coverage {
+        let Some(applied_ranges) = applied.get(device_id) else {
+            return Ok(false);
+        };
+        let applied_bounds = applied_ranges
+            .iter()
+            .map(interval_bounds)
+            .collect::<StoreResult<Vec<_>>>()?;
+        for range in ranges {
+            let (start, end) = interval_bounds(range)?;
+            // Merged intervals never overlap, so a covered range that is
+            // applied at all sits inside exactly one of them.
+            if !applied_bounds.iter().any(|(applied_start, applied_end)| {
+                *applied_start <= start && end <= *applied_end
+            }) {
+                return Ok(false);
+            }
+        }
+    }
+    Ok(true)
+}
+
+fn interval_bounds(interval: &CoverageInterval) -> StoreResult<(u64, u64)> {
+    Ok((
+        parse_sequence(&interval.start)?,
+        parse_sequence(&interval.end)?,
+    ))
 }
 
 async fn selected_coverage(
