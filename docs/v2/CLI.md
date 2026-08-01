@@ -662,3 +662,24 @@ followed by the same item records.
 Do not parse human output in integrations. The JSON and NDJSON schemas are the
 machine interfaces and require an explicit compatibility plan before a breaking
 change.
+
+## Zen documents (planned, v2.2)
+
+[ADR 0011](./ADR_0011_ZEN_DOCUMENTS.md) adds a bounded authored-document
+workspace after the [ADR 0010](./ADR_0010_BOUNDED_ITEM_SCOPED_SYNC.md)
+aggregate migration ships. The target command group is:
+
+```text
+research zen list
+research zen add [--title <TITLE>]
+research zen show <DOC_ID>
+research zen edit <DOC_ID>
+research zen delete <DOC_ID>
+research zen restore <DOC_ID>
+```
+
+Zen commands are a target contract, not part of the shipped surface above.
+Documents are Markdown bounded to 256 KiB, mention saved items through
+`research:item/<uuid>` links, and never enter publication artifacts. Item
+capture is unchanged: `research add` still requires an absolute HTTP(S) URL.
+Machine output will version document records separately from item records.
