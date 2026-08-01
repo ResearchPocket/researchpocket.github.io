@@ -659,7 +659,7 @@ async fn apply_remote_batch(
     })
 }
 
-async fn build_checkpoint_candidate(
+pub(crate) async fn build_checkpoint_candidate(
     connection: &mut SqliteConnection,
     force: bool,
 ) -> StoreResult<Option<PendingCheckpoint>> {
