@@ -70,8 +70,7 @@ function ZenList({
         <div className="zen-title">
           <h2 id="zen-heading">Zen</h2>
           <p className="zen-count">
-            {documents.length} {documents.length === 1 ? "document" : "documents"} · titles
-            and metadata only — bodies load on open
+            {documents.length} {documents.length === 1 ? "document" : "documents"}
           </p>
         </div>
         <select
@@ -86,7 +85,7 @@ function ZenList({
       </div>
 
       <form
-        className="quick-capture"
+        className="quick-add zen-add"
         onSubmit={(event) => {
           event.preventDefault();
           onCreate(draftTitle.trim());
@@ -98,15 +97,14 @@ function ZenList({
           aria-label="New document title"
           disabled={busy}
           onChange={(event) => setDraftTitle(event.target.value)}
-          placeholder="New document — title optional, ↵ creates and opens."
+          placeholder="New document"
           type="text"
           value={draftTitle}
         />
-        <span className="quick-capture-hint">or research zen add</span>
       </form>
 
       <div className="library-search-row">
-        <label className="library-search">
+        <label className="library-search zen-search">
           <input
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Search document titles"
@@ -196,7 +194,9 @@ function ZenEditor({
   onSaveTitle,
   onSaveBody,
 }: ZenWorkspaceProps & { open: { documentId: string; view: ZenDocumentView } }) {
-  const [mode, setMode] = useState<"edit" | "view">("view");
+  const [mode, setMode] = useState<"edit" | "view">(() =>
+    window.matchMedia("(max-width: 48rem)").matches ? "edit" : "view",
+  );
   const [draft, setDraft] = useState(open.view.body);
   const [title, setTitle] = useState(open.view.title.value ?? "");
   const byteLength = new TextEncoder().encode(draft).length;
@@ -233,7 +233,7 @@ function ZenEditor({
             {open.view.title.value?.trim() || "Untitled document"}
           </span>
         </nav>
-        <span className="zen-budget">
+        <span className="zen-budget zen-budget-toolbar">
           {formatBytes(byteLength)} of {formatBytes(MAX_BODY_BYTES)}
         </span>
         <div className="zen-mode" role="group" aria-label="Document mode">
@@ -287,10 +287,6 @@ function ZenEditor({
               type="text"
               value={title}
             />
-            <p className="zen-hint">
-              CommonMark + GFM task lists · plain text only · writes past{" "}
-              {formatBytes(MAX_BODY_BYTES)} fail with an explicit error
-            </p>
             <textarea
               aria-label="Document body"
               className="zen-body-input"
@@ -314,10 +310,16 @@ function ZenEditor({
       </div>
 
       <footer className="zen-footer">
-        <span>
+        <span className="zen-budget zen-budget-footer">
+          {formatBytes(byteLength)} of {formatBytes(MAX_BODY_BYTES)}
+        </span>
+        <span className="zen-footer-desktop">
           <b>esc</b> close
         </span>
-        <span>autosaves locally · durable before sync reports it</span>
+        <span className="zen-footer-desktop">
+          autosaves locally · durable before sync reports it
+        </span>
+        <span className="zen-footer-mobile">saved locally</span>
       </footer>
     </section>
   );
