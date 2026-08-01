@@ -865,7 +865,7 @@ export function App() {
       </div>
 
       <div className="workspace-layout">
-        <aside className="tag-rail">
+        <aside className={`tag-rail${view === "library" ? "" : " tag-rail-empty"}`}>
           {view === "library" && (
           <nav aria-label="Library views" className="rail-nav">
             <button

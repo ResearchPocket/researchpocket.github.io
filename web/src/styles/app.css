@@ -3346,6 +3346,7 @@ kbd {
 
   .mobile-actions {
     background: var(--color-canvas);
+    block-size: var(--mobile-actions-size);
     border-top: var(--rule) solid var(--color-border-strong);
     bottom: 0;
     display: grid;
@@ -5155,6 +5156,7 @@ kbd {
   color: var(--color-text-muted);
   font-size: var(--font-size-xs);
   margin: 0;
+  min-inline-size: 0;
 }
 
 .zen-heading-row select {
@@ -5269,4 +5271,83 @@ button.local-status {
 button.local-status:hover .status-copy,
 button.local-status:focus-visible .status-copy {
   color: var(--color-text);
+}
+
+.zen-budget-footer,
+.zen-footer-mobile {
+  display: none;
+}
+
+@media (max-width: 48rem) {
+  :root {
+    --mobile-actions-size: 3.25rem;
+  }
+
+  /* Outside the library the rail has nothing to show, and an empty strip
+     reads as a rendering fault. */
+  .tag-rail-empty {
+    display: none;
+  }
+
+  .zen-budget-toolbar,
+  .zen-footer-desktop {
+    display: none;
+  }
+
+  .zen-budget-footer,
+  .zen-footer-mobile {
+    display: inline;
+  }
+
+  .zen-footer {
+    /* The status belongs on screen while writing, not below a tall body. The
+       offset clears the actions bar, which is sticky in the same scroller. */
+    background: var(--color-canvas);
+    bottom: var(--mobile-actions-size);
+    justify-content: space-between;
+    position: sticky;
+  }
+
+  .zen-body-input {
+    min-block-size: 60vh;
+  }
+
+  .zen-toolbar {
+    gap: 0.5rem;
+    padding: 0 1rem;
+  }
+
+  .zen-reader,
+  .zen-edit {
+    padding: 1.25rem 1rem 2rem;
+  }
+
+  .zen-heading-row {
+    align-items: start;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .zen-title {
+    flex-wrap: wrap;
+    inline-size: 100%;
+  }
+
+  .zen-list {
+    min-inline-size: 0;
+  }
+
+  /* The library hides quick-add on mobile because the actions bar can save a
+     link. Nothing there creates a document, so this form has to stay. */
+  .zen-add {
+    display: grid;
+  }
+
+  .zen-row {
+    column-gap: 0.5rem;
+  }
+
+  .zen-row-meta {
+    row-gap: 0.125rem;
+  }
 }
