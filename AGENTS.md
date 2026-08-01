@@ -33,7 +33,8 @@ Do not expand V2 into:
 
 - an AI memory, personal profile, RAG service, or autonomous organizer;
 - a multi-user collaboration or real-time team product;
-- a general notes/wiki application or a store for standalone notes;
+- a general notes/wiki application; standalone authored prose is limited to the
+  bounded zen documents of [ADR 0011](docs/v2/ADR_0011_ZEN_DOCUMENTS.md);
 - a general-purpose webpage archive, file/PDF store, highlighting system, or
   attachment manager beyond bounded content-addressed Firecrawl Markdown
   referenced by an item;
@@ -108,6 +109,12 @@ research delete <item-id>
 research restore <item-id>
 research list
 research search <query>
+research zen list
+research zen add [--title <title>]
+research zen show <doc-id>
+research zen edit <doc-id>
+research zen delete <doc-id>
+research zen restore <doc-id>
 research ui
 research tui
 research sync setup github

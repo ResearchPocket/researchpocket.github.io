@@ -19,6 +19,13 @@ plainly and must not expose partial or unsafe implementations.
 The version boundary and supported distribution channels are recorded in
 [ADR 0006](./ADR_0006_STAGED_V2_PARITY.md).
 
+The 2.2 iteration adds the Research Zen workspace defined in
+[ADR 0011](./ADR_0011_ZEN_DOCUMENTS.md): bounded authored Markdown documents
+with inline item mentions, lists, and todos. Zen documents ship only after the
+bounded item-scoped synchronization migration of
+[ADR 0010](./ADR_0010_BOUNDED_ITEM_SCOPED_SYNC.md) and never weaken URL-first
+item identity.
+
 ## Vision
 
 ResearchPocket is a local-first, URL-first personal library for developers. It
@@ -191,8 +198,10 @@ V2 is successful when all of the following are true:
   using many devices, browsers, and tabs.
 - AI memory, personal profiling, RAG, autonomous organization, or canonical
   machine-generated tags and summaries.
-- Standalone notes, full webpage archival, PDFs, attachments, highlights, or a
-  general-purpose wiki.
+- Full webpage archival, PDFs, attachments, highlights, or a general-purpose
+  wiki. Bounded zen documents ([ADR 0011](./ADR_0011_ZEN_DOCUMENTS.md)) are the
+  only standalone authored prose: Markdown with item mentions, lists, and
+  todos, never a note graph, attachment store, or archive.
 - Autonomous crawling, AI-generated memory, automatic provider fallback, or
   silently sending saved URLs to a third-party extraction service.
 - Native mobile applications.
@@ -209,7 +218,10 @@ V2 is successful when all of the following are true:
 
 The following are contractual, not incidental implementation details:
 
-- V2 remains URL-first and developer-only.
+- Items remain URL-first and V2 remains developer-only. Zen documents
+  ([ADR 0011](./ADR_0011_ZEN_DOCUMENTS.md)) are the single bounded
+  authored-prose exception; item capture still requires an absolute HTTP(S)
+  URL.
 - The V1 database is imported into a new V2 library and is never migrated in
   place.
 - The complete private library is editable from GitHub Pages owner mode.
