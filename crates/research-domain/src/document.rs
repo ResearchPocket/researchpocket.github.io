@@ -52,6 +52,8 @@ pub enum DomainError {
     UnsupportedFeature(String),
     #[error("unsupported operation pack version {0}")]
     UnsupportedOperationPackVersion(u8),
+    #[error("unsupported aggregate kind {0}")]
+    UnsupportedAggregateKind(String),
     #[error("integrity failure at {path}: expected {expected}, got {actual}")]
     Integrity {
         path: String,

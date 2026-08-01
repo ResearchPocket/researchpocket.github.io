@@ -398,8 +398,9 @@ hash, Loro snapshot mode, and snapshot frontier before use.
 Create a checkpoint after either 100 newly applied batches or 2 MiB of
 decoded update tail since the selected checkpoint. Checkpoint creation is an
 optimization and may be repeated by several devices. Clients select a compatible
-valid checkpoint with the greatest `batch_count`, breaking ties by lowercase
-checkpoint ID, then apply every discovered operation outside its exact coverage.
+valid checkpoint with the greatest `batch_count`, breaking ties by the
+lexicographically smallest lowercase checkpoint ID, then apply every discovered
+operation outside its exact coverage.
 Selection order cannot change final state.
 
 Every operation remains in the repository. A client can rebuild from the full
@@ -434,12 +435,25 @@ The negotiated `item-aggregates-v2` generation scopes an envelope to
 operations at:
 
 ```text
-sync/v2/ops/items/<item-uuid>/<device-uuid>/<20-digit-sequence>.json
+sync/v2/ops/<kind-segment>/<aggregate-uuid>/<device-uuid>/<20-digit-sequence>.json
 ```
 
-An immutable compact catalogue lists item aggregate IDs, saved ordering,
-lifecycle state, and content-addressed item-checkpoint paths; it contains no
-captured-document bytes. Each item checkpoint validates that its full Loro
+The path segment is derived from `aggregate_kind`; item aggregates use `items`,
+so item operations live at `sync/v2/ops/items/…` and item checkpoints at
+`sync/v2/checkpoints/items/…`.
+
+An immutable compact catalogue lists each aggregate's kind and ID, saved
+ordering, lifecycle state, and content-addressed checkpoint path; it contains no
+captured-document bytes. Entries are strictly ascending by `(kind,
+aggregate_id)`, so the artifact is byte-identical for a given library state and
+one aggregate cannot be defined twice. Genesis binds the catalogue by SHA-256
+over its exact bytes.
+
+An unrecognized `aggregate_kind` is a recognized protocol object a client cannot
+implement, not a malformed one. Clients parse it, then fail closed with an
+upgrade-shaped error before applying or uploading. Ignoring the entry would
+silently materialize a partial library, so a catalogue containing any
+unimplemented kind is rejected whole. Each item checkpoint validates that its full Loro
 snapshot contains exactly its declared item. Migration deterministically seeds
 these checkpoints from one selected v1 canonical checkpoint, retains all v1
 history, and records that checkpoint identity in v2 genesis.
