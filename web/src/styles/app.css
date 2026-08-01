@@ -5257,3 +5257,16 @@ kbd {
 .zen-prose li.zen-todo p {
   margin: 0;
 }
+
+/* The local indicator is the way into sync, so it reads as pressable. */
+button.local-status {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  padding: 0;
+}
+
+button.local-status:hover .status-copy,
+button.local-status:focus-visible .status-copy {
+  color: var(--color-text);
+}

@@ -841,13 +841,18 @@ export function App() {
                 </select>
               </div>
             ) : null}
-            <div className="local-status" role="status">
+            <button
+              aria-label={`Sync — ${formatHeaderStatus(libraryState.status, libraryState.pendingCount)}`}
+              className="local-status"
+              onClick={() => navigateToView("sync")}
+              type="button"
+            >
               <span aria-hidden="true" className="status-dot" />
               <span className="status-label">local</span>
-              <span className="status-copy">
+              <span aria-live="polite" className="status-copy" role="status">
                 {formatHeaderStatus(libraryState.status, libraryState.pendingCount)}
               </span>
-            </div>
+            </button>
             <button
               className="command-trigger"
               onClick={() => setCommandOpen(true)}
@@ -1272,7 +1277,6 @@ export function App() {
         <nav aria-label="Mobile actions" className="mobile-actions">
           <button className="primary-button" onClick={(event) => openCapture(event.currentTarget)} type="button">＋ Save a link</button>
           <button className="secondary-button" onClick={() => { setOpenZen(null); navigateToView("zen"); }} type="button">Zen {zenDocuments.length}</button>
-          <button className="secondary-button" onClick={() => navigateToView("sync")} type="button">Sync {libraryState.pendingCount}</button>
           <button className="secondary-button" onClick={() => navigateToView("settings")} type="button">Settings</button>
         </nav>
       </div>
