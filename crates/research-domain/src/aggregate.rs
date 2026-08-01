@@ -815,6 +815,21 @@ mod tests {
             ITEM_OPS_PREFIX,
             "item paths must stay byte-identical now that they are kind-derived"
         );
+        // The zen kind's wire name and namespace are protocol surface: changing
+        // either would strand documents already written under the old one.
+        assert_eq!(AggregateKind::Zen.as_str(), "zen_document");
+        assert_eq!(
+            AggregateKind::from("zen_document".to_owned()),
+            AggregateKind::Zen,
+            "the wire name must round-trip"
+        );
+        assert_eq!(AggregateKind::Zen.ops_prefix().unwrap(), "sync/v2/ops/zen/");
+        assert_eq!(
+            AggregateKind::Zen
+                .checkpoint_path(ITEM, &"c".repeat(64))
+                .unwrap(),
+            format!("sync/v2/checkpoints/zen/{ITEM}/{}.json", "c".repeat(64))
+        );
         assert_eq!(
             AggregateKind::Item
                 .checkpoint_path(ITEM, &"c".repeat(64))

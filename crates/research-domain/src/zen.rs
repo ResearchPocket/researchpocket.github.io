@@ -9,6 +9,8 @@
 //! character splice, which is what lets two devices flip different boxes and
 //! keep both.
 
+use std::collections::BTreeSet;
+
 use loro::{ExportMode, LoroDoc, VersionVector};
 use serde::{Deserialize, Serialize};
 
@@ -89,6 +91,30 @@ pub struct ZenDocumentSummary {
     pub lifecycle_state: LifecycleState,
 }
 
+/// Strips a GFM list marker, bulleted or ordered, and returns what follows.
+fn strip_list_marker(line: &str) -> Option<&str> {
+    let trimmed = line.trim_start();
+    for bullet in ["- ", "* ", "+ "] {
+        if let Some(rest) = trimmed.strip_prefix(bullet) {
+            return Some(rest);
+        }
+    }
+    let digits = trimmed.len()
+        - trimmed
+            .trim_start_matches(|c: char| c.is_ascii_digit())
+            .len();
+    if digits == 0 {
+        return None;
+    }
+    let after_digits = &trimmed[digits..];
+    for delimiter in [". ", ") "] {
+        if let Some(rest) = after_digits.strip_prefix(delimiter) {
+            return Some(rest);
+        }
+    }
+    None
+}
+
 /// Counts GFM task-list items, and how many are checked.
 ///
 /// Derived from the body rather than stored, so a hand-edited checkbox and a
@@ -97,16 +123,10 @@ fn count_todos(body: &str) -> (usize, usize) {
     let mut total = 0;
     let mut done = 0;
     for line in body.lines() {
-        let trimmed = line.trim_start();
-        let Some(rest) = trimmed
-            .strip_prefix("- ")
-            .or_else(|| trimmed.strip_prefix("* "))
-            .or_else(|| trimmed.strip_prefix("+ "))
-        else {
+        let Some(rest) = strip_list_marker(line) else {
             continue;
         };
-        let rest = rest.trim_start();
-        let checked = match rest.as_bytes() {
+        let checked = match rest.trim_start().as_bytes() {
             [b'[', mark, b']', ..] => match mark {
                 b' ' => Some(false),
                 b'x' | b'X' => Some(true),
@@ -167,7 +187,10 @@ impl ZenAggregate {
             seed.created_at,
         )?;
         entity.ensure_mergeable_map(TAGS).map_err(loro_error)?;
-        for (index, tag) in seed.tags.iter().enumerate() {
+        // Sorted and deduplicated like item creation, so two replicas seeded
+        // from the same tags produce the same bytes and no redundant dots.
+        let tags = seed.tags.iter().collect::<BTreeSet<_>>();
+        for (index, tag) in tags.into_iter().enumerate() {
             add_entity_tag(&entity, tag, &format!("{operation_prefix}/tag/{index:020}"))?;
         }
         transition_entity_lifecycle(
@@ -319,7 +342,11 @@ mod tests {
             title: Some("Today".to_owned()),
             body: "- [x] Ship it\n- [ ] Review #132\n\nGrocery run.".to_owned(),
             created_at: 1_700_000_000,
-            tags: vec!["reading".to_owned()],
+            tags: vec![
+                "reading".to_owned(),
+                "crdt".to_owned(),
+                "reading".to_owned(),
+            ],
         }
     }
 
@@ -352,7 +379,21 @@ mod tests {
         let summary = alice.view().expect("view").summary();
         assert_eq!((summary.todo_total, summary.todo_done), (2, 2));
         assert_eq!(summary.title.as_deref(), Some("Today"));
-        assert_eq!(summary.tags, ["reading"]);
+        assert_eq!(
+            summary.tags,
+            ["crdt", "reading"],
+            "tags are canonicalized, so replicas seeded alike agree"
+        );
+    }
+
+    /// Ordered task items are GFM task lists too, so they must count.
+    #[test]
+    fn todos_are_counted_in_bulleted_and_ordered_lists() {
+        let mut ordered = seed();
+        ordered.body = "1. [x] first\n2) [ ] second\n- [ ] third\n\n- not a todo".to_owned();
+        let aggregate = ZenAggregate::create(&ordered, "alice/1", 11).expect("create");
+        let summary = aggregate.view().expect("view").summary();
+        assert_eq!((summary.todo_total, summary.todo_done), (3, 1));
     }
 
     #[test]
