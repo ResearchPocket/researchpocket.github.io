@@ -706,3 +706,173 @@ fn parse_peer_id(value: &str) -> DomainResult<u64> {
 fn js_error(error: DomainError) -> JsValue {
     JsValue::from_str(&error.to_string())
 }
+
+// ---- Zen documents -------------------------------------------------------
+//
+// Same string-in/string-out shape as the item bindings: the caller owns
+// persistence, so every entry point takes the replica it is editing and
+// returns the next durable state plus the envelope to queue.
+
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+enum ZenMutation {
+    Create {
+        document_id: String,
+        title: Option<String>,
+        body: String,
+        created_at: i64,
+        tags: Vec<String>,
+    },
+    SetTitle {
+        title: Option<String>,
+    },
+    SetBody {
+        body: String,
+    },
+    AddTag {
+        tag: String,
+    },
+    RemoveTag {
+        tag: String,
+    },
+    Delete,
+    Restore,
+}
+
+#[derive(Serialize)]
+struct ZenMutationResult {
+    snapshot: String,
+    summary: crate::ZenDocumentSummary,
+    envelope: String,
+}
+
+/// Apply exactly one zen mutation and return the next durable state.
+///
+/// `snapshot_base64` is empty for a create and the document's current replica
+/// otherwise. On any error the caller keeps its existing state untouched.
+#[wasm_bindgen(js_name = applyZenMutation)]
+#[allow(clippy::too_many_arguments)]
+pub fn apply_zen_mutation(
+    snapshot_base64: &str,
+    peer_id: &str,
+    library_id: &str,
+    device_id: &str,
+    sequence: &str,
+    created_at: &str,
+    document_id: &str,
+    mutation_json: &str,
+) -> Result<String, JsValue> {
+    zen_mutate(
+        snapshot_base64,
+        peer_id,
+        library_id,
+        device_id,
+        sequence,
+        created_at,
+        document_id,
+        mutation_json,
+    )
+    .map_err(js_error)
+}
+
+/// Read one document, body included. Only called when a document is opened.
+#[wasm_bindgen(js_name = zenDocumentView)]
+pub fn zen_document_view(
+    snapshot_base64: &str,
+    peer_id: &str,
+    document_id: &str,
+) -> Result<String, JsValue> {
+    zen_view(snapshot_base64, peer_id, document_id).map_err(js_error)
+}
+
+fn zen_view(snapshot_base64: &str, peer_id: &str, document_id: &str) -> DomainResult<String> {
+    let snapshot = STANDARD.decode(snapshot_base64)?;
+    let aggregate =
+        crate::ZenAggregate::from_snapshot(document_id, &snapshot, parse_peer_id(peer_id)?)?;
+    Ok(serde_json::to_string(&aggregate.view()?)?)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn zen_mutate(
+    snapshot_base64: &str,
+    peer_id: &str,
+    library_id: &str,
+    device_id: &str,
+    sequence: &str,
+    created_at: &str,
+    document_id: &str,
+    mutation_json: &str,
+) -> DomainResult<String> {
+    let peer_id = parse_peer_id(peer_id)?;
+    let sequence_number = sequence
+        .parse::<u64>()
+        .map_err(|_| DomainError::InvalidState("sequence is not an integer".into()))?;
+    let mutation: ZenMutation = serde_json::from_str(mutation_json)?;
+    let prefix = format!("{device_id}/{sequence}/zen/{document_id}");
+
+    let (aggregate, before) = match &mutation {
+        ZenMutation::Create {
+            document_id: seed_id,
+            title,
+            body,
+            created_at: seeded_at,
+            tags,
+        } => {
+            if seed_id != document_id {
+                return Err(DomainError::InvalidState(
+                    "create mutation does not match its document".into(),
+                ));
+            }
+            let seed = crate::ZenDocumentSeed {
+                document_id: seed_id.clone(),
+                title: title.clone(),
+                body: body.clone(),
+                created_at: *seeded_at,
+                tags: tags.clone(),
+            };
+            (
+                crate::ZenAggregate::create(&seed, &prefix, peer_id)?,
+                Default::default(),
+            )
+        }
+        _ => {
+            let snapshot = STANDARD.decode(snapshot_base64)?;
+            let aggregate =
+                crate::ZenAggregate::from_snapshot(document_id, &snapshot, peer_id)?;
+            let before = aggregate.version();
+            match &mutation {
+                ZenMutation::Create { .. } => unreachable!("handled above"),
+                ZenMutation::SetTitle { title } => {
+                    aggregate.write_title(&format!("{prefix}/title"), title.as_deref())?;
+                }
+                ZenMutation::SetBody { body } => aggregate.set_body(body)?,
+                ZenMutation::AddTag { tag } => {
+                    aggregate.add_tag(tag, &format!("{prefix}/tag-add"))?;
+                }
+                ZenMutation::RemoveTag { tag } => aggregate.remove_tag(tag)?,
+                ZenMutation::Delete => aggregate.transition_lifecycle(
+                    &format!("{prefix}/lifecycle"),
+                    LifecycleState::Deleted,
+                )?,
+                ZenMutation::Restore => aggregate.transition_lifecycle(
+                    &format!("{prefix}/lifecycle"),
+                    LifecycleState::Active,
+                )?,
+            }
+            (aggregate, before)
+        }
+    };
+
+    let envelope = aggregate.export_envelope(
+        &before,
+        library_id,
+        device_id,
+        sequence_number,
+        created_at,
+    )?;
+    Ok(serde_json::to_string(&ZenMutationResult {
+        snapshot: STANDARD.encode(aggregate.export_snapshot()?),
+        summary: aggregate.view()?.summary(),
+        envelope: serde_json::to_string(&envelope)?,
+    })?)
+}

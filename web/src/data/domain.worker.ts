@@ -1,5 +1,6 @@
 import initWasm, {
   applyMutation,
+  applyZenMutation,
   applyRemoteEnvelopes,
   createCheckpoint,
   createCapturedDocument,
@@ -11,10 +12,12 @@ import initWasm, {
   validateCheckpoint,
   validateCapturedContent,
   validateSyncGenesis,
+  zenDocumentView,
 } from "../generated/research_domain";
 
 type DomainMethod =
   | "applyMutation"
+  | "applyZenMutation"
   | "applyRemoteEnvelopes"
   | "createCheckpoint"
   | "createCapturedDocument"
@@ -25,7 +28,8 @@ type DomainMethod =
   | "unpackOperationPack"
   | "validateCheckpoint"
   | "validateCapturedContent"
-  | "validateSyncGenesis";
+  | "validateSyncGenesis"
+  | "zenDocumentView";
 
 interface DomainRequest {
   id: number;
@@ -41,6 +45,7 @@ interface DomainResponse {
 
 const methods: Record<DomainMethod, (...args: string[]) => string> = {
   applyMutation,
+  applyZenMutation,
   applyRemoteEnvelopes,
   createCheckpoint,
   createCapturedDocument,
@@ -52,6 +57,7 @@ const methods: Record<DomainMethod, (...args: string[]) => string> = {
   validateCheckpoint,
   validateCapturedContent,
   validateSyncGenesis,
+  zenDocumentView,
 };
 
 const ready = initWasm();

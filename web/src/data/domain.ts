@@ -1,5 +1,6 @@
 type DomainMethod =
   | "applyMutation"
+  | "applyZenMutation"
   | "applyRemoteEnvelopes"
   | "createCheckpoint"
   | "createCapturedDocument"
@@ -10,7 +11,8 @@ type DomainMethod =
   | "unpackOperationPack"
   | "validateCheckpoint"
   | "validateCapturedContent"
-  | "validateSyncGenesis";
+  | "validateSyncGenesis"
+  | "zenDocumentView";
 
 interface DomainResponse {
   id: number;
