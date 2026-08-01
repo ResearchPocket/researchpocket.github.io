@@ -7,7 +7,7 @@
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use research_domain::{
-    AggregateCatalogue, AggregateGenesis, AggregateKind, ItemAggregateCheckpoint, Library,
+    AggregateGenesis, AggregateKind, ItemAggregateCheckpoint, Library,
     aggregate_catalogue_path, create_aggregate_migration,
 };
 use sqlx::{Row, SqliteConnection};
@@ -64,8 +64,7 @@ async fn read_migration(
     connection: &mut SqliteConnection,
 ) -> StoreResult<Option<AggregateMigrationReceipt>> {
     let Some(row) = sqlx::query(
-        "SELECT library_id, v1_checkpoint_id, catalogue_path, catalogue_sha256, \
-         catalogue_json, barrier_device_id, barrier_sequence \
+        "SELECT library_id, catalogue_json, genesis_json, barrier_device_id, barrier_sequence \
          FROM aggregate_migration WHERE singleton = 1",
     )
     .fetch_optional(&mut *connection)
@@ -73,15 +72,20 @@ async fn read_migration(
     else {
         return Ok(None);
     };
+    let library_id: String = row.try_get("library_id")?;
     let catalogue_json: String = row.try_get("catalogue_json")?;
-    let catalogue: AggregateCatalogue = serde_json::from_str(&catalogue_json)?;
+    let genesis_json: String = row.try_get("genesis_json")?;
     let device_id: String = row.try_get("barrier_device_id")?;
     let sequence: String = row.try_get("barrier_sequence")?;
+    // Reading revalidates rather than trusting local bytes, so a corrupt row
+    // cannot report a migration whose identities do not hold.
+    let genesis: AggregateGenesis = serde_json::from_str(&genesis_json)?;
+    let catalogue = genesis.validate(&library_id, &catalogue_json)?;
     Ok(Some(AggregateMigrationReceipt {
-        library_id: row.try_get("library_id")?,
-        v1_checkpoint_id: row.try_get("v1_checkpoint_id")?,
-        catalogue_path: row.try_get("catalogue_path")?,
-        catalogue_sha256: row.try_get("catalogue_sha256")?,
+        library_id,
+        v1_checkpoint_id: genesis.migrated_from_v1_checkpoint,
+        catalogue_path: aggregate_catalogue_path(&genesis.catalogue_sha256),
+        catalogue_sha256: genesis.catalogue_sha256,
         barrier_path: format!("sync/v1/ops/{device_id}/{sequence}.json"),
         aggregate_count: catalogue.entries.len(),
         already_migrated: true,
@@ -215,17 +219,13 @@ async fn run_migration(
         .await?;
     }
 
-    let catalogue_path = aggregate_catalogue_path(&migration.catalogue_sha256);
     sqlx::query(
         "INSERT INTO aggregate_migration \
-         (singleton, library_id, v1_checkpoint_id, catalogue_path, catalogue_sha256, \
-          catalogue_json, genesis_json, barrier_device_id, barrier_sequence, migrated_at) \
-         VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         (singleton, library_id, catalogue_json, genesis_json, barrier_device_id, \
+          barrier_sequence, migrated_at) \
+         VALUES (1, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&library_id)
-    .bind(&checkpoint.checkpoint_id)
-    .bind(&catalogue_path)
-    .bind(&migration.catalogue_sha256)
     .bind(&migration.catalogue_json)
     .bind(&migration.genesis_json)
     .bind(&barrier.device_id)
@@ -237,7 +237,7 @@ async fn run_migration(
     Ok(AggregateMigrationReceipt {
         library_id,
         v1_checkpoint_id: checkpoint.checkpoint_id,
-        catalogue_path,
+        catalogue_path: aggregate_catalogue_path(&migration.catalogue_sha256),
         catalogue_sha256: migration.catalogue_sha256,
         barrier_path,
         aggregate_count: migration.checkpoints.len(),

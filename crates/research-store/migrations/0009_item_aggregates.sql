@@ -30,12 +30,13 @@ CREATE INDEX aggregate_checkpoints_aggregate
 
 -- The single record binding retained v1 history to the v2 generation. Its
 -- presence is what makes this installation an aggregate writer.
+--
+-- Only the exact protocol bytes are stored. The v1 checkpoint identity, the
+-- catalogue hash, and the catalogue path are all derived from validated genesis
+-- on read, so no denormalized copy can disagree with them.
 CREATE TABLE aggregate_migration (
     singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
     library_id TEXT NOT NULL,
-    v1_checkpoint_id TEXT NOT NULL CHECK (length(v1_checkpoint_id) = 64),
-    catalogue_path TEXT NOT NULL,
-    catalogue_sha256 TEXT NOT NULL CHECK (length(catalogue_sha256) = 64),
     catalogue_json TEXT NOT NULL,
     genesis_json TEXT NOT NULL,
     barrier_device_id TEXT NOT NULL,
