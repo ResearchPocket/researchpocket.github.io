@@ -14,6 +14,7 @@ use std::collections::BTreeSet;
 use loro::{ExportMode, LoroDoc, VersionVector};
 use serde::{Deserialize, Serialize};
 
+use crate::aggregate::{AggregateEnvelope, AggregateKind, build_aggregate_envelope};
 use crate::document::{
     DomainError, DomainResult, add_entity_tag, entity_mut, entity_text_mut, loro_error,
     map_child, map_keys, project_scalar, project_tags, remove_entity_tag, text_child,
@@ -243,6 +244,41 @@ impl ZenAggregate {
 
     pub fn import_update(&self, update: &[u8]) -> DomainResult<()> {
         self.doc.import(update).map_err(loro_error).map(|_| ())
+    }
+
+    pub fn export_envelope(
+        &self,
+        from: &VersionVector,
+        library_id: &str,
+        device_id: &str,
+        sequence: u64,
+        created_at: &str,
+    ) -> DomainResult<AggregateEnvelope> {
+        build_aggregate_envelope(
+            AggregateKind::Zen,
+            &self.document_id,
+            &self.export_update(from)?,
+            from,
+            library_id,
+            device_id,
+            sequence,
+            created_at,
+        )
+    }
+
+    pub fn import_envelope(
+        &self,
+        path: &str,
+        envelope: &AggregateEnvelope,
+        expected_library_id: &str,
+    ) -> DomainResult<()> {
+        if envelope.aggregate_kind != AggregateKind::Zen {
+            return Err(DomainError::UnsupportedAggregateKind(
+                envelope.aggregate_kind.as_str().to_owned(),
+            ));
+        }
+        let payload = envelope.validate(path, expected_library_id, &self.document_id)?;
+        self.import_update(&payload)
     }
 
     pub fn write_title(&self, revision_id: &str, title: Option<&str>) -> DomainResult<()> {

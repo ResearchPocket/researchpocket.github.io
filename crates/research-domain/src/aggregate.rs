@@ -205,6 +205,51 @@ impl AggregateEnvelope {
     }
 }
 
+/// Wraps one aggregate's CRDT update as a validated, addressable envelope.
+///
+/// Every aggregate kind produces envelopes the same way, so the shape is
+/// written once here and the kinds differ only in what they put in it.
+#[allow(clippy::too_many_arguments)]
+pub fn build_aggregate_envelope(
+    aggregate_kind: AggregateKind,
+    aggregate_id: &str,
+    update: &[u8],
+    from: &VersionVector,
+    library_id: &str,
+    device_id: &str,
+    sequence: u64,
+    created_at: &str,
+) -> DomainResult<AggregateEnvelope> {
+    validate_uuid_v7(library_id, "library ID")?;
+    validate_uuid_v7(device_id, "device ID")?;
+    validate_utc(created_at, "aggregate operation creation time")?;
+    if sequence == 0 {
+        return Err(DomainError::InvalidState(
+            "aggregate operation sequence cannot be zero".into(),
+        ));
+    }
+    let envelope = AggregateEnvelope {
+        protocol_version: AGGREGATE_PROTOCOL_VERSION,
+        domain_schema_version: DOMAIN_SCHEMA_VERSION,
+        loro_codec: LORO_CODEC.to_owned(),
+        required_features: vec![ITEM_AGGREGATES_FEATURE.to_owned()],
+        aggregate_kind,
+        aggregate_id: aggregate_id.to_owned(),
+        library_id: library_id.to_owned(),
+        device_id: device_id.to_owned(),
+        sequence: format!("{sequence:020}"),
+        causal_frontier: from
+            .iter()
+            .map(|(peer, counter)| (peer.to_string(), *counter))
+            .collect(),
+        created_at: created_at.to_owned(),
+        payload: STANDARD.encode(update),
+        payload_sha256: sha256_hex(update),
+    };
+    envelope.validate(&envelope.path()?, library_id, aggregate_id)?;
+    Ok(envelope)
+}
+
 pub struct ItemAggregate {
     item_id: String,
     library: Library,
@@ -293,7 +338,6 @@ impl ItemAggregate {
             .ok_or_else(|| DomainError::InvalidState("item aggregate body is missing".into()))
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn export_envelope(
         &self,
         from: &VersionVector,
@@ -302,35 +346,16 @@ impl ItemAggregate {
         sequence: u64,
         created_at: &str,
     ) -> DomainResult<AggregateEnvelope> {
-        validate_uuid_v7(library_id, "library ID")?;
-        validate_uuid_v7(device_id, "device ID")?;
-        validate_utc(created_at, "aggregate operation creation time")?;
-        if sequence == 0 {
-            return Err(DomainError::InvalidState(
-                "aggregate operation sequence cannot be zero".into(),
-            ));
-        }
-        let update = self.library.export_update(from)?;
-        let envelope = AggregateEnvelope {
-            protocol_version: AGGREGATE_PROTOCOL_VERSION,
-            domain_schema_version: DOMAIN_SCHEMA_VERSION,
-            loro_codec: LORO_CODEC.to_owned(),
-            required_features: vec![ITEM_AGGREGATES_FEATURE.to_owned()],
-            aggregate_kind: AggregateKind::Item,
-            aggregate_id: self.item_id.clone(),
-            library_id: library_id.to_owned(),
-            device_id: device_id.to_owned(),
-            sequence: format!("{sequence:020}"),
-            causal_frontier: from
-                .iter()
-                .map(|(peer, counter)| (peer.to_string(), *counter))
-                .collect(),
-            created_at: created_at.to_owned(),
-            payload: STANDARD.encode(&update),
-            payload_sha256: sha256_hex(&update),
-        };
-        envelope.validate(&envelope.path()?, library_id, &self.item_id)?;
-        Ok(envelope)
+        build_aggregate_envelope(
+            AggregateKind::Item,
+            &self.item_id,
+            &self.library.export_update(from)?,
+            from,
+            library_id,
+            device_id,
+            sequence,
+            created_at,
+        )
     }
 
     pub fn import_envelope(
