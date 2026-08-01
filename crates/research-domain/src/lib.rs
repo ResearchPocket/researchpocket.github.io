@@ -14,6 +14,7 @@ mod pack;
 mod projection;
 #[cfg(target_arch = "wasm32")]
 mod wasm;
+mod zen;
 
 pub use document::{
     DomainError, DomainResult, ItemSeed, Library, TextSplice, validate_item_url,
@@ -32,6 +33,9 @@ pub use projection::{
 #[cfg(target_arch = "wasm32")]
 pub use wasm::{
     apply_mutation, apply_remote_envelopes, initialize_library, materialize_library,
+};
+pub use zen::{
+    MAX_ZEN_BODY_BYTES, ZenAggregate, ZenDocumentSeed, ZenDocumentSummary, ZenDocumentView,
 };
 
 const ITEM_ID: &str = "0197f2b5-93d7-7ad4-8c67-21e98f0c7341";

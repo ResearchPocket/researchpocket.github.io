@@ -42,6 +42,7 @@ pub const ITEM_CHECKPOINTS_PREFIX: &str = "sync/v2/checkpoints/items/";
 #[serde(from = "String", into = "String")]
 pub enum AggregateKind {
     Item,
+    Zen,
     Unsupported(String),
 }
 
@@ -49,6 +50,7 @@ impl AggregateKind {
     pub fn as_str(&self) -> &str {
         match self {
             Self::Item => "item",
+            Self::Zen => "zen_document",
             Self::Unsupported(value) => value,
         }
     }
@@ -61,6 +63,7 @@ impl AggregateKind {
     pub fn path_segment(&self) -> DomainResult<&'static str> {
         match self {
             Self::Item => Ok("items"),
+            Self::Zen => Ok("zen"),
             Self::Unsupported(value) => {
                 Err(DomainError::UnsupportedAggregateKind(value.clone()))
             }
@@ -94,6 +97,7 @@ impl From<String> for AggregateKind {
     fn from(value: String) -> Self {
         match value.as_str() {
             "item" => Self::Item,
+            "zen_document" => Self::Zen,
             _ => Self::Unsupported(value),
         }
     }
@@ -811,6 +815,21 @@ mod tests {
             ITEM_OPS_PREFIX,
             "item paths must stay byte-identical now that they are kind-derived"
         );
+        // The zen kind's wire name and namespace are protocol surface: changing
+        // either would strand documents already written under the old one.
+        assert_eq!(AggregateKind::Zen.as_str(), "zen_document");
+        assert_eq!(
+            AggregateKind::from("zen_document".to_owned()),
+            AggregateKind::Zen,
+            "the wire name must round-trip"
+        );
+        assert_eq!(AggregateKind::Zen.ops_prefix().unwrap(), "sync/v2/ops/zen/");
+        assert_eq!(
+            AggregateKind::Zen
+                .checkpoint_path(ITEM, &"c".repeat(64))
+                .unwrap(),
+            format!("sync/v2/checkpoints/zen/{ITEM}/{}.json", "c".repeat(64))
+        );
         assert_eq!(
             AggregateKind::Item
                 .checkpoint_path(ITEM, &"c".repeat(64))
@@ -840,16 +859,16 @@ mod tests {
         // upgrade rather than a corrupt repository.
         let future = migration
             .catalogue_json
-            .replace(r#""item""#, r#""zen_document""#);
+            .replace(r#""item""#, r#""collection""#);
         let catalogue: AggregateCatalogue =
             serde_json::from_str(&future).expect("unknown kind still parses");
         assert_eq!(
             catalogue.entries[0].aggregate_kind,
-            AggregateKind::Unsupported("zen_document".into())
+            AggregateKind::Unsupported("collection".into())
         );
         assert!(matches!(
             catalogue.validate(LIBRARY),
-            Err(DomainError::UnsupportedAggregateKind(kind)) if kind == "zen_document"
+            Err(DomainError::UnsupportedAggregateKind(kind)) if kind == "collection"
         ));
 
         let genesis: AggregateGenesis =
@@ -884,7 +903,7 @@ mod tests {
             )
             .expect("envelope");
         let path = envelope.path().expect("path");
-        envelope.aggregate_kind = AggregateKind::Unsupported("zen_document".into());
+        envelope.aggregate_kind = AggregateKind::Unsupported("collection".into());
         assert!(matches!(
             envelope.path(),
             Err(DomainError::UnsupportedAggregateKind(_))
