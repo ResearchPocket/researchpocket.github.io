@@ -5163,6 +5163,10 @@ kbd {
   inline-size: auto;
 }
 
+.zen-list .library-search-row {
+  margin-block-start: 0.625rem;
+}
+
 .zen-rows {
   list-style: none;
   margin: 0;
@@ -5253,7 +5257,11 @@ kbd {
   cursor: pointer;
   flex: 0 0 auto;
   inline-size: 1rem;
-  margin: 0.3125rem 0 0;
+  /* Inputs carry a touch-target minimum app-wide, which a checkbox beside
+     16px text must not inherit or it towers over its own label. */
+  margin: 0.25rem 0 0;
+  min-block-size: 0;
+  min-inline-size: 0;
 }
 
 .zen-prose li.zen-todo p {

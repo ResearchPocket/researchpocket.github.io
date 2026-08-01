@@ -866,7 +866,6 @@ export function App() {
 
       <div className="workspace-layout">
         <aside className={`tag-rail${view === "library" ? "" : " tag-rail-empty"}`}>
-          {view === "library" && (
           <nav aria-label="Library views" className="rail-nav">
             <button
               aria-current={view === "library" && filter === "active" && !favoriteOnly ? "page" : undefined}
@@ -906,7 +905,6 @@ export function App() {
               <span>Archive</span><small>{deletedCount}</small>
             </button>
           </nav>
-          )}
 
           <div className="rail-tags">
             <div className="rail-heading">
