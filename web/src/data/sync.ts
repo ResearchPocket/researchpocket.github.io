@@ -672,10 +672,16 @@ class BrowserSyncService {
       }
     }
     if (candidates.length === 0) return;
+    // Greatest coverage wins; ties go to the smallest checkpoint ID so this
+    // client selects the same object the native client would.
     candidates.sort(
       (left, right) =>
         right.batchCount - left.batchCount ||
-        right.checkpointId.localeCompare(left.checkpointId),
+        (left.checkpointId < right.checkpointId
+          ? -1
+          : left.checkpointId > right.checkpointId
+            ? 1
+            : 0),
     );
     const selected = candidates[0]!;
     for (const candidate of candidates.slice(1)) {

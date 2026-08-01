@@ -14,13 +14,95 @@ use crate::{
 pub const AGGREGATE_PROTOCOL_VERSION: u8 = 2;
 pub const ITEM_AGGREGATES_FEATURE: &str = "item-aggregates-v2";
 pub const AGGREGATE_GENESIS_PATH: &str = "sync/v2/library.json";
+pub const AGGREGATE_OPS_ROOT: &str = "sync/v2/ops/";
+pub const AGGREGATE_CHECKPOINTS_ROOT: &str = "sync/v2/checkpoints/";
+pub const AGGREGATE_CATALOGUE_PREFIX: &str = "sync/v2/catalogue/";
+
+/// Location of a catalogue.
+///
+/// Genesis binds the catalogue by hash rather than by name, so the artifact is
+/// addressed by that same hash. A catalogue is immutable like every other v2
+/// object: a new library state produces a new path, never a rewrite.
+pub fn aggregate_catalogue_path(catalogue_sha256: &str) -> String {
+    format!("{AGGREGATE_CATALOGUE_PREFIX}{catalogue_sha256}.json")
+}
 pub const ITEM_OPS_PREFIX: &str = "sync/v2/ops/items/";
 pub const ITEM_CHECKPOINTS_PREFIX: &str = "sync/v2/checkpoints/items/";
 
+/// Which kind of aggregate an operation, checkpoint, or catalogue entry
+/// describes.
+///
+/// An unrecognized kind deserializes into [`AggregateKind::Unsupported`] rather
+/// than failing to parse. That distinction matters: a client that cannot tell
+/// "written by a newer client" from "malformed" would either reject a valid
+/// repository or, worse, skip the entry and materialize a partial library.
+/// Carrying the unknown name lets every consumer fail closed with an
+/// upgrade-shaped error instead.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(from = "String", into = "String")]
 pub enum AggregateKind {
     Item,
+    Unsupported(String),
+}
+
+impl AggregateKind {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Item => "item",
+            Self::Unsupported(value) => value,
+        }
+    }
+
+    /// Repository path segment for this kind.
+    ///
+    /// Fails closed for a kind this build does not implement, which is what
+    /// stops an older client from writing to or reading around a namespace it
+    /// does not understand.
+    pub fn path_segment(&self) -> DomainResult<&'static str> {
+        match self {
+            Self::Item => Ok("items"),
+            Self::Unsupported(value) => {
+                Err(DomainError::UnsupportedAggregateKind(value.clone()))
+            }
+        }
+    }
+
+    pub fn ops_prefix(&self) -> DomainResult<String> {
+        Ok(format!("{AGGREGATE_OPS_ROOT}{}/", self.path_segment()?))
+    }
+
+    pub fn checkpoints_prefix(&self) -> DomainResult<String> {
+        Ok(format!(
+            "{AGGREGATE_CHECKPOINTS_ROOT}{}/",
+            self.path_segment()?
+        ))
+    }
+
+    pub fn checkpoint_path(
+        &self,
+        aggregate_id: &str,
+        snapshot_sha256: &str,
+    ) -> DomainResult<String> {
+        Ok(format!(
+            "{}{aggregate_id}/{snapshot_sha256}.json",
+            self.checkpoints_prefix()?
+        ))
+    }
+}
+
+impl From<String> for AggregateKind {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "item" => Self::Item,
+            _ => Self::Unsupported(value),
+        }
+    }
+}
+
+impl From<AggregateKind> for String {
+    fn from(value: AggregateKind) -> Self {
+        value.as_str().to_owned()
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -42,11 +124,14 @@ pub struct AggregateEnvelope {
 }
 
 impl AggregateEnvelope {
-    pub fn path(&self) -> String {
-        format!(
-            "{ITEM_OPS_PREFIX}{}/{}/{}.json",
-            self.aggregate_id, self.device_id, self.sequence
-        )
+    pub fn path(&self) -> DomainResult<String> {
+        Ok(format!(
+            "{}{}/{}/{}.json",
+            self.aggregate_kind.ops_prefix()?,
+            self.aggregate_id,
+            self.device_id,
+            self.sequence
+        ))
     }
 
     pub fn validate(
@@ -74,11 +159,7 @@ impl AggregateEnvelope {
                     .unwrap_or_else(|| "missing-item-aggregates-v2".into()),
             ));
         }
-        if self.aggregate_kind != AggregateKind::Item {
-            return Err(DomainError::InvalidState(
-                "unsupported aggregate kind".into(),
-            ));
-        }
+        self.aggregate_kind.path_segment()?;
         for (value, label) in [
             (self.aggregate_id.as_str(), "aggregate ID"),
             (self.library_id.as_str(), "library ID"),
@@ -96,10 +177,11 @@ impl AggregateEnvelope {
                 actual: format!("{}/{}", self.library_id, self.aggregate_id),
             });
         }
-        if path != self.path() {
+        let expected_path = self.path()?;
+        if path != expected_path {
             return Err(DomainError::Integrity {
                 path: path.to_owned(),
-                expected: self.path(),
+                expected: expected_path,
                 actual: path.to_owned(),
             });
         }
@@ -243,7 +325,7 @@ impl ItemAggregate {
             payload: STANDARD.encode(&update),
             payload_sha256: sha256_hex(&update),
         };
-        envelope.validate(&envelope.path(), library_id, &self.item_id)?;
+        envelope.validate(&envelope.path()?, library_id, &self.item_id)?;
         Ok(envelope)
     }
 
@@ -253,6 +335,11 @@ impl ItemAggregate {
         envelope: &AggregateEnvelope,
         expected_library_id: &str,
     ) -> DomainResult<bool> {
+        if envelope.aggregate_kind != AggregateKind::Item {
+            return Err(DomainError::UnsupportedAggregateKind(
+                envelope.aggregate_kind.as_str().to_owned(),
+            ));
+        }
         let payload = envelope.validate(path, expected_library_id, &self.item_id)?;
         self.library.import_update(&payload)
     }
@@ -300,6 +387,7 @@ impl ItemAggregateCheckpoint {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CatalogueEntry {
+    pub aggregate_kind: AggregateKind,
     pub aggregate_id: String,
     pub saved_at: i64,
     pub state: LifecycleState,
@@ -316,6 +404,68 @@ pub struct AggregateCatalogue {
     pub entries: Vec<CatalogueEntry>,
 }
 
+impl AggregateCatalogue {
+    /// Content-addressed location of this catalogue's exact serialized bytes.
+    pub fn path(&self) -> DomainResult<String> {
+        Ok(aggregate_catalogue_path(&sha256_hex(
+            serde_json::to_string(self)?.as_bytes(),
+        )))
+    }
+
+    /// Validates a catalogue before any of its aggregates are trusted.
+    ///
+    /// Entries are required to be strictly ascending by `(kind, aggregate_id)`
+    /// so the artifact is byte-identical for a given library state and so
+    /// duplicates cannot hide a second definition of one aggregate.
+    pub fn validate(&self, expected_library_id: &str) -> DomainResult<()> {
+        if self.protocol_version != AGGREGATE_PROTOCOL_VERSION {
+            return Err(DomainError::UnsupportedProtocol(self.protocol_version));
+        }
+        validate_uuid_v7(&self.library_id, "catalogue library ID")?;
+        validate_uuid_v7(expected_library_id, "expected library ID")?;
+        if self.library_id != expected_library_id {
+            return Err(DomainError::Integrity {
+                path: self.path()?,
+                expected: expected_library_id.to_owned(),
+                actual: self.library_id.clone(),
+            });
+        }
+        validate_sha256(
+            &self.migrated_from_v1_checkpoint,
+            "catalogue v1 checkpoint ID",
+        )?;
+        let mut previous: Option<(&str, &str)> = None;
+        for entry in &self.entries {
+            // Fails closed: a kind this build does not implement must stop the
+            // whole catalogue rather than materialize a partial library.
+            entry.aggregate_kind.path_segment()?;
+            validate_uuid_v7(&entry.aggregate_id, "catalogue aggregate ID")?;
+            validate_sha256(&entry.snapshot_sha256, "catalogue snapshot SHA-256")?;
+            let expected_path = entry
+                .aggregate_kind
+                .checkpoint_path(&entry.aggregate_id, &entry.snapshot_sha256)?;
+            // Anchored on the entry's own checkpoint path, so a mismatch names
+            // the object a reader would go fetch.
+            if entry.checkpoint_path != expected_path {
+                return Err(DomainError::Integrity {
+                    path: entry.checkpoint_path.clone(),
+                    expected: expected_path,
+                    actual: entry.checkpoint_path.clone(),
+                });
+            }
+            let current = (entry.aggregate_kind.as_str(), entry.aggregate_id.as_str());
+            if previous.is_some_and(|previous| previous >= current) {
+                return Err(DomainError::InvalidState(
+                    "catalogue entries are not strictly ascending by kind and aggregate ID"
+                        .into(),
+                ));
+            }
+            previous = Some(current);
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AggregateGenesis {
@@ -325,6 +475,71 @@ pub struct AggregateGenesis {
     pub created_at: String,
     pub migrated_from_v1_checkpoint: String,
     pub catalogue_sha256: String,
+}
+
+impl AggregateGenesis {
+    /// Validates genesis and binds it to the exact catalogue bytes it declares.
+    pub fn validate(
+        &self,
+        expected_library_id: &str,
+        catalogue_json: &str,
+    ) -> DomainResult<AggregateCatalogue> {
+        if self.protocol_version != AGGREGATE_PROTOCOL_VERSION {
+            return Err(DomainError::UnsupportedProtocol(self.protocol_version));
+        }
+        // Unknown features are reported before exactness so a newer writer
+        // always surfaces as "upgrade", never as "malformed".
+        if let Some(unknown) = self
+            .required_features
+            .iter()
+            .find(|feature| feature.as_str() != ITEM_AGGREGATES_FEATURE)
+        {
+            return Err(DomainError::UnsupportedFeature(unknown.clone()));
+        }
+        if self.required_features.is_empty() {
+            return Err(DomainError::UnsupportedFeature(
+                "missing-item-aggregates-v2".into(),
+            ));
+        }
+        if self.required_features != [ITEM_AGGREGATES_FEATURE] {
+            return Err(DomainError::InvalidState(
+                "genesis required features are not canonical".into(),
+            ));
+        }
+        validate_uuid_v7(&self.library_id, "genesis library ID")?;
+        validate_uuid_v7(expected_library_id, "expected library ID")?;
+        if self.library_id != expected_library_id {
+            return Err(DomainError::Integrity {
+                path: AGGREGATE_GENESIS_PATH.to_owned(),
+                expected: expected_library_id.to_owned(),
+                actual: self.library_id.clone(),
+            });
+        }
+        validate_utc(&self.created_at, "aggregate genesis creation time")?;
+        validate_sha256(
+            &self.migrated_from_v1_checkpoint,
+            "genesis v1 checkpoint ID",
+        )?;
+        validate_sha256(&self.catalogue_sha256, "genesis catalogue SHA-256")?;
+        let actual = sha256_hex(catalogue_json.as_bytes());
+        if actual != self.catalogue_sha256 {
+            return Err(DomainError::Integrity {
+                path: AGGREGATE_GENESIS_PATH.to_owned(),
+                expected: self.catalogue_sha256.clone(),
+                actual,
+            });
+        }
+        let catalogue: AggregateCatalogue = serde_json::from_str(catalogue_json)?;
+        catalogue.validate(expected_library_id)?;
+        if catalogue.migrated_from_v1_checkpoint != self.migrated_from_v1_checkpoint {
+            return Err(DomainError::Integrity {
+                path: AGGREGATE_GENESIS_PATH.to_owned(),
+                expected: self.migrated_from_v1_checkpoint.clone(),
+                actual: catalogue.migrated_from_v1_checkpoint,
+            });
+        }
+        Ok(catalogue)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -358,6 +573,7 @@ pub fn create_aggregate_migration(
         };
         let checkpoint_path = checkpoint.path();
         entries.push(CatalogueEntry {
+            aggregate_kind: AggregateKind::Item,
             aggregate_id: item_id.clone(),
             saved_at: item.saved_at.value,
             state: item.lifecycle.state,
@@ -372,6 +588,7 @@ pub fn create_aggregate_migration(
         migrated_from_v1_checkpoint: v1_checkpoint_id.to_owned(),
         entries,
     };
+    catalogue.validate(library_id)?;
     let catalogue_json = serde_json::to_string(&catalogue)?;
     let catalogue_sha256 = sha256_hex(catalogue_json.as_bytes());
     let genesis = AggregateGenesis {
@@ -382,8 +599,10 @@ pub fn create_aggregate_migration(
         migrated_from_v1_checkpoint: v1_checkpoint_id.to_owned(),
         catalogue_sha256: catalogue_sha256.clone(),
     };
+    let genesis_json = serde_json::to_string(&genesis)?;
+    genesis.validate(library_id, &catalogue_json)?;
     Ok(AggregateMigration {
-        genesis_json: serde_json::to_string(&genesis)?,
+        genesis_json,
         catalogue_json,
         catalogue_sha256,
         checkpoints,
@@ -531,7 +750,8 @@ mod tests {
         let envelope = aggregate
             .export_envelope(&before, LIBRARY, DEVICE, 1, "2026-07-28T00:00:01Z")
             .expect("envelope");
-        assert!(envelope.path().contains(ITEM));
+        let path = envelope.path().expect("path");
+        assert!(path.contains(ITEM));
         assert!(
             !serde_json::to_string(&envelope)
                 .unwrap()
@@ -539,7 +759,7 @@ mod tests {
         );
 
         let base = ItemAggregate::from_snapshot(ITEM, &base_snapshot, 22).expect("base");
-        base.import_envelope(&envelope.path(), &envelope, LIBRARY)
+        base.import_envelope(&path, &envelope, LIBRARY)
             .expect("apply");
         assert_eq!(
             base.canonical_item().unwrap().title.value.as_deref(),
@@ -577,6 +797,102 @@ mod tests {
         let (path, json) = &migration.checkpoints[0];
         let checkpoint: ItemAggregateCheckpoint = serde_json::from_str(json).unwrap();
         checkpoint.validate(path, 32).expect("checkpoint");
+    }
+
+    /// A newer client's aggregate kind must stop an older client outright.
+    ///
+    /// Ignoring the entry would silently materialize a partial library, which
+    /// is the failure mode the fail-closed migration boundary exists to
+    /// prevent.
+    #[test]
+    fn unknown_aggregate_kind_fails_closed_everywhere() {
+        assert_eq!(
+            AggregateKind::Item.ops_prefix().unwrap(),
+            ITEM_OPS_PREFIX,
+            "item paths must stay byte-identical now that they are kind-derived"
+        );
+        assert_eq!(
+            AggregateKind::Item
+                .checkpoint_path(ITEM, &"c".repeat(64))
+                .unwrap(),
+            ItemAggregateCheckpoint {
+                aggregate_id: ITEM.to_owned(),
+                snapshot_sha256: "c".repeat(64),
+                snapshot_base64: String::new(),
+            }
+            .path()
+        );
+
+        let projection = CanonicalProjection {
+            schema_version: 3,
+            items: BTreeMap::from([(ITEM.to_owned(), item())]),
+        };
+        let migration = create_aggregate_migration(
+            &projection,
+            LIBRARY,
+            CHECKPOINT,
+            "2026-07-28T00:00:00Z",
+            51,
+        )
+        .expect("migration");
+
+        // An unrecognized kind still parses, so the client can report an
+        // upgrade rather than a corrupt repository.
+        let future = migration
+            .catalogue_json
+            .replace(r#""item""#, r#""zen_document""#);
+        let catalogue: AggregateCatalogue =
+            serde_json::from_str(&future).expect("unknown kind still parses");
+        assert_eq!(
+            catalogue.entries[0].aggregate_kind,
+            AggregateKind::Unsupported("zen_document".into())
+        );
+        assert!(matches!(
+            catalogue.validate(LIBRARY),
+            Err(DomainError::UnsupportedAggregateKind(kind)) if kind == "zen_document"
+        ));
+
+        let genesis: AggregateGenesis =
+            serde_json::from_str(&migration.genesis_json).expect("genesis");
+        assert!(genesis.validate(LIBRARY, &migration.catalogue_json).is_ok());
+        // Genesis is bound to exact catalogue bytes.
+        assert!(matches!(
+            genesis.validate(LIBRARY, &future),
+            Err(DomainError::Integrity { .. })
+        ));
+        let mut duplicated = genesis.clone();
+        duplicated
+            .required_features
+            .push(ITEM_AGGREGATES_FEATURE.to_owned());
+        assert!(
+            matches!(
+                duplicated.validate(LIBRARY, &migration.catalogue_json),
+                Err(DomainError::InvalidState(_))
+            ),
+            "a non-canonical feature list must not validate"
+        );
+
+        let aggregate =
+            ItemAggregate::from_canonical(ITEM, &item(), CHECKPOINT, 52).expect("aggregate");
+        let mut envelope = aggregate
+            .export_envelope(
+                &aggregate.version(),
+                LIBRARY,
+                DEVICE,
+                1,
+                "2026-07-28T00:00:01Z",
+            )
+            .expect("envelope");
+        let path = envelope.path().expect("path");
+        envelope.aggregate_kind = AggregateKind::Unsupported("zen_document".into());
+        assert!(matches!(
+            envelope.path(),
+            Err(DomainError::UnsupportedAggregateKind(_))
+        ));
+        assert!(matches!(
+            aggregate.import_envelope(&path, &envelope, LIBRARY),
+            Err(DomainError::UnsupportedAggregateKind(_))
+        ));
     }
 
     #[test]

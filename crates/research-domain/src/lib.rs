@@ -287,10 +287,11 @@ pub fn run_wasm_convergence_scenario() -> Result<String, wasm_bindgen::JsValue> 
         .map_err(|error| wasm_bindgen::JsValue::from_str(&error.to_string()))
 }
 pub use aggregate::{
-    AGGREGATE_GENESIS_PATH, AGGREGATE_PROTOCOL_VERSION, AggregateCatalogue, AggregateEnvelope,
+    AGGREGATE_CATALOGUE_PREFIX, AGGREGATE_CHECKPOINTS_ROOT, AGGREGATE_GENESIS_PATH,
+    AGGREGATE_OPS_ROOT, AGGREGATE_PROTOCOL_VERSION, AggregateCatalogue, AggregateEnvelope,
     AggregateGenesis, AggregateKind, AggregateMigration, CatalogueEntry,
     ITEM_AGGREGATES_FEATURE, ITEM_CHECKPOINTS_PREFIX, ITEM_OPS_PREFIX, ItemAggregate,
-    ItemAggregateCheckpoint, create_aggregate_migration,
+    ItemAggregateCheckpoint, aggregate_catalogue_path, create_aggregate_migration,
 };
 pub use captured::{
     CAPTURED_CONTENT_PREFIX, CAPTURED_MARKDOWN_MEDIA_TYPE, CapturedDocumentArtifact,
