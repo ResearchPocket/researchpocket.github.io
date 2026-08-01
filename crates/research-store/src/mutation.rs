@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use chrono::{DateTime, SecondsFormat, Utc};
-use research_domain::{CanonicalProjection, ItemSeed, Library, LifecycleState};
+use research_domain::{CanonicalProjection, ItemSeed, Library, LifecycleState, UpdateEnvelope};
 use sqlx::{Row, SqliteConnection};
 use uuid::Uuid;
 
@@ -293,7 +293,20 @@ where
     .execute(&mut *connection)
     .await?;
 
-    let envelope_json = serde_json::to_string(&envelope)?;
+    enqueue_local_envelope(connection, &envelope, &now).await?;
+
+    Ok(stored_item)
+}
+
+/// Record one locally produced envelope as durable, queued, and sequenced.
+///
+/// Every local writer shares this so a mutation and a protocol migration cannot
+/// disagree about what "durable before upload" means.
+pub(crate) async fn enqueue_local_envelope(
+    connection: &mut SqliteConnection,
+    envelope: &UpdateEnvelope,
+    now: &str,
+) -> StoreResult<()> {
     sqlx::query(
         "INSERT INTO batches \
          (device_id, sequence, payload_sha256, protocol_version, library_id, path, \
@@ -306,26 +319,28 @@ where
     .bind(i64::from(envelope.protocol_version))
     .bind(&envelope.library_id)
     .bind(envelope.path())
-    .bind(envelope_json)
-    .bind(&now)
+    .bind(serde_json::to_string(envelope)?)
+    .bind(now)
     .execute(&mut *connection)
     .await?;
     sqlx::query("INSERT INTO outbox (device_id, sequence, enqueued_at) VALUES (?, ?, ?)")
         .bind(&envelope.device_id)
         .bind(&envelope.sequence)
-        .bind(&now)
+        .bind(now)
         .execute(&mut *connection)
         .await?;
-    let next = sequence
+    let next = envelope
+        .sequence
+        .parse::<u64>()
+        .map_err(|_| StoreError::InvalidStore("invalid device sequence".into()))?
         .checked_add(1)
         .ok_or(StoreError::NumericRange("device sequence"))?;
     sqlx::query("UPDATE devices SET next_sequence = ? WHERE device_id = ?")
         .bind(format!("{next:020}"))
-        .bind(&device_id)
+        .bind(&envelope.device_id)
         .execute(&mut *connection)
         .await?;
-
-    Ok(stored_item)
+    Ok(())
 }
 
 fn optional_text(update: &OptionalTextUpdate) -> Option<&str> {

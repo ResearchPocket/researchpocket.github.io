@@ -120,6 +120,75 @@ async fn checkpoint_bootstrap_restores_coverage_and_applies_only_the_tail() {
     );
 }
 
+/// Migration seeds the v2 generation without disturbing retained v1 history.
+///
+/// Repeating it must produce the same identities rather than a second
+/// generation, because the first attempt may have committed locally and then
+/// failed before anything was uploaded.
+#[tokio::test]
+async fn migrating_to_item_aggregates_is_idempotent_and_queues_the_barrier() {
+    let root = tempfile::tempdir().expect("temporary test root");
+    let store = V2Store::init(root.path().join("library"))
+        .await
+        .expect("store");
+    for url in ["https://example.com/one", "https://example.com/two"] {
+        store
+            .create_item(CreateItemRequest {
+                url: url.into(),
+                title: Some("Saved".into()),
+                excerpt: None,
+                favorite: false,
+                language: None,
+                saved_at: None,
+                note: String::new(),
+                tags: vec!["reference".into()],
+            })
+            .await
+            .expect("create item");
+    }
+    // A device with unsent work cannot migrate: those operations would have to
+    // be re-expressed in a generation that did not exist when they were made.
+    assert!(store.migrate_to_item_aggregates().await.is_err());
+    // Pulling back an uploaded operation is what acknowledges the outbox.
+    for batch in store.pending_batches().await.expect("pending") {
+        store
+            .receive_remote_batch(&batch.path, &"a".repeat(40), batch.envelope_json.as_bytes())
+            .await
+            .expect("confirm upload");
+    }
+
+    let receipt = store
+        .migrate_to_item_aggregates()
+        .await
+        .expect("migrate to aggregates");
+    assert!(!receipt.already_migrated);
+    assert_eq!(receipt.aggregate_count, 2, "one aggregate per item");
+
+    // The barrier is an ordinary v1 operation, so it uploads through the
+    // existing outbox and older clients meet it on their next pull.
+    let queued = store.pending_batches().await.expect("barrier queued");
+    assert_eq!(queued.len(), 1);
+    assert_eq!(queued[0].path, receipt.barrier_path);
+
+    let repeated = store
+        .migrate_to_item_aggregates()
+        .await
+        .expect("repeat migration");
+    assert!(repeated.already_migrated);
+    assert_eq!(repeated.v1_checkpoint_id, receipt.v1_checkpoint_id);
+    assert_eq!(repeated.catalogue_sha256, receipt.catalogue_sha256);
+    assert_eq!(
+        store
+            .list(ListQuery::default())
+            .await
+            .expect("projection")
+            .page
+            .total,
+        2,
+        "migration leaves the readable library untouched"
+    );
+}
+
 /// A device that edits while its own checkpoint uploads must still select it.
 ///
 /// The tail is measured from the selected checkpoint, so failing to select here
