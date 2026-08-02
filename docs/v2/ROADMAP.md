@@ -246,6 +246,67 @@ V2 must preserve the following boundaries throughout delivery:
   clean-room restore drill succeeds, no open P0/P1 correctness or privacy
   defects remain, and publication privacy gates pass.
 
+## Beyond V2: candidate directions
+
+Items here are recorded, not committed. None is scheduled, and none may be
+started before the V2 parity gate passes.
+
+### Optional signaling relay for low-latency convergence
+
+Today a change reaches another device when that device next polls GitHub, which
+puts convergence somewhere between seconds and a minute. A small relay that
+fans out updates as they happen would make edits appear on a second device
+about as fast as the network allows — the difference between "my other laptop
+will catch up" and "my other laptop already has it".
+
+The relay would carry exactly the immutable envelopes the clients already
+produce and validate. That is the whole point: it is a fan-out pipe, not a
+second synchronization service, and it introduces no second wire format, no
+server-side merge, and no state the domain has to trust.
+
+Constraints any design must hold:
+
+- **The relay is never authoritative.** An operation is durable when the
+  append-only remote accepts it, not when the relay acknowledges it. A client
+  that talked only to the relay and never reached the durable remote must still
+  show that work as pending. Otherwise a relay outage becomes data loss, and
+  the product stops being local-first in the only way that matters.
+- **Losing the relay costs latency and nothing else.** With it unreachable,
+  every client falls back to the existing pull cycle with no user-visible
+  failure and no recovery procedure.
+- **A hostile relay must be unable to corrupt a library.** Dropping,
+  reordering, duplicating, and delaying are already tolerated — envelopes are
+  hash-verified, application is idempotent, and operations with missing causal
+  dependencies are deferred rather than half-applied. What the relay must not
+  be able to do is *forge*, which is the open question below.
+- **This is transport, not collaboration.** No presence, no cursors, no
+  multi-user libraries. It is one owner's own devices converging faster, which
+  is a different thing from the multi-user non-goal in the product contract.
+
+Open questions to resolve before this is more than an idea:
+
+- **Privacy is the blocker.** A relay is a new party that sees payload bytes.
+  V2 accepts that GitHub sees them because GitHub is already the durable store
+  the owner chose; adding a second observer is not the same trade. This is
+  where the deferred "encryption behind the storage boundary" non-goal stops
+  being deferrable, and it should probably land first.
+- **Authenticity.** Envelopes are hash-addressed but not signed. Under GitHub
+  alone, write access is the authenticity boundary. A relay accepting pushes
+  needs its own answer — most likely per-device signing keys, which is a
+  protocol change with its own migration.
+- **Who runs it.** Self-hosted single binary, or an optional hosted instance?
+  A hosted one reintroduces exactly the "continuously running application
+  server" dependency the product contract exists to avoid, so it can only ever
+  be opt-in and disposable.
+- **Where it attaches.** The existing transport boundary already keeps Git
+  commits and branches out of the domain layer, so the relay should be a peer
+  of the GitHub adapter rather than a layer above or beneath it. Worth
+  confirming that boundary is actually sufficient before committing.
+
+Shipping this would revise the product contract's remote-provider non-goal and
+narrow its real-time non-goal to collaboration rather than transport. Both are
+ADR-sized decisions.
+
 ## GitHub Project tracking conventions
 
 - Track implementation work as repository issues attached to the applicable
