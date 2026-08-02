@@ -1007,6 +1007,7 @@ export function App() {
           onClose={() => setOpenZen(null)}
           onCreate={(title) => void createZenDocument(title)}
           onDelete={(documentId) => void removeZenDocument(documentId)}
+          onLeave={() => navigateToView("library")}
           onOpen={(documentId) => void openZenDocument(documentId)}
           onSaveBody={(documentId, body) => void saveZenBody(documentId, body)}
           onSaveTitle={(documentId, title) => void saveZenTitle(documentId, title)}
