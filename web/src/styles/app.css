@@ -3124,8 +3124,21 @@ kbd {
     width: 100%;
   }
 
+  /* The only route to Sync on a phone: the rail's utilities are hidden and the
+     actions bar carries saving, not syncing. A bare dot and a word read as a
+     readout, so it takes a chip's outline to look like the control it is. */
   .local-status {
+    border: var(--rule) solid var(--color-border);
+    border-radius: var(--radius);
     flex: 0 0 auto;
+    gap: 0.375rem;
+    min-block-size: 2rem;
+    padding-inline: 0.5rem;
+  }
+
+  .status-pending {
+    color: var(--color-text-muted);
+    display: inline;
   }
 
   .workspace-layout {
@@ -5288,6 +5301,11 @@ button.local-status {
   border: 0;
   cursor: pointer;
   padding: 0;
+}
+
+/* Desktop shows the whole status sentence, so a bare count would repeat it. */
+.status-pending {
+  display: none;
 }
 
 button.local-status:hover .status-copy,

@@ -852,6 +852,13 @@ export function App() {
               <span aria-live="polite" className="status-copy" role="status">
                 {formatHeaderStatus(libraryState.status, libraryState.pendingCount)}
               </span>
+              {/* The full status sentence does not fit on a phone, so the
+                  pending count stands in for it there. */}
+              {libraryState.pendingCount > 0 ? (
+                <span aria-hidden="true" className="status-pending">
+                  {libraryState.pendingCount}
+                </span>
+              ) : null}
             </button>
             <button
               className="command-trigger"
