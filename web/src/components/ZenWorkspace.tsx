@@ -278,9 +278,6 @@ function ZenEditor({
             {open.view.title.value?.trim() || "Untitled document"}
           </span>
         </nav>
-        <span className="zen-budget zen-budget-toolbar">
-          {formatBytes(byteLength)} of {formatBytes(MAX_BODY_BYTES)}
-        </span>
         <div className="zen-mode" role="group" aria-label="Document mode">
           <button
             aria-pressed={mode === "edit"}
@@ -325,7 +322,14 @@ function ZenEditor({
             aria-label="Document title"
             className="zen-title-input"
             disabled={busy}
-            onBlur={() => onSaveTitle(open.documentId, title.trim() || null)}
+            onBlur={() => {
+              // Every save is an operation other devices have to fetch, so a
+              // blur that changed nothing must not write one.
+              const next = title.trim() || null;
+              if (next !== (open.view.title.value ?? null)) {
+                onSaveTitle(open.documentId, next);
+              }
+            }}
             onChange={(event) => setTitle(event.target.value)}
             placeholder="Untitled document"
             type="text"
@@ -369,15 +373,18 @@ function ZenEditor({
         </div>
       </div>
 
+      {/* The budget lives here rather than in the toolbar: it is a readout
+          about the body, and the toolbar is the one bar that has to stay
+          legible while scrolling. */}
       <footer className="zen-footer">
-        <span className="zen-budget zen-budget-footer">
-          {formatBytes(byteLength)} of {formatBytes(MAX_BODY_BYTES)}
-        </span>
         <span className="zen-footer-desktop">
           <b>esc</b> close
         </span>
         <span className="zen-footer-desktop">saves as you go</span>
         <span className="zen-footer-mobile">saved</span>
+        <span className="zen-budget">
+          {formatBytes(byteLength)} of {formatBytes(MAX_BODY_BYTES)}
+        </span>
       </footer>
     </section>
   );
