@@ -472,6 +472,32 @@ clients accept the barrier, validate v2 genesis/catalogue/checkpoints, and apply
 only aggregate-scoped updates. Repeating migration with the same v1 checkpoint
 and identities produces the same aggregate identities and visible state.
 
+### Aggregate operation transport
+
+Aggregate operations are carried after the protocol-v1 phase of a cycle, so the
+migration barrier is on the remote before any v2 object a barrier-blind client
+could reach. Discovery covers all of `sync/`: a client that enumerated only the
+paths it writes could upload into a namespace it never read.
+
+Application may decline. An operation whose causal predecessor has not been
+applied is *deferred*: no replica, batch record, or remote observation is
+written, and the client retries it after other operations land. This is required
+rather than cosmetic — a replica persists as a snapshot, and a snapshot does not
+carry the part of an update Loro is still holding pending, so recording a
+partially imported operation as applied would lose it silently. A round that
+applies nothing while operations remain deferred means a dependency is absent
+from the remote, which is reported as an integrity failure.
+
+Upload is confirmed from the remote, never assumed. A created object is applied
+back from the write that created it, and a losing race is resolved by reading
+whatever object is actually at that path. Only that confirmation clears the
+queue, so an interrupted cycle re-uploads rather than dropping work.
+
+Zen documents use the `zen_document` kind and the `zen` path segment, so their
+operations live at `sync/v2/ops/zen/…`. They are aggregates from the start and
+have no v1 history, so they need no catalogue entry: a create operation
+establishes the whole document.
+
 ## Version negotiation
 
 A client advertises an internal supported tuple:

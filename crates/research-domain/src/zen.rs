@@ -242,8 +242,16 @@ impl ZenAggregate {
             .map_err(loro_error)
     }
 
-    pub fn import_update(&self, update: &[u8]) -> DomainResult<()> {
-        self.doc.import(update).map_err(loro_error).map(|_| ())
+    /// Applies an update, reporting whether any of it was deferred.
+    ///
+    /// `true` means part of the update is waiting on an operation this replica
+    /// has not seen. Loro keeps it in memory, but a snapshot written now would
+    /// not carry it, so a caller that persists snapshots must retry the
+    /// operation after its dependency lands instead of recording it as applied.
+    pub fn import_update(&self, update: &[u8]) -> DomainResult<bool> {
+        LoroDoc::decode_import_blob_meta(update, true).map_err(loro_error)?;
+        let status = self.doc.import(update).map_err(loro_error)?;
+        Ok(status.pending.is_some())
     }
 
     pub fn export_envelope(
@@ -271,14 +279,33 @@ impl ZenAggregate {
         path: &str,
         envelope: &AggregateEnvelope,
         expected_library_id: &str,
-    ) -> DomainResult<()> {
-        if envelope.aggregate_kind != AggregateKind::Zen {
-            return Err(DomainError::UnsupportedAggregateKind(
-                envelope.aggregate_kind.as_str().to_owned(),
-            ));
-        }
-        let payload = envelope.validate(path, expected_library_id, &self.document_id)?;
+    ) -> DomainResult<bool> {
+        let payload =
+            verified_zen_payload(path, envelope, expected_library_id, &self.document_id)?;
         self.import_update(&payload)
+    }
+
+    /// Materializes a replica for a document this device has never seen.
+    ///
+    /// `None` means the update did not establish the document: the operation
+    /// depends on one that has not arrived, so the caller retries it once that
+    /// lands rather than persisting a replica with nothing in it.
+    pub fn from_envelope(
+        path: &str,
+        envelope: &AggregateEnvelope,
+        expected_library_id: &str,
+        peer_id: u64,
+    ) -> DomainResult<Option<Self>> {
+        let document_id = envelope.aggregate_id.clone();
+        let payload = verified_zen_payload(path, envelope, expected_library_id, &document_id)?;
+        let doc = LoroDoc::new();
+        doc.set_peer_id(peer_id).map_err(loro_error)?;
+        LoroDoc::decode_import_blob_meta(&payload, true).map_err(loro_error)?;
+        doc.import(&payload).map_err(loro_error)?;
+        if map_keys(&doc.get_map(ZEN)) != [document_id.clone()] {
+            return Ok(None);
+        }
+        Ok(Some(Self { document_id, doc }))
     }
 
     pub fn write_title(&self, revision_id: &str, title: Option<&str>) -> DomainResult<()> {
@@ -354,6 +381,26 @@ impl ZenAggregate {
     fn entity(&self) -> DomainResult<loro::LoroMap> {
         entity_mut(&self.doc, ZEN, &self.document_id)
     }
+}
+
+/// Checks that an envelope is a zen operation for the expected document and
+/// returns its verified payload.
+///
+/// A kind this build does not implement is reported as unsupported rather than
+/// skipped, so an aggregate written by a newer client stops the caller instead
+/// of quietly leaving a hole in the library.
+fn verified_zen_payload(
+    path: &str,
+    envelope: &AggregateEnvelope,
+    expected_library_id: &str,
+    expected_document_id: &str,
+) -> DomainResult<Vec<u8>> {
+    if envelope.aggregate_kind != AggregateKind::Zen {
+        return Err(DomainError::UnsupportedAggregateKind(
+            envelope.aggregate_kind.as_str().to_owned(),
+        ));
+    }
+    envelope.validate(path, expected_library_id, expected_document_id)
 }
 
 fn validate_body(body: &str) -> DomainResult<()> {

@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -7,12 +7,14 @@ use chrono::{DateTime, FixedOffset};
 use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, HeaderValue, USER_AGENT};
 use reqwest::{Client, Response, StatusCode, Url};
 use research_domain::{
-    DomainError, LibraryGenesis, MAX_OPERATION_PACK_BYTES, MAX_OPERATION_PACK_MEMBERS,
-    OperationPackArtifact, create_operation_pack, validate_checkpoint,
+    AGGREGATE_GENESIS_PATH, AGGREGATE_OPS_ROOT, AggregateCatalogue, AggregateGenesis,
+    AggregateKind, DomainError, LibraryGenesis, MAX_OPERATION_PACK_BYTES,
+    MAX_OPERATION_PACK_MEMBERS, OperationPackArtifact, aggregate_catalogue_path,
+    create_operation_pack, validate_checkpoint,
 };
 use research_store::{
-    PendingBatch, PendingCapturedDocument, RemoteBatchDisposition, StoreError,
-    SyncConfiguration, V2Store,
+    AggregateDisposition, AggregateGeneration, PendingAggregateOperation, PendingBatch,
+    PendingCapturedDocument, RemoteBatchDisposition, StoreError, SyncConfiguration, V2Store,
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -24,7 +26,6 @@ const GENESIS_PATH: &str = "sync/v1/library.json";
 const OPS_PREFIX: &str = "sync/v1/ops/";
 const PACKS_PREFIX: &str = "sync/v1/ops/packs/";
 const CHECKPOINTS_PREFIX: &str = "sync/v1/checkpoints/";
-const CONTENT_PREFIX: &str = "sync/v2/content/sha256/";
 const MAX_UPLOAD_ATTEMPTS: usize = 4;
 const PACK_JSON_OVERHEAD_ALLOWANCE: usize = 1_024;
 
@@ -121,6 +122,18 @@ pub struct SyncCycleResult {
     pub acknowledged: u64,
     pub uploaded: u64,
     pub pending: u64,
+    /// Aggregate-scoped work — zen documents today, items once they move.
+    /// Counted apart from v1 because the two generations queue separately and
+    /// a number that mixed them could not be reconciled with either queue.
+    pub aggregates_uploaded: u64,
+    pub aggregates_applied: u64,
+    pub aggregates_pending: u64,
+}
+
+#[derive(Default)]
+struct AggregateStats {
+    uploaded: u64,
+    applied: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -462,6 +475,7 @@ async fn run_configured(
     }
     pull.add(pull_remote(store, client, remote).await?);
     ensure_checkpoint_uploaded(store, client, remote).await?;
+    let aggregates = run_aggregates(store, client, remote).await?;
     let pending = u64::try_from(store.pending_batches().await?.len())
         .map_err(|_| StoreError::NumericRange("pending sync batch count"))?;
     Ok(SyncCycleResult {
@@ -473,7 +487,309 @@ async fn run_configured(
         acknowledged: pull.acknowledged,
         uploaded,
         pending,
+        aggregates_uploaded: aggregates.uploaded,
+        aggregates_applied: aggregates.applied,
+        aggregates_pending: store.pending_aggregate_operation_count().await?,
     })
+}
+
+/// Carries the aggregate generation: publish or adopt it, upload what is
+/// queued, then apply what is there.
+///
+/// Runs after the v1 phase so the migration barrier is already on the remote by
+/// the time any v2 object is: an older client meets the barrier and stops
+/// before it can encounter a namespace it does not implement.
+async fn run_aggregates(
+    store: &V2Store,
+    client: &GitHubClient,
+    remote: &Remote,
+) -> Result<AggregateStats, SyncError> {
+    reconcile_generation(store, client, remote).await?;
+    let mut stats = AggregateStats::default();
+    for operation in store.pending_aggregate_operations().await? {
+        if ensure_aggregate_uploaded(store, client, remote, &operation).await? {
+            stats.uploaded += 1;
+        }
+    }
+    stats.applied = apply_remote_aggregates(store, client, remote).await?;
+    Ok(stats)
+}
+
+/// Agrees with the remote on which v2 generation this library is in.
+///
+/// Genesis is immutable, so there is exactly one right answer per library: the
+/// first device to publish defines it and everyone else adopts. A device that
+/// finds a genesis it cannot reconcile with its own stops rather than writing
+/// into a history it does not share.
+async fn reconcile_generation(
+    store: &V2Store,
+    client: &GitHubClient,
+    remote: &Remote,
+) -> Result<(), SyncError> {
+    let tree = client.discover(remote).await?;
+    let Some(sha) = tree.blobs.get(AGGREGATE_GENESIS_PATH) else {
+        if let Some(generation) = store.aggregate_generation().await? {
+            publish_generation(store, client, remote, &generation).await?;
+        }
+        return Ok(());
+    };
+
+    let genesis_json = remote_text(client, remote, sha, AGGREGATE_GENESIS_PATH).await?;
+    let genesis: AggregateGenesis = serde_json::from_str(&genesis_json)
+        .map_err(|_| SyncError::RemoteData("aggregate genesis JSON is invalid".into()))?;
+    let catalogue_path = aggregate_catalogue_path(&genesis.catalogue_sha256);
+    let catalogue_sha = tree.blobs.get(&catalogue_path).ok_or_else(|| {
+        SyncError::Integrity(
+            "aggregate genesis names a catalogue the repository does not contain".into(),
+        )
+    })?;
+    let catalogue_json = remote_text(client, remote, catalogue_sha, &catalogue_path).await?;
+    // Adoption revalidates both artifacts against this library and fails closed
+    // on an aggregate kind this build does not implement.
+    store
+        .adopt_aggregate_generation(&genesis_json, &catalogue_json)
+        .await?;
+    store
+        .record_immutable_remote_blob(AGGREGATE_GENESIS_PATH, sha)
+        .await?;
+
+    let catalogue: AggregateCatalogue = serde_json::from_str(&catalogue_json)
+        .map_err(|_| SyncError::RemoteData("aggregate catalogue JSON is invalid".into()))?;
+    seed_missing_replicas(store, client, remote, &tree, &catalogue).await?;
+    publish_missing_checkpoints(store, client, remote, &tree).await
+}
+
+/// Downloads the checkpoints for catalogue entries this device has no replica
+/// of, which is how a device that did not migrate joins the generation.
+async fn seed_missing_replicas(
+    store: &V2Store,
+    client: &GitHubClient,
+    remote: &Remote,
+    tree: &ProtocolTree,
+    catalogue: &AggregateCatalogue,
+) -> Result<(), SyncError> {
+    let kinds = catalogue
+        .entries
+        .iter()
+        .map(|entry| entry.aggregate_kind.as_str().to_owned())
+        .collect::<BTreeSet<_>>();
+    let mut present = BTreeSet::new();
+    for kind in kinds {
+        for id in store
+            .known_aggregate_ids(&AggregateKind::from(kind.clone()))
+            .await?
+        {
+            present.insert((kind.clone(), id));
+        }
+    }
+    for entry in &catalogue.entries {
+        let key = (
+            entry.aggregate_kind.as_str().to_owned(),
+            entry.aggregate_id.clone(),
+        );
+        if present.contains(&key) {
+            continue;
+        }
+        let sha = tree.blobs.get(&entry.checkpoint_path).ok_or_else(|| {
+            SyncError::Integrity(
+                "the aggregate catalogue names a checkpoint the repository does not contain"
+                    .into(),
+            )
+        })?;
+        let json = remote_text(client, remote, sha, &entry.checkpoint_path).await?;
+        store
+            .receive_aggregate_checkpoint(&entry.checkpoint_path, &json)
+            .await?;
+        store
+            .record_immutable_remote_blob(&entry.checkpoint_path, sha)
+            .await?;
+    }
+    Ok(())
+}
+
+/// Publishes this device's generation. The catalogue goes up before genesis, so
+/// genesis never names an artifact a reader cannot fetch.
+async fn publish_generation(
+    store: &V2Store,
+    client: &GitHubClient,
+    remote: &Remote,
+    generation: &AggregateGeneration,
+) -> Result<(), SyncError> {
+    put_immutable(
+        client,
+        remote,
+        &generation.catalogue_path,
+        generation.catalogue_json.as_bytes(),
+    )
+    .await?;
+    put_immutable(
+        client,
+        remote,
+        AGGREGATE_GENESIS_PATH,
+        generation.genesis_json.as_bytes(),
+    )
+    .await?;
+    let tree = client.discover(remote).await?;
+    publish_missing_checkpoints(store, client, remote, &tree).await
+}
+
+async fn publish_missing_checkpoints(
+    store: &V2Store,
+    client: &GitHubClient,
+    remote: &Remote,
+    tree: &ProtocolTree,
+) -> Result<(), SyncError> {
+    for (path, checkpoint_json) in store.aggregate_checkpoints().await? {
+        if tree.blobs.contains_key(&path) {
+            continue;
+        }
+        put_immutable(client, remote, &path, checkpoint_json.as_bytes()).await?;
+    }
+    Ok(())
+}
+
+/// Writes a content-addressed object, treating "already there" as success.
+///
+/// Every v2 artifact is named by the hash of its own bytes, so a losing race is
+/// a race with an identical object.
+async fn put_immutable(
+    client: &GitHubClient,
+    remote: &Remote,
+    path: &str,
+    bytes: &[u8],
+) -> Result<(), SyncError> {
+    for attempt in 0..MAX_UPLOAD_ATTEMPTS {
+        match client
+            .put_new(remote, path, bytes, Some(&remote.branch))
+            .await?
+        {
+            PutResult::Created(_) | PutResult::Race => return Ok(()),
+            PutResult::Ambiguous(_) => retry_delay(path, attempt).await,
+        }
+    }
+    Err(SyncError::Contention)
+}
+
+async fn ensure_aggregate_uploaded(
+    store: &V2Store,
+    client: &GitHubClient,
+    remote: &Remote,
+    operation: &PendingAggregateOperation,
+) -> Result<bool, SyncError> {
+    let bytes = operation.envelope_json.as_bytes();
+    for attempt in 0..MAX_UPLOAD_ATTEMPTS {
+        match client
+            .put_new(remote, &operation.path, bytes, Some(&remote.branch))
+            .await
+        {
+            Ok(PutResult::Created(sha)) => {
+                // Confirming from the write is what clears the outbox, so a
+                // crash before the next pull cannot leave the operation queued
+                // forever.
+                store
+                    .receive_remote_aggregate_operation(&operation.path, &sha, bytes)
+                    .await?;
+                return Ok(true);
+            }
+            Ok(PutResult::Race) => {
+                // The path already exists. Confirm from whatever is actually
+                // there rather than assuming our bytes are what a reader sees.
+                let tree = client.discover(remote).await?;
+                if let Some(sha) = tree.blobs.get(&operation.path) {
+                    let existing = client.download_blob(remote, sha).await?;
+                    store
+                        .receive_remote_aggregate_operation(&operation.path, sha, &existing)
+                        .await?;
+                    return Ok(false);
+                }
+                store
+                    .record_aggregate_outbox_attempt(&operation.path, Some("contention"))
+                    .await?;
+                retry_delay(&operation.path, attempt).await;
+            }
+            Ok(PutResult::Ambiguous(kind)) => {
+                store
+                    .record_aggregate_outbox_attempt(&operation.path, Some(kind))
+                    .await?;
+                retry_delay(&operation.path, attempt).await;
+            }
+            Err(error) => {
+                let _ = store
+                    .record_aggregate_outbox_attempt(&operation.path, Some(error.kind()))
+                    .await;
+                return Err(error);
+            }
+        }
+    }
+    Err(SyncError::Contention)
+}
+
+/// Applies every remote aggregate operation this device has not seen.
+///
+/// Operations are retried in rounds rather than applied once each: one can
+/// depend on another that sorts after it by path. A round that applies nothing
+/// while work remains means a dependency is genuinely absent from the remote,
+/// which is a broken history rather than a slow one.
+async fn apply_remote_aggregates(
+    store: &V2Store,
+    client: &GitHubClient,
+    remote: &Remote,
+) -> Result<u64, SyncError> {
+    let tree = client.discover(remote).await?;
+    let mut queue = Vec::new();
+    for (path, sha) in tree
+        .blobs
+        .iter()
+        .filter(|(path, _)| path.starts_with(AGGREGATE_OPS_ROOT))
+    {
+        if let Some(observed) = store.observed_remote_blob(path).await? {
+            if observed == *sha {
+                continue;
+            }
+            return Err(SyncError::Integrity(
+                "an immutable aggregate operation changed after it was observed".into(),
+            ));
+        }
+        let bytes = client.download_blob(remote, sha).await?;
+        queue.push((path.clone(), sha.clone(), bytes));
+    }
+
+    let mut applied = 0_u64;
+    while !queue.is_empty() {
+        let mut deferred = Vec::new();
+        let mut progressed = false;
+        for (path, sha, bytes) in queue {
+            let result = store
+                .receive_remote_aggregate_operation(&path, &sha, &bytes)
+                .await?;
+            match result.disposition {
+                AggregateDisposition::Deferred => deferred.push((path, sha, bytes)),
+                AggregateDisposition::Applied => {
+                    applied += 1;
+                    progressed = true;
+                }
+                AggregateDisposition::AlreadyApplied => progressed = true,
+            }
+        }
+        if !deferred.is_empty() && !progressed {
+            return Err(SyncError::Integrity(
+                "remote aggregate operations have missing causal dependencies".into(),
+            ));
+        }
+        queue = deferred;
+    }
+    Ok(applied)
+}
+
+async fn remote_text(
+    client: &GitHubClient,
+    remote: &Remote,
+    sha: &str,
+    path: &str,
+) -> Result<String, SyncError> {
+    let bytes = client.download_blob(remote, sha).await?;
+    String::from_utf8(bytes)
+        .map_err(|_| SyncError::RemoteData(format!("{path} is not UTF-8 JSON")))
 }
 
 async fn pull_remote(
@@ -857,7 +1173,7 @@ impl GitHubClient {
                 validate_reserved_directory(&path, &entry)?;
                 if entry.kind == "tree" && protocol_tree_relevant(&path) {
                     stack.push((entry.sha, path));
-                } else if path.starts_with("sync/v1/") || path.starts_with(CONTENT_PREFIX) {
+                } else if is_protocol_path(&path) {
                     insert_protocol_blob(&mut protocol, &path, &entry)?;
                 }
             }
@@ -1026,9 +1342,7 @@ fn collect_protocol_entries(
     for entry in entries {
         let path = join_path(prefix, &entry.path);
         validate_reserved_directory(&path, &entry)?;
-        if (path.starts_with("sync/v1/") || path.starts_with(CONTENT_PREFIX))
-            && entry.kind != "tree"
-        {
+        if is_protocol_path(&path) && entry.kind != "tree" {
             insert_protocol_blob(&mut protocol, &path, &entry)?;
         }
     }
@@ -1071,12 +1385,15 @@ fn validate_reserved_directory(path: &str, entry: &TreeEntry) -> Result<(), Sync
     Ok(())
 }
 
+/// Both generations live under `sync/`, and a client must see all of it:
+/// discovering only what it writes would let it upload into a namespace it has
+/// not read.
+fn is_protocol_path(path: &str) -> bool {
+    path.starts_with("sync/v1/") || path.starts_with("sync/v2/")
+}
+
 fn protocol_tree_relevant(path: &str) -> bool {
-    matches!(
-        path,
-        "sync" | "sync/v1" | "sync/v2" | "sync/v2/content" | "sync/v2/content/sha256"
-    ) || path.starts_with("sync/v1/")
-        || path.starts_with(CONTENT_PREFIX)
+    path == "sync" || path == "sync/v1" || path == "sync/v2" || is_protocol_path(path)
 }
 
 fn join_path(prefix: &str, path: &str) -> String {

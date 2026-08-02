@@ -9,6 +9,7 @@ export const GENESIS_PATH = "sync/v1/library.json";
 export const OPS_PREFIX = "sync/v1/ops/";
 export const PACKS_PREFIX = `${OPS_PREFIX}packs/`;
 export const CONTENT_PREFIX = "sync/v2/content/sha256/";
+export const AGGREGATE_OPS_ROOT = "sync/v2/ops/";
 
 export interface GitHubRemote {
   owner: string;
@@ -161,10 +162,7 @@ export class GitHubClient {
         validateReservedDirectory(path, entry);
         if (entry.type === "tree" && protocolTreeRelevant(path)) {
           stack.push([entry.sha, path]);
-        } else if (
-          path.startsWith("sync/v1/") ||
-          path.startsWith(CONTENT_PREFIX)
-        ) {
+        } else if (isProtocolPath(path)) {
           insertProtocolBlob(protocol, path, entry);
         }
       }
@@ -338,10 +336,7 @@ function collectProtocolEntries(entries: TreeEntry[], prefix: string): ProtocolT
   for (const entry of entries) {
     const path = joinPath(prefix, entry.path);
     validateReservedDirectory(path, entry);
-    if (
-      (path.startsWith("sync/v1/") || path.startsWith(CONTENT_PREFIX)) &&
-      entry.type !== "tree"
-    ) {
+    if (isProtocolPath(path) && entry.type !== "tree") {
       insertProtocolBlob(protocol, path, entry);
     }
   }
@@ -387,17 +382,18 @@ function validateReservedDirectory(path: string, entry: TreeEntry): void {
   }
 }
 
+/**
+ * Both protocol generations live under `sync/`, and a client has to see all of
+ * it: discovering only the paths it writes would let it upload into a namespace
+ * it never read.
+ */
+function isProtocolPath(path: string): boolean {
+  return path.startsWith("sync/v1/") || path.startsWith("sync/v2/");
+}
+
 function protocolTreeRelevant(path: string): boolean {
   return (
-    [
-      "sync",
-      "sync/v1",
-      "sync/v2",
-      "sync/v2/content",
-      "sync/v2/content/sha256",
-    ].includes(path) ||
-    path.startsWith("sync/v1/") ||
-    path.startsWith(CONTENT_PREFIX)
+    ["sync", "sync/v1", "sync/v2"].includes(path) || isProtocolPath(path)
   );
 }
 

@@ -32,7 +32,8 @@ pub use projection::{
 };
 #[cfg(target_arch = "wasm32")]
 pub use wasm::{
-    apply_mutation, apply_remote_envelopes, initialize_library, materialize_library,
+    apply_mutation, apply_remote_envelopes, apply_zen_envelope, apply_zen_mutation,
+    initialize_library, materialize_library, zen_document_view,
 };
 pub use zen::{
     MAX_ZEN_BODY_BYTES, ZenAggregate, ZenDocumentSeed, ZenDocumentSummary, ZenDocumentView,

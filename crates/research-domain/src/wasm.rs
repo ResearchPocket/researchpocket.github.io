@@ -775,6 +775,63 @@ pub fn apply_zen_mutation(
     .map_err(js_error)
 }
 
+/// Apply one remote zen operation to the replica it addresses.
+///
+/// `snapshot_base64` is empty when this device has never seen the document.
+/// A result with `deferred: true` carries no snapshot: the operation depends on
+/// one that has not arrived, and persisting anything now would drop it.
+#[wasm_bindgen(js_name = applyZenEnvelope)]
+pub fn apply_zen_envelope(
+    snapshot_base64: &str,
+    peer_id: &str,
+    library_id: &str,
+    path: &str,
+    envelope_json: &str,
+) -> Result<String, JsValue> {
+    zen_receive(snapshot_base64, peer_id, library_id, path, envelope_json).map_err(js_error)
+}
+
+#[derive(Serialize)]
+struct ZenEnvelopeResult {
+    deferred: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    snapshot: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    summary: Option<crate::ZenDocumentSummary>,
+}
+
+fn zen_receive(
+    snapshot_base64: &str,
+    peer_id: &str,
+    library_id: &str,
+    path: &str,
+    envelope_json: &str,
+) -> DomainResult<String> {
+    let peer_id = parse_peer_id(peer_id)?;
+    let envelope: crate::AggregateEnvelope = serde_json::from_str(envelope_json)?;
+    let aggregate = if snapshot_base64.is_empty() {
+        crate::ZenAggregate::from_envelope(path, &envelope, library_id, peer_id)?
+    } else {
+        let snapshot = STANDARD.decode(snapshot_base64)?;
+        let aggregate =
+            crate::ZenAggregate::from_snapshot(&envelope.aggregate_id, &snapshot, peer_id)?;
+        let deferred = aggregate.import_envelope(path, &envelope, library_id)?;
+        (!deferred).then_some(aggregate)
+    };
+    let Some(aggregate) = aggregate else {
+        return Ok(serde_json::to_string(&ZenEnvelopeResult {
+            deferred: true,
+            snapshot: None,
+            summary: None,
+        })?);
+    };
+    Ok(serde_json::to_string(&ZenEnvelopeResult {
+        deferred: false,
+        snapshot: Some(STANDARD.encode(aggregate.export_snapshot()?)),
+        summary: Some(aggregate.view()?.summary()),
+    })?)
+}
+
 /// Read one document, body included. Only called when a document is opened.
 #[wasm_bindgen(js_name = zenDocumentView)]
 pub fn zen_document_view(
