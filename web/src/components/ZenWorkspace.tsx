@@ -219,8 +219,11 @@ function ZenEditor({
   onSaveTitle,
   onSaveBody,
 }: ZenWorkspaceProps & { open: { documentId: string; view: ZenDocumentView } }) {
+  // Reading is the default everywhere, phones included: a document is opened to
+  // be read far more often than to be changed. An empty one is the exception —
+  // there is nothing to read yet, so it opens ready to type.
   const [mode, setMode] = useState<"edit" | "view">(() =>
-    window.matchMedia("(max-width: 48rem)").matches ? "edit" : "view",
+    open.view.body.trim() === "" ? "edit" : "view",
   );
   const [draft, setDraft] = useState(open.view.body);
   const [title, setTitle] = useState(open.view.title.value ?? "");
