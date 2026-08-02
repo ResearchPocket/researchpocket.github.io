@@ -85,8 +85,92 @@ pub enum Commands {
         command: SyncCommands,
     },
 
+    /// Write and read zen documents — prose, lists, and todos
+    Zen {
+        #[command(subcommand)]
+        command: ZenCommands,
+    },
+
     /// Show local library, import, outbox, and sync state
     Status,
+}
+
+#[derive(Subcommand)]
+pub enum ZenCommands {
+    /// List documents with their metadata; bodies are never read
+    List,
+
+    /// Create a document, reading its body from a file or standard input
+    Add(ZenAddArgs),
+
+    /// Print one document, body included
+    Show(ZenDocumentIdArgs),
+
+    /// Change a document's title, body, or tags
+    Edit(ZenEditArgs),
+
+    /// Delete a document without erasing its history
+    Delete(ZenDocumentIdArgs),
+
+    /// Restore a deleted document
+    Restore(ZenDocumentIdArgs),
+}
+
+#[derive(Args)]
+pub struct ZenDocumentIdArgs {
+    /// UUID of the document
+    pub document_id: String,
+}
+
+#[derive(Args)]
+pub struct ZenAddArgs {
+    /// Title; omit for an untitled document
+    #[arg(long)]
+    pub title: Option<String>,
+
+    /// Read the body from this file, or from standard input with `-`
+    #[arg(long, value_name = "PATH")]
+    pub body_file: Option<PathBuf>,
+
+    /// Body text, for short documents
+    // Hyphens are allowed because a Markdown body very often starts with a
+    // list marker, which clap would otherwise read as a flag.
+    #[arg(long, conflicts_with = "body_file", allow_hyphen_values = true)]
+    pub body: Option<String>,
+
+    /// Add exact tag text; repeat or comma-separate
+    #[arg(long, value_delimiter = ',', num_args = 1..)]
+    pub tag: Vec<String>,
+}
+
+#[derive(Args)]
+pub struct ZenEditArgs {
+    /// UUID of the document
+    pub document_id: String,
+
+    /// Set the title
+    #[arg(long, conflicts_with = "clear_title")]
+    pub title: Option<String>,
+
+    /// Set the title to absent
+    #[arg(long)]
+    pub clear_title: bool,
+
+    /// Replace the body from this file, or from standard input with `-`
+    #[arg(long, value_name = "PATH")]
+    pub body_file: Option<PathBuf>,
+
+    /// Replace the body with this text
+    #[arg(long, conflicts_with = "body_file", allow_hyphen_values = true)]
+    pub body: Option<String>,
+
+    /// Add exact tag text; repeat or comma-separate
+    #[arg(long, value_delimiter = ',', num_args = 1..)]
+    pub add_tag: Vec<String>,
+
+    /// Remove exact tag text; repeat or comma-separate
+    #[arg(long, value_delimiter = ',', num_args = 1..)]
+    pub remove_tag: Vec<String>,
 }
 
 #[derive(Args)]

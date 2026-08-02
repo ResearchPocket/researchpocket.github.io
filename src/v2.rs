@@ -5,16 +5,17 @@ use std::time::Duration;
 
 use directories::ProjectDirs;
 use research_store::{
-    CreateItemRequest, EditItemRequest, EnrichmentClaim, EnrichmentJob, EnrichmentProvider,
-    EnrichmentQueueCounts, EnrichmentStatus as StoreEnrichmentStatus, ListQuery,
-    OptionalTextUpdate, SearchQuery, StoreError, StoredItem, V2Store,
+    CreateItemRequest, CreateZenDocumentRequest, EditItemRequest, EditZenDocumentRequest,
+    EnrichmentClaim, EnrichmentJob, EnrichmentProvider, EnrichmentQueueCounts,
+    EnrichmentStatus as StoreEnrichmentStatus, ListQuery, OptionalTextUpdate, SearchQuery,
+    StoreError, StoredItem, V2Store,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
 
 use crate::cli::{
     CaptureCommands, CliArgs, Commands, EnrichCommands, EnrichmentProviderArg, ImportCommands,
-    OutputFormat, SyncCommands,
+    OutputFormat, SyncCommands, ZenCommands,
 };
 use crate::{capture, enrichment, sync, tui};
 
@@ -140,8 +141,172 @@ pub async fn handle(args: &CliArgs) -> CliResult<()> {
         }
         Commands::Capture { command } => handle_capture(&data_dir, args.format, command).await,
         Commands::Sync { command } => handle_sync(&data_dir, args.format, command).await,
+        Commands::Zen { command } => handle_zen(&data_dir, args.format, command).await,
         Commands::Status => handle_status(&data_dir, args.format).await,
     }
+}
+
+/// Zen documents from the terminal.
+///
+/// Bodies come from a file or standard input rather than an argument, because a
+/// document is prose and shells mangle prose. `--body` stays for one-liners.
+async fn handle_zen(
+    data_dir: &Path,
+    format: OutputFormat,
+    command: &ZenCommands,
+) -> CliResult<()> {
+    let store = V2Store::open(data_dir).await?;
+    match command {
+        ZenCommands::List => {
+            let documents = store.list_zen_documents().await?;
+            let output = command_output(
+                "zen_list",
+                json!({ "documents": documents, "total": documents.len() }),
+            )?;
+            write_single(format, &output, human_zen_list)
+        }
+        ZenCommands::Add(add) => {
+            let summary = store
+                .create_zen_document(CreateZenDocumentRequest {
+                    title: add.title.clone(),
+                    body: read_body(add.body.as_deref(), add.body_file.as_deref())?,
+                    tags: add.tag.clone(),
+                })
+                .await?;
+            let output = command_output("zen_add", summary)?;
+            write_single(format, &output, human_zen_document)
+        }
+        ZenCommands::Show(document) => {
+            let view = store.zen_document(&document.document_id).await?;
+            let output = command_output("zen_show", view)?;
+            write_single(format, &output, human_zen_show)
+        }
+        ZenCommands::Edit(edit) => {
+            let body = match (&edit.body, &edit.body_file) {
+                (None, None) => None,
+                (body, file) => Some(read_body(body.as_deref(), file.as_deref())?),
+            };
+            let summary = store
+                .edit_zen_document(EditZenDocumentRequest {
+                    document_id: edit.document_id.clone(),
+                    title: match (&edit.title, edit.clear_title) {
+                        (_, true) => Some(None),
+                        (Some(title), false) => Some(Some(title.clone())),
+                        (None, false) => None,
+                    },
+                    body,
+                    add_tags: edit.add_tag.clone(),
+                    remove_tags: edit.remove_tag.clone(),
+                })
+                .await?;
+            let output = command_output("zen_edit", summary)?;
+            write_single(format, &output, human_zen_document)
+        }
+        ZenCommands::Delete(document) => {
+            let summary = store.delete_zen_document(&document.document_id).await?;
+            let output = command_output("zen_delete", summary)?;
+            write_single(format, &output, human_zen_document)
+        }
+        ZenCommands::Restore(document) => {
+            let summary = store.restore_zen_document(&document.document_id).await?;
+            let output = command_output("zen_restore", summary)?;
+            write_single(format, &output, human_zen_document)
+        }
+    }
+}
+
+/// Reads a document body from text, a file, or standard input via `-`.
+fn read_body(body: Option<&str>, body_file: Option<&Path>) -> CliResult<String> {
+    match (body, body_file) {
+        (Some(body), _) => Ok(body.to_owned()),
+        (None, Some(path)) if path == Path::new("-") => {
+            let mut body = String::new();
+            io::stdin().read_to_string(&mut body)?;
+            Ok(body)
+        }
+        (None, Some(path)) => Ok(std::fs::read_to_string(path)?),
+        (None, None) => Ok(String::new()),
+    }
+}
+
+fn human_zen_list(value: &Value) {
+    let Some(documents) = value.get("documents").and_then(Value::as_array) else {
+        println!("No documents found");
+        return;
+    };
+    println!("{} document{}", documents.len(), plural(documents.len()));
+    for document in documents {
+        println!();
+        println!(
+            "{}",
+            document
+                .get("title")
+                .and_then(Value::as_str)
+                .unwrap_or("Untitled document")
+        );
+        print_indented_string(document, "document_id", "ID");
+        print_zen_counts(document);
+    }
+}
+
+fn human_zen_document(value: &Value) {
+    println!(
+        "{}",
+        value
+            .get("title")
+            .and_then(Value::as_str)
+            .unwrap_or("Untitled document")
+    );
+    print_indented_string(value, "document_id", "ID");
+    print_zen_counts(value);
+}
+
+fn human_zen_show(value: &Value) {
+    println!(
+        "{}",
+        value
+            .pointer("/title/value")
+            .and_then(Value::as_str)
+            .unwrap_or("Untitled document")
+    );
+    print_indented_string(value, "document_id", "ID");
+    if let Some(tags) = value.get("tags").and_then(Value::as_array) {
+        let tags = tags.iter().filter_map(Value::as_str).collect::<Vec<_>>();
+        if !tags.is_empty() {
+            println!("  tags: {}", tags.join(", "));
+        }
+    }
+    if let Some(body) = value.get("body").and_then(Value::as_str) {
+        println!();
+        println!("{body}");
+    }
+}
+
+fn print_zen_counts(document: &Value) {
+    if let Some(bytes) = document.get("byte_length").and_then(Value::as_u64) {
+        println!("  size: {bytes} B");
+    }
+    let total = document.get("todo_total").and_then(Value::as_u64);
+    if let Some(total) = total.filter(|total| *total > 0) {
+        let done = document
+            .get("todo_done")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        println!("  todos: {done}/{total}");
+    }
+    if let Some(tags) = document.get("tags").and_then(Value::as_array) {
+        let tags = tags.iter().filter_map(Value::as_str).collect::<Vec<_>>();
+        if !tags.is_empty() {
+            println!("  tags: {}", tags.join(", "));
+        }
+    }
+    if document.get("lifecycle_state").and_then(Value::as_str) == Some("deleted") {
+        println!("  state: deleted");
+    }
+}
+
+fn plural(count: usize) -> &'static str {
+    if count == 1 { "" } else { "s" }
 }
 
 async fn handle_capture(
