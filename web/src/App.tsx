@@ -222,6 +222,10 @@ export function App() {
   } | null>(null);
   const [profiles, setProfiles] = useState<LibraryProfile[]>([]);
   const [activeProfileId, setActiveProfileId] = useState<string | null>(null);
+  // Read only by the history listener, which needs the current document
+  // without re-subscribing every time one is opened.
+  const openZenId = useRef<string | null>(null);
+  openZenId.current = openZen?.documentId ?? null;
   const captureOpenerRef = useRef<HTMLButtonElement | null>(null);
   const editOpenerRef = useRef<HTMLButtonElement | null>(null);
 
@@ -389,21 +393,32 @@ export function App() {
 
   useEffect(() => {
     function restoreNavigationFromHistory() {
-      const match = window.location.hash.match(/^#item=(.+)$/);
-      if (!match) {
-        setReaderItem(null);
-        setView(readWorkspaceView());
+      const item = window.location.hash.match(/^#item=(.+)$/);
+      if (item) {
+        const itemId = decodeURIComponent(item[1]!);
+        setReaderItem(items.find((entry) => entry.id === itemId) ?? null);
         return;
       }
-      const itemId = decodeURIComponent(match[1]!);
-      setReaderItem(items.find((item) => item.id === itemId) ?? null);
+      setReaderItem(null);
+      setView(readWorkspaceView());
+
+      const document = window.location.hash.match(/^#document=(.+)$/);
+      if (!document) {
+        setOpenZen(null);
+        return;
+      }
+      const documentId = decodeURIComponent(document[1]!);
+      // Already loaded when this runs for an entry we pushed ourselves; only a
+      // real back, forward, or deep link has to fetch the document.
+      if (documentId === openZenId.current) return;
+      if (libraryState.initialized) void loadZenDocument(documentId);
     }
 
     window.addEventListener("popstate", restoreNavigationFromHistory);
     restoreNavigationFromHistory();
     return () =>
       window.removeEventListener("popstate", restoreNavigationFromHistory);
-  }, [items]);
+  }, [items, libraryState.initialized]);
   const deferredQuery = useDeferredValue(query);
   const visibleItems = useMemo(
     () =>
@@ -495,15 +510,52 @@ export function App() {
     setZenDocuments(await libraryRepository.listZenDocuments());
   }
 
-  async function openZenDocument(documentId: string) {
+  /** Loads a document into the workspace without touching history. */
+  async function loadZenDocument(documentId: string) {
     try {
       setOpenZen({
         documentId,
         view: await libraryRepository.zenDocument(documentId),
       });
+      return true;
     } catch (error) {
       setLocalError(error instanceof Error ? error.message : "That document could not be opened.");
+      return false;
     }
+  }
+
+  /**
+   * Opening a document is a navigation, so it earns a history entry. Without
+   * one the browser's back gesture leaves the application entirely instead of
+   * returning to the index, which is the only back a phone has.
+   */
+  async function openZenDocument(documentId: string) {
+    if (!(await loadZenDocument(documentId))) return;
+    const nextUrl = `${window.location.pathname}${window.location.search}#document=${encodeURIComponent(documentId)}`;
+    if (nextUrl === `${window.location.pathname}${window.location.search}${window.location.hash}`) {
+      return;
+    }
+    window.history.pushState(
+      { ...window.history.state, researchPocketZen: true },
+      "",
+      nextUrl,
+    );
+  }
+
+  function closeZenDocument() {
+    setOpenZen(null);
+    if (!window.location.hash.startsWith("#document=")) return;
+    // Unwinding our own entry keeps forward working and stops the stack from
+    // growing every time a document is opened and closed.
+    if (window.history.state?.researchPocketZen) {
+      window.history.back();
+      return;
+    }
+    window.history.replaceState(
+      window.history.state,
+      "",
+      `${window.location.pathname}${window.location.search}${hashForView("zen")}`,
+    );
   }
 
   async function createZenDocument(title: string) {
@@ -522,7 +574,7 @@ export function App() {
     await runZen(async () => {
       await libraryRepository.setZenBody(documentId, body);
       await refreshZenDocuments();
-      await openZenDocument(documentId);
+      await loadZenDocument(documentId);
     });
   }
 
@@ -530,14 +582,14 @@ export function App() {
     await runZen(async () => {
       await libraryRepository.setZenTitle(documentId, title);
       await refreshZenDocuments();
-      await openZenDocument(documentId);
+      await loadZenDocument(documentId);
     });
   }
 
   async function removeZenDocument(documentId: string) {
     await runZen(async () => {
       await libraryRepository.deleteZenDocument(documentId);
-      setOpenZen(null);
+      closeZenDocument();
       await refreshZenDocuments();
     });
   }
@@ -1015,7 +1067,7 @@ export function App() {
           busy={busyAction !== null}
           documents={zenDocuments}
           hidden={view !== "zen"}
-          onClose={() => setOpenZen(null)}
+          onClose={closeZenDocument}
           onCreate={(title) => void createZenDocument(title)}
           onDelete={(documentId) => void removeZenDocument(documentId)}
           onLeave={() => navigateToView("library")}
