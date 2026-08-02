@@ -913,7 +913,12 @@ export function App() {
             <nav aria-label="Zen" className="rail-nav">
               <button
                 aria-current={view === "zen" ? "page" : undefined}
-                onClick={() => navigateToView("zen")}
+                onClick={() => {
+                  // Closes the open document too, or this reads as a dead
+                  // control for anyone already inside one.
+                  setOpenZen(null);
+                  navigateToView("zen");
+                }}
                 type="button"
               >
                 <span>Documents</span>
