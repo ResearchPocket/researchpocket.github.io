@@ -195,7 +195,9 @@ V2 is successful when all of the following are true:
 - Using Git commits, branch merges, file locking, or last-push-wins as the
   application conflict-resolution model.
 - Multi-user or real-time collaborative libraries. V2 supports one human owner
-  using many devices, browsers, and tabs.
+  using many devices, browsers, and tabs. How quickly those devices converge is
+  a transport question rather than a collaboration one; see the signaling relay
+  recorded in the [roadmap](./ROADMAP.md).
 - AI memory, personal profiling, RAG, autonomous organization, or canonical
   machine-generated tags and summaries.
 - Full webpage archival, PDFs, attachments, highlights, or a general-purpose
