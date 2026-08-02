@@ -1,6 +1,7 @@
 //! Durable, local-only persistence for a V2 ResearchPocket library.
 
 mod aggregate;
+mod aggregate_sync;
 mod captured;
 mod enrichment;
 mod error;
@@ -11,7 +12,10 @@ mod store;
 mod sync;
 mod zen;
 
-pub use aggregate::AggregateMigrationReceipt;
+pub use aggregate::{AggregateGeneration, AggregateMigrationReceipt};
+pub use aggregate_sync::{
+    AggregateDisposition, PendingAggregateOperation, RemoteAggregateResult,
+};
 pub use enrichment::ENRICHMENT_MAX_ATTEMPTS;
 pub use error::{StoreError, StoreResult};
 pub use model::{

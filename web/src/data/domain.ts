@@ -1,5 +1,6 @@
 type DomainMethod =
   | "applyMutation"
+  | "applyZenEnvelope"
   | "applyZenMutation"
   | "applyRemoteEnvelopes"
   | "createCheckpoint"

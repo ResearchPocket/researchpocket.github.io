@@ -1,8 +1,9 @@
 #![cfg(target_arch = "wasm32")]
 
 use research_domain::{
-    GOLDEN_CANONICAL_JSON, apply_mutation, apply_remote_envelopes, initialize_library,
-    materialize_library, run_convergence_scenario,
+    GOLDEN_CANONICAL_JSON, apply_mutation, apply_remote_envelopes, apply_zen_envelope,
+    apply_zen_mutation, initialize_library, materialize_library, run_convergence_scenario,
+    zen_document_view,
 };
 use serde_json::{Value, json};
 use wasm_bindgen_test::*;
@@ -218,4 +219,123 @@ fn mutation(snapshot: &str, sequence: &str, mutation: Value) -> Value {
         .expect("local browser mutation"),
     )
     .expect("local mutation result JSON")
+}
+
+/// The browser must reach the same document a native peer holds, and must
+/// decline an operation whose predecessor has not arrived rather than half-apply
+/// it. A snapshot written from a partially imported update would drop the
+/// pending part, so declining is what makes the browser queue durable.
+#[wasm_bindgen_test]
+fn browser_zen_operations_converge_and_defer_until_their_dependency_lands() {
+    const LIBRARY_ID: &str = "00000000-0000-7000-8000-000000000001";
+    const DOCUMENT_ID: &str = "00000000-0000-7000-8000-000000000004";
+    const DEVICE_ID: &str = "00000000-0000-7000-8000-000000000002";
+    const AUTHOR_PEER: &str = "18446744073709551614";
+    const READER_PEER: &str = "42";
+
+    let created = zen_mutation(
+        "",
+        "00000000000000000001",
+        json!({
+            "type": "create",
+            "document_id": DOCUMENT_ID,
+            "title": "CRDT reading log",
+            "body": "- [ ] Read the paper",
+            "created_at": 1_700_000_000_i64,
+            "tags": ["crdt"],
+        }),
+    );
+    let edited = zen_mutation(
+        created["snapshot"].as_str().expect("created snapshot"),
+        "00000000000000000002",
+        json!({
+            "type": "set_body",
+            "body": "- [x] Read the paper\n- [ ] Write it up",
+        }),
+    );
+
+    let path =
+        |sequence: &str| format!("sync/v2/ops/zen/{DOCUMENT_ID}/{DEVICE_ID}/{sequence}.json");
+    let create_path = path("00000000000000000001");
+    let edit_path = path("00000000000000000002");
+
+    // Backwards on purpose: the edit depends on the create.
+    let deferred: Value = serde_json::from_str(
+        &apply_zen_envelope(
+            "",
+            READER_PEER,
+            LIBRARY_ID,
+            &edit_path,
+            edited["envelope"].as_str().expect("edit envelope"),
+        )
+        .expect("receive the edit first"),
+    )
+    .expect("deferred result JSON");
+    assert_eq!(deferred["deferred"], json!(true));
+    assert!(
+        deferred.get("snapshot").is_none(),
+        "a deferred operation must not produce a replica"
+    );
+
+    let mut replica = String::new();
+    for (operation_path, envelope) in [
+        (&create_path, &created["envelope"]),
+        (&edit_path, &edited["envelope"]),
+    ] {
+        let applied: Value = serde_json::from_str(
+            &apply_zen_envelope(
+                &replica,
+                READER_PEER,
+                LIBRARY_ID,
+                operation_path,
+                envelope.as_str().expect("envelope"),
+            )
+            .expect("receive in order"),
+        )
+        .expect("applied result JSON");
+        assert_eq!(applied["deferred"], json!(false));
+        replica = applied["snapshot"]
+            .as_str()
+            .expect("applied snapshot")
+            .to_owned();
+    }
+
+    let reader: Value = serde_json::from_str(
+        &zen_document_view(&replica, READER_PEER, DOCUMENT_ID).expect("reader view"),
+    )
+    .expect("reader view JSON");
+    let author: Value = serde_json::from_str(
+        &zen_document_view(
+            edited["snapshot"].as_str().expect("author snapshot"),
+            AUTHOR_PEER,
+            DOCUMENT_ID,
+        )
+        .expect("author view"),
+    )
+    .expect("author view JSON");
+    assert_eq!(reader["body"], author["body"]);
+    assert_eq!(reader["title"]["value"], json!("CRDT reading log"));
+    assert!(
+        reader["body"]
+            .as_str()
+            .expect("body text")
+            .contains("Write it up")
+    );
+}
+
+fn zen_mutation(snapshot: &str, sequence: &str, mutation: Value) -> Value {
+    serde_json::from_str(
+        &apply_zen_mutation(
+            snapshot,
+            "18446744073709551614",
+            "00000000-0000-7000-8000-000000000001",
+            "00000000-0000-7000-8000-000000000002",
+            sequence,
+            "2026-07-11T00:00:00Z",
+            "00000000-0000-7000-8000-000000000004",
+            &mutation.to_string(),
+        )
+        .expect("local browser zen mutation"),
+    )
+    .expect("zen mutation result JSON")
 }

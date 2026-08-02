@@ -1163,6 +1163,9 @@ fn print_sync_counts(value: &Value) {
     print_number(value, "acknowledged", "Acknowledged");
     print_number(value, "uploaded", "Uploaded");
     print_number(value, "pending", "Pending");
+    print_number(value, "aggregates_applied", "Documents applied");
+    print_number(value, "aggregates_uploaded", "Documents uploaded");
+    print_number(value, "aggregates_pending", "Documents pending");
 }
 
 fn human_status(value: &Value) {

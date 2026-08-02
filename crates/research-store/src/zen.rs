@@ -334,7 +334,7 @@ async fn load_aggregate(
     ZenAggregate::from_snapshot(document_id, &snapshot, peer_id).map_err(StoreError::from)
 }
 
-async fn persist_zen_projection(
+pub(crate) async fn persist_zen_projection(
     connection: &mut SqliteConnection,
     summary: &ZenDocumentSummary,
     now: &str,

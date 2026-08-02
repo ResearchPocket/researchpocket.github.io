@@ -168,7 +168,7 @@ async fn migrating_to_item_aggregates_is_idempotent_and_queues_the_barrier() {
     // existing outbox and older clients meet it on their next pull.
     let queued = store.pending_batches().await.expect("barrier queued");
     assert_eq!(queued.len(), 1);
-    assert_eq!(queued[0].path, receipt.barrier_path);
+    assert_eq!(Some(queued[0].path.clone()), receipt.barrier_path);
 
     let repeated = store
         .migrate_to_item_aggregates()

@@ -1,5 +1,6 @@
 import initWasm, {
   applyMutation,
+  applyZenEnvelope,
   applyZenMutation,
   applyRemoteEnvelopes,
   createCheckpoint,
@@ -17,6 +18,7 @@ import initWasm, {
 
 type DomainMethod =
   | "applyMutation"
+  | "applyZenEnvelope"
   | "applyZenMutation"
   | "applyRemoteEnvelopes"
   | "createCheckpoint"
@@ -45,6 +47,7 @@ interface DomainResponse {
 
 const methods: Record<DomainMethod, (...args: string[]) => string> = {
   applyMutation,
+  applyZenEnvelope,
   applyZenMutation,
   applyRemoteEnvelopes,
   createCheckpoint,

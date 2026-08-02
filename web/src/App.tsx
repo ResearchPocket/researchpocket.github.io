@@ -1889,7 +1889,8 @@ function SyncPanel({
             <div>
               <dt>Last cycle</dt>
               <dd>
-                {state.lastCycle.downloaded} down · {state.lastCycle.uploaded} up
+                {state.lastCycle.downloaded + state.lastCycle.aggregatesApplied} down ·{" "}
+                {state.lastCycle.uploaded + state.lastCycle.aggregatesUploaded} up
               </dd>
             </div>
           ) : null}

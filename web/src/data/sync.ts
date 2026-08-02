@@ -1,4 +1,5 @@
 import {
+  AGGREGATE_OPS_ROOT,
   CONTENT_PREFIX,
   GENESIS_PATH,
   GitHubClient,
@@ -15,6 +16,7 @@ import {
   libraryRepository,
   type BrowserCheckpointCandidate,
   type CapturedDocumentReference,
+  type PendingAggregateOperation,
   type PendingSyncBatch,
   type RemoteEnvelopeInput,
   type RemoteOperationPackInput,
@@ -54,6 +56,11 @@ export interface SyncCycleResult {
   acknowledged: number;
   uploaded: number;
   pending: number;
+  /** Aggregate-scoped work — zen documents today. Counted apart from v1
+   *  because the two generations queue separately. */
+  aggregatesUploaded: number;
+  aggregatesApplied: number;
+  aggregatesPending: number;
 }
 
 interface PullStats {
@@ -481,11 +488,15 @@ class BrowserSyncService {
       this.patch({ status: "Publishing a fast-restore checkpoint…" });
       await this.ensureCheckpointUploaded(client, remote, checkpoint);
     }
+    const aggregates = await this.runAggregates(client, remote);
     const pending = (await libraryRepository.pendingSyncBatches()).length;
     const result: SyncCycleResult = {
       ...pull,
       uploaded,
       pending,
+      aggregatesUploaded: aggregates.uploaded,
+      aggregatesApplied: aggregates.applied,
+      aggregatesPending: await libraryRepository.pendingAggregateCount(),
     };
     await libraryRepository.recordSyncSuccess();
     this.retryNotBefore = 0;
@@ -743,6 +754,150 @@ class BrowserSyncService {
       "Checkpoint publication remained contended after safe retries.",
       "contention",
     );
+  }
+
+  /**
+   * Carries the aggregate generation: zen documents today.
+   *
+   * Runs after the v1 phase so the ordering on the remote matches the ordering
+   * a reader needs — v1 first, then the aggregates layered on top.
+   */
+  private async runAggregates(
+    client: GitHubClient,
+    remote: GitHubRemote,
+  ): Promise<{ uploaded: number; applied: number }> {
+    let uploaded = 0;
+    const queued = await libraryRepository.pendingAggregateOperations();
+    if (queued.length > 0) {
+      this.patch({
+        status: `Uploading ${queued.length} queued document change${queued.length === 1 ? "" : "s"}…`,
+      });
+    }
+    for (const operation of queued) {
+      if (await this.ensureAggregateUploaded(client, remote, operation)) {
+        uploaded += 1;
+      }
+    }
+    return { uploaded, applied: await this.applyRemoteAggregates(client, remote) };
+  }
+
+  private async ensureAggregateUploaded(
+    client: GitHubClient,
+    remote: GitHubRemote,
+    operation: PendingAggregateOperation,
+  ): Promise<boolean> {
+    for (let attempt = 0; attempt < MAX_UPLOAD_ATTEMPTS; attempt += 1) {
+      let put;
+      try {
+        put = await client.putNew(
+          remote,
+          operation.path,
+          operation.envelopeJson,
+          remote.branch,
+        );
+      } catch (error) {
+        await libraryRepository.recordAggregateOutboxAttempt(
+          operation.path,
+          error instanceof GitHubSyncError ? error.kind : "transport",
+        );
+        throw error;
+      }
+      if (put.type === "created") {
+        // Confirming from the write is what clears the queue, so a crash before
+        // the next pull cannot leave the operation queued forever.
+        await libraryRepository.receiveRemoteAggregateOperation(
+          operation.path,
+          put.blobSha,
+          operation.envelopeJson,
+        );
+        return true;
+      }
+      if (put.type === "race") {
+        // Already there. Confirm from whatever a reader would actually see
+        // rather than assuming our bytes won.
+        const tree = await client.discover(remote);
+        const existingSha = tree.blobs.get(operation.path);
+        if (existingSha) {
+          const existing = await client.downloadText(remote, existingSha);
+          await libraryRepository.receiveRemoteAggregateOperation(
+            operation.path,
+            existingSha,
+            existing,
+          );
+          return false;
+        }
+      }
+      await libraryRepository.recordAggregateOutboxAttempt(
+        operation.path,
+        put.type === "race" ? "contention" : put.kind,
+      );
+      await retryDelay(operation.path, attempt);
+    }
+    throw new GitHubSyncError(
+      "Document synchronization remained contended after safe retries.",
+      "contention",
+    );
+  }
+
+  /**
+   * Applies every remote aggregate operation this device has not seen.
+   *
+   * Operations are retried in rounds because one can depend on another that
+   * sorts after it by path. A round that applies nothing while work remains
+   * means a dependency is genuinely absent — a broken history, not a slow one.
+   */
+  private async applyRemoteAggregates(
+    client: GitHubClient,
+    remote: GitHubRemote,
+  ): Promise<number> {
+    const tree = await client.discover(remote);
+    let queue: Array<{ path: string; blobSha: string; json: string }> = [];
+    for (const [path, blobSha] of [...tree.blobs.entries()].sort(([left], [right]) =>
+      left.localeCompare(right),
+    )) {
+      if (!path.startsWith(AGGREGATE_OPS_ROOT)) continue;
+      const observation = await libraryRepository.remoteObservation(path);
+      if (observation) {
+        if (observation.blobSha === blobSha) continue;
+        throw new GitHubSyncError(
+          "An immutable document change was rewritten after it was observed.",
+          "integrity",
+        );
+      }
+      queue.push({ path, blobSha, json: await client.downloadText(remote, blobSha) });
+    }
+    if (queue.length > 0) {
+      this.patch({
+        status: `Applying ${queue.length} document change${queue.length === 1 ? "" : "s"}…`,
+      });
+    }
+
+    let applied = 0;
+    while (queue.length > 0) {
+      const deferred: typeof queue = [];
+      let progressed = false;
+      for (const operation of queue) {
+        const outcome = await libraryRepository.receiveRemoteAggregateOperation(
+          operation.path,
+          operation.blobSha,
+          operation.json,
+        );
+        if (outcome.disposition === "deferred") {
+          deferred.push(operation);
+          continue;
+        }
+        progressed = true;
+        if (outcome.disposition === "applied") applied += 1;
+      }
+      if (deferred.length > 0 && !progressed) {
+        throw new GitHubSyncError(
+          "Remote document changes are missing a causal predecessor.",
+          "integrity",
+        );
+      }
+      queue = deferred;
+    }
+    return applied;
   }
 
   private async ensureUploaded(

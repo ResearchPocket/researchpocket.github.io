@@ -591,6 +591,181 @@ class LibraryRepository {
     return (await this.database()).count("deferred");
   }
 
+  /**
+   * Aggregate operations awaiting upload, oldest first.
+   *
+   * Ordered by device and sequence so a receiver is never handed an operation
+   * before the one it depends on.
+   */
+  async pendingAggregateOperations(): Promise<PendingAggregateOperation[]> {
+    const database = await this.database();
+    const outbox = await database.getAll("aggregateOutbox");
+    const pending = await Promise.all(
+      outbox.map(async (entry) => {
+        const batch = await database.get("aggregateBatches", entry.path);
+        if (!batch) {
+          throw new Error("A queued aggregate operation is missing its immutable batch.");
+        }
+        return {
+          path: entry.path,
+          envelopeJson: batch.envelopeJson,
+          deviceId: batch.deviceId,
+          sequence: batch.sequence,
+        };
+      }),
+    );
+    return pending.sort(
+      (left, right) =>
+        left.deviceId.localeCompare(right.deviceId) ||
+        left.sequence.localeCompare(right.sequence),
+    );
+  }
+
+  async pendingAggregateCount(): Promise<number> {
+    return (await this.database()).count("aggregateOutbox");
+  }
+
+  async recordAggregateOutboxAttempt(
+    path: string,
+    errorKind: string | null,
+  ): Promise<void> {
+    await this.write(async (database) => {
+      const entry = await database.get("aggregateOutbox", path);
+      if (!entry) return;
+      await database.put("aggregateOutbox", {
+        ...entry,
+        attempts: entry.attempts + 1,
+        lastErrorKind: errorKind,
+      });
+    });
+  }
+
+  /**
+   * Applies one remote aggregate operation, or declines it.
+   *
+   * Declining is not a failure: an operation whose causal predecessor has not
+   * arrived is reported as `deferred` and nothing is written, so the caller can
+   * retry it once that predecessor lands. Recording it as applied would lose it,
+   * because the snapshot this store persists does not carry a pending update.
+   */
+  async receiveRemoteAggregateOperation(
+    path: string,
+    blobSha: string,
+    envelopeJson: string,
+  ): Promise<RemoteAggregateOutcome> {
+    validateBlobSha(blobSha);
+    const envelope = JSON.parse(envelopeJson) as {
+      aggregate_kind: string;
+      aggregate_id: string;
+      device_id: string;
+      sequence: string;
+      payload_sha256: string;
+    };
+    // Fails closed rather than skipping: a kind this build cannot apply would
+    // otherwise leave a hole in the library that looks like a complete one.
+    if (envelope.aggregate_kind !== "zen_document") {
+      throw new Error(
+        `This library contains ${envelope.aggregate_kind} aggregates, which this version cannot read. Update to continue.`,
+      );
+    }
+    const expected = `sync/v2/ops/zen/${envelope.aggregate_id}/${envelope.device_id}/${envelope.sequence}.json`;
+    if (path !== expected) {
+      throw new Error("An aggregate operation does not address its own contents.");
+    }
+
+    let outcome: RemoteAggregateOutcome = {
+      disposition: "deferred",
+      acknowledged: false,
+    };
+    await this.write(async (database) => {
+      const meta = await database.get("meta", "library");
+      if (!meta) throw new Error("This library is still opening.");
+      const known = await database.get("aggregateBatches", path);
+      const replica = await database.get("zenReplicas", envelope.aggregate_id);
+      const now = new Date().toISOString();
+
+      let applied: ZenEnvelopeResult | null = null;
+      if (!known) {
+        applied = JSON.parse(
+          await domainCore.call(
+            "applyZenEnvelope",
+            replica?.snapshot ?? "",
+            meta.peerId,
+            meta.libraryId,
+            path,
+            envelopeJson,
+          ),
+        ) as ZenEnvelopeResult;
+        if (applied.deferred) {
+          outcome = { disposition: "deferred", acknowledged: false };
+          return;
+        }
+      }
+
+      const transaction = database.transaction(
+        [
+          "zenReplicas",
+          "zenDocuments",
+          "aggregateBatches",
+          "aggregateOutbox",
+          "remoteObservations",
+        ],
+        "readwrite",
+      );
+      try {
+        if (applied?.snapshot && applied.summary) {
+          const summary = applied.summary;
+          await transaction.objectStore("zenReplicas").put({
+            documentId: envelope.aggregate_id,
+            snapshot: applied.snapshot,
+            updatedAt: now,
+          });
+          await transaction.objectStore("zenDocuments").put({
+            documentId: envelope.aggregate_id,
+            title: summary.title,
+            byteLength: summary.byte_length,
+            todoTotal: summary.todo_total,
+            todoDone: summary.todo_done,
+            createdAt: summary.created_at,
+            editedAt: now,
+            tags: summary.tags,
+            deleted: summary.lifecycle_state === "deleted",
+          });
+          await transaction.objectStore("aggregateBatches").add({
+            path,
+            aggregateKind: envelope.aggregate_kind,
+            aggregateId: envelope.aggregate_id,
+            deviceId: envelope.device_id,
+            sequence: envelope.sequence,
+            payloadSha256: envelope.payload_sha256,
+            envelopeJson,
+            origin: "remote" as const,
+            appliedAt: now,
+          });
+        }
+        const outbox = transaction.objectStore("aggregateOutbox");
+        const queued = await outbox.get(path);
+        if (queued) await outbox.delete(path);
+        await transaction
+          .objectStore("remoteObservations")
+          .put({ path, blobSha, observedAt: now });
+        await transaction.done;
+        outcome = {
+          disposition: known ? "already_applied" : "applied",
+          acknowledged: queued !== undefined,
+        };
+      } catch (error) {
+        abortTransaction(transaction);
+        throw error;
+      }
+    });
+    if (outcome.disposition !== "deferred") {
+      this.channel.postMessage({ type: "changed" });
+      await this.load();
+    }
+    return outcome;
+  }
+
   async checkpointCandidate(
     force = false,
   ): Promise<BrowserCheckpointCandidate | null> {
@@ -997,13 +1172,16 @@ class LibraryRepository {
         this.emit();
         return;
       }
-      const [items, outbox] = await Promise.all([
+      const [items, outbox, queuedDocuments] = await Promise.all([
         database.getAll("items"),
         database.getAll("outbox"),
+        database.count("aggregateOutbox"),
       ]);
       items.sort(compareItems);
       const pendingChanges = materializePendingChanges(outbox, items);
-      const pendingCount = pendingChanges.length;
+      // Document edits queue separately but are just as unsynchronized, and a
+      // count that ignored them would report "all synced" while they wait.
+      const pendingCount = pendingChanges.length + queuedDocuments;
       this.state = {
         initialized: true,
         loading: false,
@@ -1195,6 +1373,9 @@ class LibraryRepository {
       }
     });
     this.channel.postMessage({ type: "changed" });
+    // Reloads so the pending count includes this edit: a document waiting to
+    // sync must not read as synchronized.
+    await this.load();
   }
 
   private async afterCommit(status: string): Promise<void> {
@@ -1962,6 +2143,26 @@ interface ZenMutationResult {
   envelope: string;
 }
 
+/** Absent snapshot and summary mean the operation was deferred. */
+interface ZenEnvelopeResult {
+  deferred: boolean;
+  snapshot?: string;
+  summary?: ZenSummary;
+}
+
+export interface PendingAggregateOperation {
+  path: string;
+  envelopeJson: string;
+  deviceId: string;
+  sequence: string;
+}
+
+export interface RemoteAggregateOutcome {
+  disposition: "applied" | "already_applied" | "deferred";
+  /** True when this was one of ours coming back — the proof an upload stuck. */
+  acknowledged: boolean;
+}
+
 const OPENING_STATE: LibraryState = {
   initialized: false,
   loading: true,
@@ -2172,6 +2373,33 @@ class LibraryWorkspace {
 
   async deferredSyncCount(): Promise<number> {
     return (await this.instance()).deferredSyncCount();
+  }
+
+  async pendingAggregateOperations(): Promise<PendingAggregateOperation[]> {
+    return (await this.instance()).pendingAggregateOperations();
+  }
+
+  async pendingAggregateCount(): Promise<number> {
+    return (await this.instance()).pendingAggregateCount();
+  }
+
+  async recordAggregateOutboxAttempt(
+    path: string,
+    errorKind: string | null,
+  ): Promise<void> {
+    return (await this.instance()).recordAggregateOutboxAttempt(path, errorKind);
+  }
+
+  async receiveRemoteAggregateOperation(
+    path: string,
+    blobSha: string,
+    envelopeJson: string,
+  ): Promise<RemoteAggregateOutcome> {
+    return (await this.instance()).receiveRemoteAggregateOperation(
+      path,
+      blobSha,
+      envelopeJson,
+    );
   }
 
   async checkpointCandidate(
