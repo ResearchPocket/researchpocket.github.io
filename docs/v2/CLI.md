@@ -663,23 +663,39 @@ Do not parse human output in integrations. The JSON and NDJSON schemas are the
 machine interfaces and require an explicit compatibility plan before a breaking
 change.
 
-## Zen documents (planned, v2.2)
+## Zen documents
 
 [ADR 0011](./ADR_0011_ZEN_DOCUMENTS.md) adds a bounded authored-document
-workspace after the [ADR 0010](./ADR_0010_BOUNDED_ITEM_SCOPED_SYNC.md)
-aggregate migration ships. The target command group is:
+workspace: Markdown limited to 256 KiB, mentioning saved items through
+`research:item/<uuid>` links, and never entering publication artifacts. Item
+capture is unchanged — `research add` still requires an absolute HTTP(S) URL.
 
 ```text
 research zen list
-research zen add [--title <TITLE>]
+research zen add [--title <TITLE>] [--body <TEXT> | --body-file <PATH>] [--tag <TAG>]
 research zen show <DOC_ID>
-research zen edit <DOC_ID>
+research zen edit <DOC_ID> [--title <TITLE> | --clear-title]
+                           [--body <TEXT> | --body-file <PATH>]
+                           [--add-tag <TAG>] [--remove-tag <TAG>]
 research zen delete <DOC_ID>
 research zen restore <DOC_ID>
 ```
 
-Zen commands are a target contract, not part of the shipped surface above.
-Documents are Markdown bounded to 256 KiB, mention saved items through
-`research:item/<uuid>` links, and never enter publication artifacts. Item
-capture is unchanged: `research add` still requires an absolute HTTP(S) URL.
-Machine output will version document records separately from item records.
+A body is prose, and shells mangle prose, so `--body-file` is the primary input
+and `--body-file -` reads standard input:
+
+```console
+$ printf -- '- [x] Ship it\n- [ ] Review #132\n' | research zen add --title Today --body-file -
+```
+
+`--body` remains for one-liners and accepts leading hyphens, since a Markdown
+body usually starts with a list marker.
+
+`research zen list` reads projected metadata only — title, size, todo counts,
+tags, lifecycle — and never loads a body. `research zen show` is the only
+command that does. Todo counts are derived from the body at read time rather
+than stored, so a hand-edited checkbox and a clicked one are indistinguishable.
+
+Machine output versions document records separately from item records:
+`zen_list`, `zen_add`, `zen_show`, `zen_edit`, `zen_delete`, and `zen_restore`
+each carry their own `command` value beside the shared `schema_version`.
