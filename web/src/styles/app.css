@@ -4913,25 +4913,134 @@ kbd {
   width: 18px;
 }
 
-.zen-open {
-  background: transparent;
-  border: 0;
-  color: inherit;
-  font: inherit;
-  padding: 0;
-  text-align: left;
-  cursor: pointer;
+/* The index is a new-tab surface: one centred column, nothing in the margins. */
+.zen-index {
+  display: block;
+  min-block-size: 100%;
 }
 
-.zen-open:hover {
-  color: var(--color-accent);
-  text-decoration: underline;
-  text-decoration-thickness: 2px;
-  text-underline-offset: 0.2em;
+.zen-index-column {
+  inline-size: 100%;
+  margin: 0 auto;
+  max-inline-size: 35rem;
+  padding: 4.5rem 1.5rem 4rem;
 }
 
-.zen-todo-count {
+.zen-clock {
+  align-items: baseline;
+  display: flex;
+  gap: 0.875rem;
+}
+
+.zen-clock-time {
+  font-size: 2rem;
+  font-weight: 750;
+  letter-spacing: -0.025em;
+  line-height: 1;
+}
+
+.zen-clock-date,
+.zen-clock-count {
   color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.zen-clock-count {
+  margin-inline-start: auto;
+}
+
+.zen-omnibar {
+  align-items: center;
+  background: var(--color-surface-raised);
+  border: var(--rule) solid var(--color-border);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 0.625rem;
+  grid-template-columns: auto minmax(0, 1fr);
+  margin-block-start: 1.75rem;
+  padding-inline: 0.875rem;
+}
+
+.zen-omnibar > span {
+  color: var(--color-accent);
+  font-weight: 700;
+}
+
+.zen-omnibar input {
+  background: transparent;
+  block-size: 2.625rem;
+  border: 0;
+  min-inline-size: 0;
+  outline: 0;
+  padding: 0;
+}
+
+.zen-options {
+  border-block-start: var(--rule) solid var(--color-border);
+  list-style: none;
+  margin: 1.5rem 0 0;
+  padding: 0;
+}
+
+.zen-option {
+  align-items: center;
+  border-block-end: var(--rule) solid var(--color-border);
+  cursor: pointer;
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  margin-inline: -0.5rem;
+  min-block-size: 2.75rem;
+  padding-inline: 0.5rem;
+}
+
+.zen-option[aria-selected="true"] {
+  background: var(--color-surface-raised);
+}
+
+.zen-option-title {
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zen-option[aria-selected="true"] .zen-option-title {
+  color: var(--color-accent);
+}
+
+.zen-option-meta {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+
+.zen-option-create {
+  border-block-end-style: dashed;
+  color: var(--color-text-muted);
+}
+
+.zen-option-create .zen-glyph {
+  color: var(--color-accent);
+  font-weight: 700;
+}
+
+.zen-option-create .zen-option-title {
+  font-weight: 400;
+}
+
+.zen-hints {
+  color: var(--color-text-muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: var(--font-size-xs);
+  gap: 0.875rem;
+  margin: 1.75rem 0 0;
+}
+
+.zen-hints b {
+  color: var(--color-text);
 }
 
 .zen-editor {
@@ -5094,12 +5203,6 @@ kbd {
   width: 100%;
 }
 
-.zen-hint {
-  color: var(--color-text-muted);
-  font-size: 12px;
-  margin: 8px 0 0;
-}
-
 .zen-body-input {
   background: transparent;
   border: 0;
@@ -5130,111 +5233,21 @@ kbd {
   padding: 0 20px;
 }
 
-.zen-heading-row {
-  align-items: end;
-  display: flex;
-  gap: var(--space-4);
-  justify-content: space-between;
-}
-
-.zen-title {
-  align-items: baseline;
-  display: flex;
-  gap: 0.75rem;
-  min-width: 0;
-}
-
-.zen-title h2 {
-  font-size: var(--font-size-xl);
-  font-weight: 750;
-  letter-spacing: -0.025em;
-  margin: 0;
-  white-space: nowrap;
-}
-
-.zen-count {
-  color: var(--color-text-muted);
-  font-size: var(--font-size-xs);
-  margin: 0;
-  min-inline-size: 0;
-}
-
-.zen-heading-row select {
-  inline-size: auto;
-}
-
-.zen-list .library-search-row {
-  margin-block-start: 0.625rem;
-}
-
-.zen-rows {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.zen-row {
-  align-items: center;
-  border-bottom: var(--rule) solid var(--color-border);
-  display: grid;
-  gap: var(--space-3);
-  grid-template-columns: 1.125rem minmax(0, 1fr) auto;
-  min-block-size: 3.75rem;
-  padding: var(--space-2) 0;
-}
-
-.zen-row-copy {
-  display: grid;
-  gap: 0.1875rem;
-  min-width: 0;
-}
-
-.zen-row-copy h3 {
-  font-size: var(--font-size-sm);
-  font-weight: 700;
-  margin: 0;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.zen-row-meta {
-  align-items: center;
-  color: var(--color-text-muted);
-  display: flex;
-  flex-wrap: wrap;
-  font-size: var(--font-size-xs);
-  gap: 0.375rem;
-  margin: 0;
-  min-width: 0;
-}
-
-.zen-row-tags {
-  color: var(--color-accent);
-  display: inline-flex;
-  gap: 0.1875rem;
-}
-
-.zen-row-actions {
-  display: flex;
-  gap: 0.1875rem;
-}
-
-.zen-row-actions button {
+.zen-delete {
   background: transparent;
   border: var(--rule) solid transparent;
   border-radius: var(--radius);
   color: var(--color-text-muted);
   cursor: pointer;
-  block-size: 2rem;
-  inline-size: 2rem;
-  padding: 0;
+  font-size: var(--font-size-xs);
+  min-block-size: 1.875rem;
+  padding-inline: 0.5rem;
 }
 
-.zen-row-actions button:hover:not(:disabled) {
+.zen-delete:hover:not(:disabled),
+.zen-delete:focus-visible {
   border-color: var(--color-border);
-  color: var(--color-text);
+  color: var(--color-danger);
 }
 
 /* Task lists render as rows, not bulleted list items with a stray marker. */
@@ -5330,32 +5343,13 @@ button.local-status:focus-visible .status-copy {
     padding: 1.25rem 1rem 2rem;
   }
 
-  .zen-heading-row {
-    align-items: start;
-    flex-direction: column;
-    gap: 0.5rem;
+  /* A phone has no room for the new-tab breathing space, and the hints
+     describe keys it does not have. */
+  .zen-index-column {
+    padding: 1.5rem 1rem 2.5rem;
   }
 
-  .zen-title {
-    flex-wrap: wrap;
-    inline-size: 100%;
-  }
-
-  .zen-list {
-    min-inline-size: 0;
-  }
-
-  /* The library hides quick-add on mobile because the actions bar can save a
-     link. Nothing there creates a document, so this form has to stay. */
-  .zen-add {
-    display: grid;
-  }
-
-  .zen-row {
-    column-gap: 0.5rem;
-  }
-
-  .zen-row-meta {
-    row-gap: 0.125rem;
+  .zen-hints {
+    display: none;
   }
 }

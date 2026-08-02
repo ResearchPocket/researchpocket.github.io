@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -24,164 +24,186 @@ interface ZenWorkspaceProps {
   onCreate(title: string): void;
   onOpen(documentId: string): void;
   onClose(): void;
+  /** Leaves Zen entirely — the index has nothing above it to go back to. */
+  onLeave(): void;
   onDelete(documentId: string): void;
   onSaveTitle(documentId: string, title: string | null): void;
   onSaveBody(documentId: string, body: string): void;
 }
 
-type SortMode = "edited" | "created" | "title";
-
 export function ZenWorkspace(props: ZenWorkspaceProps) {
   if (props.hidden) return null;
-  return props.open ? <ZenEditor {...props} open={props.open} /> : <ZenList {...props} />;
+  return props.open ? (
+    <ZenEditor {...props} open={props.open} />
+  ) : (
+    <ZenIndex {...props} />
+  );
 }
 
-function ZenList({
-  documents,
-  busy,
-  onCreate,
-  onOpen,
-  onDelete,
-}: ZenWorkspaceProps) {
-  const [draftTitle, setDraftTitle] = useState("");
-  const [search, setSearch] = useState("");
-  const [sort, setSort] = useState<SortMode>("edited");
+/**
+ * The Zen index, built as a new-tab surface rather than a list page.
+ *
+ * Everything here is metadata the projection already holds, so the screen costs
+ * nothing to open — no body is read until a document is. The single omnibar is
+ * the whole interaction: typing filters, ⏎ opens, ctrl ⏎ creates. That is one
+ * control instead of a create field, a search field, and a sort menu, and it is
+ * the reason this works unchanged on a phone.
+ */
+function ZenIndex({ documents, busy, onCreate, onOpen, onLeave }: ZenWorkspaceProps) {
+  const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState(0);
+  const now = useClock();
+  const omnibar = useRef<HTMLInputElement>(null);
+  const section = useRef<HTMLElement>(null);
 
-  const visible = useMemo(() => {
-    const needle = search.trim().toLowerCase();
-    const matched = needle
-      ? documents.filter((document) =>
-          (document.title ?? "").toLowerCase().includes(needle),
-        )
-      : documents;
-    const ordered = [...matched];
-    if (sort === "created") ordered.sort((left, right) => right.createdAt - left.createdAt);
-    if (sort === "title") {
-      ordered.sort((left, right) =>
-        (left.title ?? "").localeCompare(right.title ?? ""),
-      );
+  const matches = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    const live = documents.filter((document) => !document.deleted);
+    if (!needle) return live;
+    return live.filter((document) =>
+      (document.title ?? "").toLowerCase().includes(needle),
+    );
+  }, [documents, query]);
+
+  // The trailing "New document" row is the last stop, so a query that matches
+  // nothing lands on it and ⏎ creates without a second keystroke.
+  const createRow = matches.length;
+  const active = Math.min(selected, createRow);
+
+  useEffect(() => setSelected(0), [query]);
+
+  useEffect(() => {
+    // Pointer-only: on a phone this would raise the keyboard over the list the
+    // person came to read.
+    if (window.matchMedia("(hover: hover)").matches) omnibar.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      // Scoped to focus inside Zen so this never fights the command palette.
+      if (!section.current?.contains(event.target as Node)) return;
+      onLeave();
     }
-    return ordered;
-  }, [documents, search, sort]);
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [onLeave]);
+
+  function create() {
+    onCreate(query.trim());
+    setQuery("");
+  }
+
+  function handleKey(event: React.KeyboardEvent) {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setSelected(active === createRow ? 0 : active + 1);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setSelected(active === 0 ? createRow : active - 1);
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      if (busy) return;
+      const target = matches[active];
+      if (event.ctrlKey || event.metaKey || !target) create();
+      else onOpen(target.documentId);
+    }
+  }
 
   return (
-    <section aria-labelledby="zen-heading" className="library-section zen-list" id="zen">
-      <div className="zen-heading-row">
-        <div className="zen-title">
-          <h2 id="zen-heading">Zen</h2>
-          <p className="zen-count">
+    <section aria-labelledby="zen-heading" className="zen-index" id="zen" ref={section}>
+      <div className="zen-index-column">
+        <div className="zen-clock">
+          <span className="zen-clock-time">{formatClock(now)}</span>
+          <span className="zen-clock-date">{formatToday(now)}</span>
+          <span className="zen-clock-count">
             {documents.length} {documents.length === 1 ? "document" : "documents"}
-          </p>
+          </span>
         </div>
-        <select
-          aria-label="Sort documents"
-          onChange={(event) => setSort(event.target.value as SortMode)}
-          value={sort}
-        >
-          <option value="edited">edited ↓</option>
-          <option value="created">created ↓</option>
-          <option value="title">title A–Z</option>
-        </select>
-      </div>
 
-      <form
-        className="quick-add zen-add"
-        onSubmit={(event) => {
-          event.preventDefault();
-          onCreate(draftTitle.trim());
-          setDraftTitle("");
-        }}
-      >
-        <span aria-hidden="true">+</span>
-        <input
-          aria-label="New document title"
-          disabled={busy}
-          onChange={(event) => setDraftTitle(event.target.value)}
-          placeholder="New document"
-          type="text"
-          value={draftTitle}
-        />
-      </form>
+        <h2 className="sr-only" id="zen-heading">
+          Zen
+        </h2>
 
-      <div className="library-search-row">
-        <label className="library-search zen-search">
+        <div className="zen-omnibar">
+          <span aria-hidden="true">&gt;</span>
           <input
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search document titles"
-            type="search"
-            value={search}
+            aria-activedescendant={`zen-option-${active}`}
+            aria-controls="zen-options"
+            aria-expanded="true"
+            aria-label="Open or create a document"
+            autoComplete="off"
+            disabled={busy}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={handleKey}
+            placeholder="Open or create a document…"
+            ref={omnibar}
+            role="combobox"
+            type="text"
+            value={query}
           />
-        </label>
-      </div>
+        </div>
 
-      {visible.length === 0 ? (
-        <p className="library-empty">
-          No documents yet. Prose, lists, and todos live here — saves stay in the library.
-        </p>
-      ) : (
-        <ol className="zen-rows">
-          {visible.map((document) => (
-            <li key={document.documentId}>
-              <article className="zen-row">
-                <span aria-hidden="true" className="zen-glyph">
-                  ≡
-                </span>
-                <div className="zen-row-copy">
-                  <h3>
-                    <button
-                      className="zen-open"
-                      onClick={() => onOpen(document.documentId)}
-                      type="button"
-                    >
-                      {document.title?.trim() || "Untitled document"}
-                    </button>
-                  </h3>
-                  <p className="zen-row-meta">
-                    <span>Edited {formatEdited(document.editedAt)}</span>
-                    <span aria-hidden="true">·</span>
-                    <span>{formatBytes(document.byteLength)}</span>
-                    {document.todoTotal > 0 && (
-                      <>
-                        <span aria-hidden="true">·</span>
-                        <span className="zen-todo-count">
-                          {document.todoDone}/{document.todoTotal} todos
-                        </span>
-                      </>
-                    )}
-                    {document.tags.length > 0 && (
-                      <span className="zen-row-tags">
-                        {document.tags.map((tag) => (
-                          <span key={tag}>#{tag}</span>
-                        ))}
-                      </span>
-                    )}
-                  </p>
-                </div>
-                <div className="zen-row-actions">
-                  <button
-                    aria-label={`Edit ${document.title ?? "document"}`}
-                    disabled={busy}
-                    onClick={() => onOpen(document.documentId)}
-                    title="Edit markdown"
-                    type="button"
-                  >
-                    ✎
-                  </button>
-                  <button
-                    aria-label={`Delete ${document.title ?? "document"}`}
-                    disabled={busy}
-                    onClick={() => onDelete(document.documentId)}
-                    title="Delete"
-                    type="button"
-                  >
-                    ⌫
-                  </button>
-                </div>
-              </article>
+        <ol className="zen-options" id="zen-options" role="listbox">
+          {matches.map((document, index) => (
+            <li
+              aria-selected={index === active}
+              className="zen-option"
+              id={`zen-option-${index}`}
+              key={document.documentId}
+              onClick={() => onOpen(document.documentId)}
+              onMouseEnter={() => setSelected(index)}
+              role="option"
+            >
+              <span aria-hidden="true" className="zen-glyph">
+                ≡
+              </span>
+              <span className="zen-option-title">
+                {document.title?.trim() || "Untitled document"}
+              </span>
+              <span className="zen-option-meta">
+                {document.todoTotal > 0 && (
+                  <>
+                    {document.todoDone}/{document.todoTotal}
+                    <span aria-hidden="true"> · </span>
+                  </>
+                )}
+                {formatEdited(document.editedAt)}
+              </span>
             </li>
           ))}
+          <li
+            aria-selected={active === createRow}
+            className="zen-option zen-option-create"
+            id={`zen-option-${createRow}`}
+            onClick={() => !busy && create()}
+            onMouseEnter={() => setSelected(createRow)}
+            role="option"
+          >
+            <span aria-hidden="true" className="zen-glyph">
+              +
+            </span>
+            <span className="zen-option-title">
+              {query.trim() ? `New document — ${query.trim()}` : "New document"}
+            </span>
+            <span className="zen-option-meta">
+              <b>ctrl ⏎</b>
+            </span>
+          </li>
         </ol>
-      )}
+
+        <p className="zen-hints">
+          <span>
+            <b>⏎</b> open
+          </span>
+          <span>
+            <b>↑↓</b> select
+          </span>
+          <span>
+            <b>esc</b> library
+          </span>
+        </p>
+      </div>
     </section>
   );
 }
@@ -191,6 +213,7 @@ function ZenEditor({
   busy,
   resolveMention,
   onClose,
+  onDelete,
   onSaveTitle,
   onSaveBody,
 }: ZenWorkspaceProps & { open: { documentId: string; view: ZenDocumentView } }) {
@@ -199,8 +222,20 @@ function ZenEditor({
   );
   const [draft, setDraft] = useState(open.view.body);
   const [title, setTitle] = useState(open.view.title.value ?? "");
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const byteLength = new TextEncoder().encode(draft).length;
   const overBound = byteLength > MAX_BODY_BYTES;
+  const section = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      if (!section.current?.contains(event.target as Node)) return;
+      onClose();
+    }
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [onClose]);
 
   /**
    * A checkbox toggle rewrites one line, which the domain turns into a
@@ -222,7 +257,12 @@ function ZenEditor({
   }
 
   return (
-    <section aria-labelledby="zen-doc-heading" className="zen-editor" id="zen-document">
+    <section
+      aria-labelledby="zen-doc-heading"
+      className="zen-editor"
+      id="zen-document"
+      ref={section}
+    >
       <div className="zen-toolbar">
         <nav aria-label="Breadcrumb" className="zen-breadcrumb">
           <button onClick={onClose} type="button">
@@ -255,6 +295,20 @@ function ZenEditor({
             view
           </button>
         </div>
+        {/* Deleting belongs to the open document rather than a row in a list:
+            it is the one place the thing being destroyed is fully visible. */}
+        <button
+          className="zen-delete"
+          disabled={busy}
+          onBlur={() => setConfirmingDelete(false)}
+          onClick={() => {
+            if (!confirmingDelete) setConfirmingDelete(true);
+            else onDelete(open.documentId);
+          }}
+          type="button"
+        >
+          {confirmingDelete ? "delete?" : "⌫"}
+        </button>
       </div>
 
       <div className="zen-canvas">
@@ -316,10 +370,8 @@ function ZenEditor({
         <span className="zen-footer-desktop">
           <b>esc</b> close
         </span>
-        <span className="zen-footer-desktop">
-          autosaves locally · durable before sync reports it
-        </span>
-        <span className="zen-footer-mobile">saved locally</span>
+        <span className="zen-footer-desktop">saves as you go</span>
+        <span className="zen-footer-mobile">saved</span>
       </footer>
     </section>
   );
@@ -411,6 +463,28 @@ function ZenBody({
 }
 
 const MENTION_PREFIX = "research:item/";
+
+/** Minute-resolution clock — the surface shows no seconds, so none are read. */
+function useClock(): Date {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  return now;
+}
+
+function formatClock(now: Date): string {
+  return now.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+}
+
+function formatToday(now: Date): string {
+  return now.toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "long",
+    weekday: "long",
+  });
+}
 
 function hostname(url: string): string {
   try {
