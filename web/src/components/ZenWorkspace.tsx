@@ -33,8 +33,10 @@ interface ZenWorkspaceProps {
 
 export function ZenWorkspace(props: ZenWorkspaceProps) {
   if (props.hidden) return null;
+  // Keyed by document so switching documents starts a fresh editor rather than
+  // carrying the previous one's unsaved title and body across.
   return props.open ? (
-    <ZenEditor {...props} open={props.open} />
+    <ZenEditor {...props} key={props.open.documentId} open={props.open} />
   ) : (
     <ZenIndex {...props} />
   );
@@ -258,7 +260,7 @@ function ZenEditor({
 
   return (
     <section
-      aria-labelledby="zen-doc-heading"
+      aria-label="Zen document"
       className="zen-editor"
       id="zen-document"
       ref={section}
@@ -312,55 +314,56 @@ function ZenEditor({
       </div>
 
       <div className="zen-canvas">
-        {mode === "view" ? (
-          <article className="zen-reader">
-            <h1 id="zen-doc-heading">
-              {open.view.title.value?.trim() || "Untitled document"}
-            </h1>
-            {open.view.tags.length > 0 && (
-              <p className="zen-tags">
-                {open.view.tags.map((tag) => (
-                  <span key={tag}>#{tag}</span>
-                ))}
-              </p>
-            )}
+        <div className="zen-page">
+          {/* The title sits outside the mode switch. It is one line, it is never
+              Markdown, and hiding it behind edit mode was the only reason it
+              could not be changed while reading. */}
+          <input
+            aria-label="Document title"
+            className="zen-title-input"
+            disabled={busy}
+            onBlur={() => onSaveTitle(open.documentId, title.trim() || null)}
+            onChange={(event) => setTitle(event.target.value)}
+            placeholder="Untitled document"
+            type="text"
+            value={title}
+          />
+          {open.view.tags.length > 0 && (
+            <p className="zen-tags">
+              {open.view.tags.map((tag) => (
+                <span key={tag}>#{tag}</span>
+              ))}
+            </p>
+          )}
+          {mode === "view" ? (
             <ZenBody
               body={open.view.body}
               onToggleTodo={toggleTodo}
               resolveMention={resolveMention}
             />
-          </article>
-        ) : (
-          <div className="zen-edit">
-            <input
-              aria-label="Document title"
-              className="zen-title-input"
-              disabled={busy}
-              onBlur={() => onSaveTitle(open.documentId, title.trim() || null)}
-              onChange={(event) => setTitle(event.target.value)}
-              type="text"
-              value={title}
-            />
-            <textarea
-              aria-label="Document body"
-              className="zen-body-input"
-              onBlur={() => {
-                if (!overBound && draft !== open.view.body) {
-                  onSaveBody(open.documentId, draft);
-                }
-              }}
-              onChange={(event) => setDraft(event.target.value)}
-              spellCheck={false}
-              value={draft}
-            />
-            {overBound && (
-              <p className="zen-error" role="alert">
-                This document is over the {formatBytes(MAX_BODY_BYTES)} bound and will not
-                save until it is shorter.
-              </p>
-            )}
-          </div>
-        )}
+          ) : (
+            <>
+              <textarea
+                aria-label="Document body"
+                className="zen-body-input"
+                onBlur={() => {
+                  if (!overBound && draft !== open.view.body) {
+                    onSaveBody(open.documentId, draft);
+                  }
+                }}
+                onChange={(event) => setDraft(event.target.value)}
+                spellCheck={false}
+                value={draft}
+              />
+              {overBound && (
+                <p className="zen-error" role="alert">
+                  This document is over the {formatBytes(MAX_BODY_BYTES)} bound and will
+                  not save until it is shorter.
+                </p>
+              )}
+            </>
+          )}
+        </div>
       </div>
 
       <footer className="zen-footer">

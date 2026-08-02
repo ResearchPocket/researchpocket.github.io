@@ -5126,18 +5126,10 @@ kbd {
   overflow: auto;
 }
 
-.zen-reader,
-.zen-edit {
+.zen-page {
   margin: 0 auto;
   max-width: 760px;
   padding: 36px 24px 64px;
-}
-
-.zen-reader h1 {
-  font-size: 26px;
-  letter-spacing: -0.02em;
-  line-height: 1.2;
-  margin: 0;
 }
 
 .zen-tags {
@@ -5194,13 +5186,22 @@ kbd {
 .zen-title-input {
   background: transparent;
   border: 0;
+  border-block-end: var(--rule) solid transparent;
   color: var(--color-text);
   font-size: 26px;
   font-weight: 700;
   letter-spacing: -0.02em;
+  line-height: 1.2;
   outline: 0;
   padding: 0;
   width: 100%;
+}
+
+/* The title is always editable, so it has to look reachable without shouting
+   about it while the document is being read. */
+.zen-title-input:hover,
+.zen-title-input:focus {
+  border-block-end-color: var(--color-border);
 }
 
 .zen-body-input {
@@ -5338,8 +5339,7 @@ button.local-status:focus-visible .status-copy {
     padding: 0 1rem;
   }
 
-  .zen-reader,
-  .zen-edit {
+  .zen-page {
     padding: 1.25rem 1rem 2rem;
   }
 
