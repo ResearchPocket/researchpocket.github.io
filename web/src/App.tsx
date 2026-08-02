@@ -483,8 +483,7 @@ export function App() {
   }
 
   function navigateToView(nextView: WorkspaceView) {
-    const hash = nextView === "library" ? "" : `#${nextView}`;
-    const nextUrl = `${window.location.pathname}${window.location.search}${hash}`;
+    const nextUrl = `${window.location.pathname}${window.location.search}${hashForView(nextView)}`;
     const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
     if (nextUrl !== currentUrl) {
       window.history.pushState(window.history.state, "", nextUrl);
@@ -732,7 +731,7 @@ export function App() {
     window.history.replaceState(
       window.history.state,
       "",
-      `${window.location.pathname}${window.location.search}`,
+      `${window.location.pathname}${window.location.search}${hashForView(view)}`,
     );
     setReaderItem(null);
   }
@@ -3386,14 +3385,20 @@ function pluralize(count: number, noun: string) {
 }
 
 function readWorkspaceView(): WorkspaceView {
-  if (
-    window.location.hash === "#sync" ||
-    window.location.hash === "#restore"
-  ) {
-    return "sync";
-  }
-  if (window.location.hash === "#zen") return "zen";
-  return window.location.hash === "#settings" ? "settings" : "library";
+  const hash = window.location.hash;
+  if (hash === "#sync" || hash === "#restore") return "sync";
+  if (hash === "#settings") return "settings";
+  // The reader is a library surface, so a deep-linked item closes back into the
+  // library rather than into the default workspace.
+  if (hash === "#library" || hash.startsWith("#item=")) return "library";
+  return "zen";
+}
+
+/**
+ * Zen is the default workspace, so it is the one view that owns the bare URL.
+ */
+function hashForView(target: WorkspaceView) {
+  return target === "zen" ? "" : `#${target}`;
 }
 
 function readDensityPreference(): Density {
