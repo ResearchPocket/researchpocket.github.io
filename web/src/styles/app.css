@@ -326,6 +326,13 @@
   display: flex;
 }
 
+.masthead-lead {
+  align-items: center;
+  display: flex;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
 .brand-lockup {
   background: transparent;
   border: 0;
@@ -334,6 +341,25 @@
   min-height: 0;
   padding: 0;
   text-decoration: none;
+}
+
+/* The way out of a pushed screen. A wide window keeps the surrounding chrome,
+   so the brand slot only has to carry this on a phone. */
+.masthead-back,
+.brand-view {
+  display: none;
+}
+
+.masthead-back {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--color-text-soft);
+  font-size: var(--font-size-sm);
+  font-weight: 750;
+  gap: var(--space-2);
+  min-height: 2.75rem;
+  padding: 0 var(--space-3);
 }
 
 .brand-mark,
@@ -364,10 +390,12 @@
   margin: 0;
 }
 
-.brand-name {
+.brand-name,
+.brand-view {
   font-size: var(--font-size-md);
   font-weight: 800;
   line-height: var(--line-height-tight);
+  margin: 0;
 }
 
 .brand-context {
@@ -390,7 +418,7 @@
 }
 
 .local-status {
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   font-size: var(--font-size-xs);
   gap: var(--space-2);
   justify-content: flex-end;
@@ -400,8 +428,47 @@
 
 .status-dot {
   background: var(--color-accent);
+  flex: 0 0 auto;
   height: 0.5rem;
   width: 0.5rem;
+}
+
+/* Queued work is the state worth interrupting for, so it takes the brighter
+   dot and the stronger edge. */
+.local-status[data-pending="true"] .status-dot {
+  background: var(--color-accent-strong);
+}
+
+/* The one route into Sync from any view. A bare dot and a word read as a
+   readout, so it takes a chip's outline to look like the control it is —
+   at every width, not only where the rail is gone. */
+button.local-status {
+  background: transparent;
+  border: var(--rule) solid var(--color-border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  min-block-size: 2rem;
+  padding-inline: 0.5rem;
+}
+
+button.local-status[data-pending="true"] {
+  border-color: var(--color-border-strong);
+}
+
+button.local-status:hover,
+button.local-status:focus-visible {
+  border-color: var(--color-accent-strong);
+}
+
+button.local-status:hover .status-copy,
+button.local-status:focus-visible .status-copy {
+  color: var(--color-text);
+}
+
+/* Desktop shows the whole status sentence, so the short reading would only
+   repeat it. */
+.status-chip {
+  display: none;
 }
 
 .workspace-nav {
@@ -796,15 +863,6 @@ footer,
   font-size: var(--font-size-xs);
 }
 
-.library-tools {
-  align-items: center;
-  display: grid;
-  gap: var(--space-2);
-  grid-template-columns: minmax(16rem, 1fr) auto;
-  margin: var(--space-5) 0 var(--space-3);
-}
-
-.filter-toggle,
 .filter-reset {
   background: transparent;
   border: var(--rule) solid var(--color-border-strong);
@@ -813,12 +871,6 @@ footer,
   font-size: var(--font-size-sm);
   font-weight: 750;
   padding: 0 var(--space-3);
-}
-
-.filter-toggle[aria-expanded="true"] {
-  background: var(--color-accent-soft);
-  border-color: var(--color-accent);
-  color: var(--color-accent-strong);
 }
 
 .library-filters {
@@ -938,23 +990,24 @@ footer,
   text-align: right;
 }
 
-.search-control {
+/* One field for search and for saving. It is the widest control in the view
+   because it is the only one most sessions touch. */
+.omnibar {
   align-items: center;
   background: var(--color-surface-raised);
   border: var(--rule) solid var(--color-border-strong);
   border-radius: var(--radius);
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  max-width: var(--measure);
   min-height: var(--control-height);
 }
 
-.search-control:focus-within {
+.omnibar:focus-within {
   outline: 0.1875rem solid var(--color-focus);
   outline-offset: 0.1875rem;
 }
 
-.search-control input {
+.omnibar input {
   background: transparent;
   border: 0;
   min-width: 0;
@@ -962,8 +1015,22 @@ footer,
   padding-inline: var(--space-2);
 }
 
-.search-control input::-webkit-search-cancel-button {
+.omnibar input::-webkit-search-cancel-button {
   display: none;
+}
+
+.omnibar-hint,
+.omnibar-key {
+  color: var(--color-text-muted);
+  flex: 0 0 auto;
+  font-size: var(--font-size-xs);
+  margin-right: var(--space-3);
+  white-space: nowrap;
+}
+
+/* The field changes what ⏎ does, so it says so before the key is pressed. */
+.omnibar-hint {
+  color: var(--color-accent-strong);
 }
 
 .search-glyph {
@@ -1088,18 +1155,27 @@ footer,
 }
 
 .item-card h3 {
+  align-items: baseline;
+  display: flex;
   font-size: var(--font-size-md);
   font-weight: 750;
+  gap: 0.4375rem;
   margin: 0;
   min-width: 0;
 }
 
 .item-card h3 a,
 .item-card h3 > span {
-  display: block;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.item-star {
+  color: var(--color-accent-strong);
+  flex: 0 0 auto;
+  font-size: var(--font-size-xs);
 }
 
 .item-card-edit-trigger {
@@ -1134,8 +1210,7 @@ footer,
   outline-offset: -0.1875rem;
 }
 
-.item-meta,
-.item-preview {
+.item-meta {
   color: var(--color-text-muted);
   font-size: var(--font-size-xs);
   line-height: var(--line-height-tight);
@@ -1206,6 +1281,55 @@ footer,
   gap: var(--space-1);
   position: relative;
   z-index: 2;
+}
+
+.item-menu {
+  position: relative;
+}
+
+/* Everything the resting row no longer shows. It is a short list, so it sits
+   against the trigger rather than borrowing a dialog. Placed against the
+   viewport because the rows themselves are paint-contained. */
+.item-menu-list {
+  background: var(--color-surface-raised);
+  border: var(--rule) solid var(--color-border-strong);
+  border-radius: var(--radius);
+  display: grid;
+  min-width: 11rem;
+  padding: var(--space-1) 0;
+  position: fixed;
+  z-index: 12;
+}
+
+.item-menu-list button {
+  background: transparent;
+  border: 0;
+  color: var(--color-text-soft);
+  display: grid;
+  font-size: var(--font-size-sm);
+  gap: var(--space-3);
+  grid-template-columns: 1rem minmax(0, 1fr);
+  min-height: 2.25rem;
+  padding: 0 var(--space-4);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.item-menu-list button:focus-visible {
+  background: var(--color-accent-soft);
+  color: var(--color-text);
+  outline-offset: -0.1875rem;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .item-menu-list button:hover {
+    background: var(--color-accent-soft);
+    color: var(--color-text);
+  }
+}
+
+.item-menu-list .item-menu-danger {
+  color: var(--color-danger);
 }
 
 .icon-button {
@@ -1698,10 +1822,6 @@ footer {
     grid-template-columns: 1fr;
   }
 
-  .library-tools {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-
   .sync-form .field,
   .capture-form .field {
     grid-template-columns: 1fr;
@@ -1921,6 +2041,7 @@ footer {
     .text-button,
     .close-button,
     .command-trigger,
+    .local-status,
     .search-clear,
     .tag-filter-options button,
     .tag-suggestions button,
@@ -1932,12 +2053,14 @@ footer {
     .rail-tag-list button,
     .rail-utilities button,
     .rail-heading button,
-    .density-controls button,
     .command-results button,
     .reader-list > header button,
     .reader-list li button,
     .reader-meta button,
     .reader-markdown-image-consent button,
+    .reader-mobile-footer button,
+    .item-menu-list button,
+    .masthead-back,
     .mobile-tag-filter-trigger
   ):active:not(:disabled):not([aria-disabled="true"]):not([aria-busy="true"]) {
   background: var(--color-control-pressed);
@@ -1948,7 +2071,7 @@ footer {
 .app-shell
   :where(
     .primary-button,
-    .mobile-filter-heading button
+    .filter-heading button
   ):active:not(:disabled):not([aria-disabled="true"]):not([aria-busy="true"]) {
   background: var(--color-control-primary-pressed);
   border-color: var(--color-control-primary-pressed);
@@ -1968,7 +2091,7 @@ footer {
   .secondary-button,
   .command-trigger,
   .mobile-tag-filter-trigger,
-  .mobile-filter-heading button,
+  .filter-heading button,
   .reader-markdown-image-consent button,
   .reader-image-viewer-close,
   .onboarding-choice
@@ -1983,7 +2106,7 @@ footer {
   .secondary-button,
   .command-trigger,
   .mobile-tag-filter-trigger,
-  .mobile-filter-heading button,
+  .filter-heading button,
   .reader-markdown-image-consent button,
   .reader-image-viewer-close,
   .onboarding-choice
@@ -2001,7 +2124,7 @@ footer {
   .secondary-button,
   .command-trigger,
   .mobile-tag-filter-trigger,
-  .mobile-filter-heading button,
+  .filter-heading button,
   .reader-markdown-image-consent button,
   .reader-image-viewer-close,
   .onboarding-choice
@@ -2012,7 +2135,7 @@ footer {
 }
 
 .primary-button,
-.mobile-filter-heading button {
+.filter-heading button {
   --control-edge-color: var(--color-inverse);
 }
 
@@ -2038,7 +2161,6 @@ footer {
 }
 
 .masthead-actions,
-.density-controls,
 .library-title,
 .reader-meta,
 .reader-meta > div,
@@ -2097,8 +2219,7 @@ kbd {
   display: none;
 }
 
-.mobile-tag-filter-trigger,
-.mobile-filter-heading {
+.mobile-tag-filter-trigger {
   display: none;
 }
 
@@ -2167,6 +2288,10 @@ kbd {
   font-weight: 400;
 }
 
+.rail-label-narrow {
+  display: none;
+}
+
 .rail-heading {
   align-items: baseline;
   display: flex;
@@ -2231,90 +2356,65 @@ kbd {
   margin: 0;
 }
 
-.density-controls {
-  border: var(--rule) solid var(--color-border);
-  border-radius: var(--radius);
+.sort-control {
   margin-left: auto;
 }
 
-.density-controls button {
-  background: transparent;
-  border: 0;
-  color: var(--color-text-muted);
-  font-size: var(--font-size-xs);
-  font-weight: 700;
-  min-height: 1.875rem;
-  padding: 0 0.625rem;
-}
-
-.density-controls button + button {
-  border-left: var(--rule) solid var(--color-border);
-}
-
-.density-controls button[aria-pressed="true"] {
-  background: var(--color-surface-raised);
-  color: var(--color-accent-strong);
-}
-
-.sort-control {
-  margin-left: 0.75rem;
-}
-
+/* No border: the row already has a heading and a count, and a third boxed
+   control makes a toolbar out of what should read as a caption. */
 .sort-control select {
   background: transparent;
-  border-color: var(--color-border);
-  color: var(--color-text-soft);
+  border-color: transparent;
+  color: var(--color-text-muted);
   font-size: var(--font-size-xs);
   height: 1.95rem;
   min-height: 1.95rem;
+  padding-inline: 0;
   width: auto;
 }
 
-.quick-add {
-  align-items: center;
-  border: var(--rule) dashed var(--color-border-strong);
-  border-radius: var(--radius);
-  display: grid;
-  gap: 0.625rem;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  margin-top: 0.75rem;
-  min-height: 2.75rem;
-  padding: 0 0.75rem;
+.sort-control select:hover,
+.sort-control select:focus-visible {
+  color: var(--color-text-soft);
 }
 
-.quick-add > span:first-child {
-  color: var(--color-accent-strong);
-  font-size: 1rem;
-  font-weight: 700;
+.omnibar {
+  margin: 0.625rem 0 0.75rem;
 }
 
-.quick-add input {
-  background: transparent;
-  border: 0;
+.omnibar input {
   height: 2.625rem;
   min-height: 2.625rem;
-  outline: 0;
-  padding: 0;
-}
-
-.quick-add-hint {
-  color: var(--color-text-muted);
-  font-size: var(--font-size-xs);
-}
-
-.library-tools {
-  grid-template-columns: minmax(12rem, 32rem) auto;
-  margin: 0.625rem 0;
-}
-
-.search-control {
-  background: transparent;
-  border-color: var(--color-border);
 }
 
 .library-filters {
   background: var(--color-surface);
   padding: 0.5rem;
+}
+
+.filter-heading {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--space-3);
+  min-height: 2rem;
+  padding-right: var(--space-2);
+}
+
+.filter-heading strong {
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.filter-heading button {
+  background: var(--color-inverse-surface);
+  border: var(--rule) solid var(--color-inverse-surface);
+  border-radius: var(--radius);
+  color: var(--color-inverse);
+  font-size: var(--font-size-xs);
+  min-height: 1.75rem;
+  padding: 0 0.625rem;
 }
 
 .result-count {
@@ -2326,59 +2426,33 @@ kbd {
 }
 
 .item-card {
-  gap: 0.75rem;
-  grid-template-columns: 1.125rem minmax(0, 1fr) auto;
-  min-block-size: 3.75rem;
-  padding: 0.625rem 0 0.625rem 0.125rem;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-block-size: 3.5rem;
+  padding: 0.5625rem 0.25rem;
 }
 
 .item-list-compact .item-card {
-  min-block-size: 2.875rem;
-  padding-block: 0.375rem;
-}
-
-.item-list-compact .item-preview {
-  display: none;
+  min-block-size: 2.75rem;
+  padding-block: 0.3125rem;
 }
 
 .item-card-favorite::before {
   display: none;
 }
 
-.item-favorite {
-  background: transparent;
-  border: 0;
-  color: var(--color-favorite-muted);
-  font-size: 0.875rem;
-  min-height: 2rem;
-  padding: 0;
-  position: relative;
-  width: 1.125rem;
-  z-index: 3;
-}
-
-.item-favorite[aria-pressed="true"] {
-  color: var(--color-accent-strong);
-}
-
 .item-card h3 {
   font-size: 0.875rem;
 }
 
-.item-meta {
-  order: 2;
-}
-
-.item-preview {
-  color: var(--color-text-soft);
-  order: 1;
-}
-
+/* The row is quiet until it is pointed at. Focus counts as pointing, so the
+   keyboard reaches the same two controls the mouse does. */
 .item-row-actions {
-  opacity: 0.45;
+  opacity: 0;
 }
 
-.item-card:focus-within .item-row-actions {
+.item-card:focus-within .item-row-actions,
+.item-row-actions:has(.item-menu-list) {
   opacity: 1;
 }
 
@@ -2990,7 +3064,8 @@ kbd {
   color: var(--color-text-muted);
 }
 
-.reader-mobile-header {
+.reader-mobile-header,
+.reader-mobile-footer {
   display: none;
 }
 
@@ -3073,32 +3148,34 @@ kbd {
     padding: 0 1rem;
   }
 
-  .brand-name::after {
-    content: "Library";
-  }
-
-  .brand-name {
-    font-size: 0;
-  }
-
-  .brand-name::after {
-    font-size: var(--font-size-md);
-  }
-
+  /* The product name is the one thing a phone already knows; which screen it
+     is on is the thing it has to be told. */
+  .brand-name,
   .command-trigger,
   .brand-context,
-  .status-copy {
+  .status-copy,
+  .status-label {
     display: none;
   }
 
-  .status-label {
-    display: inline;
+  .brand-view {
+    display: block;
+    white-space: nowrap;
   }
 
   .masthead {
     flex-wrap: nowrap;
     gap: 0.5rem;
     padding-bottom: 0;
+  }
+
+  /* Under a pushed screen the brand slot carries the way back instead. */
+  .masthead-pushed .brand-lockup {
+    display: none;
+  }
+
+  .masthead-pushed .masthead-back {
+    display: inline-flex;
   }
 
   .brand-lockup {
@@ -3124,21 +3201,19 @@ kbd {
     width: 100%;
   }
 
-  /* The only route to Sync on a phone: the rail's utilities are hidden and the
-     actions bar carries saving, not syncing. A bare dot and a word read as a
-     readout, so it takes a chip's outline to look like the control it is. */
   .local-status {
-    border: var(--rule) solid var(--color-border);
-    border-radius: var(--radius);
     flex: 0 0 auto;
     gap: 0.375rem;
-    min-block-size: 2rem;
-    padding-inline: 0.5rem;
   }
 
-  .status-pending {
+  /* The sentence is gone at this width, so the chip carries the state. */
+  .status-chip {
     color: var(--color-text-muted);
     display: inline;
+  }
+
+  .local-status[data-pending="true"] .status-chip {
+    color: var(--color-accent-strong);
   }
 
   .workspace-layout {
@@ -3178,21 +3253,45 @@ kbd {
     overflow: visible;
   }
 
+  /* The groups collapse so their buttons join the one strip. This is what puts
+     Zen and the tags one tap from anywhere instead of behind a bottom bar. */
   .rail-tags {
+    display: contents;
+  }
+
+  .rail-label-wide {
     display: none;
+  }
+
+  .rail-label-narrow {
+    display: inline;
   }
 
   .rail-nav button,
   .rail-tag-list button {
+    background: transparent;
     border: var(--rule) solid var(--color-border);
     border-radius: var(--radius);
+    color: var(--color-text-soft);
     flex: 0 0 auto;
+    font-weight: 400;
     gap: 0.4rem;
     min-height: 2rem;
     padding: 0 0.625rem;
     width: auto;
   }
 
+  /* The chip's whole edge marks the current view; the rail's left bar has no
+     meaning once the buttons are laid out in a row. */
+  .rail-nav button[aria-current="page"],
+  .rail-tag-list button[aria-current="page"] {
+    background: var(--color-surface-raised);
+    border-color: var(--color-border-strong);
+    color: var(--color-accent-strong);
+    font-weight: 700;
+  }
+
+  /* Archive is a destination, not a filter anyone reaches for mid-scroll. */
   .rail-nav button:nth-child(3) {
     display: none;
   }
@@ -3209,9 +3308,19 @@ kbd {
     padding: 0 0.625rem;
   }
 
+  /* A column so the view inside can reach the bottom of the screen. An open
+     document ends in a status footer, and a footer that floats halfway up a
+     tall blank page reads as the end of the content, not the end of the view. */
   #workspace {
+    display: flex;
     flex: 1 1 auto;
+    flex-direction: column;
     overflow: visible;
+  }
+
+  .library-section,
+  .zen-index {
+    flex: 1 1 auto;
   }
 
   .library-section {
@@ -3219,9 +3328,7 @@ kbd {
   }
 
   .library-heading-row,
-  .quick-add,
   .library-filters,
-  .filter-toggle,
   .keyboard-footer {
     display: none;
   }
@@ -3240,16 +3347,15 @@ kbd {
     z-index: 20;
   }
 
-  .mobile-filter-heading {
-    align-items: center;
+  .filter-heading {
     border-bottom: var(--rule) solid var(--color-border-strong);
-    display: flex;
     justify-content: space-between;
     margin-bottom: 0.25rem;
     min-height: 2.75rem;
+    padding-right: 0;
   }
 
-  .mobile-filter-heading button {
+  .filter-heading button {
     background: var(--color-inverse-surface);
     border: var(--rule) solid var(--color-inverse-surface);
     border-radius: var(--radius);
@@ -3290,12 +3396,8 @@ kbd {
     width: 100%;
   }
 
-  .library-tools {
-    display: block;
+  .omnibar {
     margin: 0;
-  }
-
-  .search-control {
     min-height: 2.75rem;
   }
 
@@ -3307,19 +3409,15 @@ kbd {
   .item-card {
     align-items: start;
     gap: 0.5rem;
-    grid-template-columns: 0.875rem minmax(0, 1fr);
-    min-block-size: 4rem;
-    padding: 0.5rem 0;
+    grid-template-columns: minmax(0, 1fr);
+    min-block-size: 2.75rem;
+    padding: 0.625rem 0;
   }
 
+  /* A hover strip has no meaning on a touch screen; opening the save is how
+     everything here is reached. */
   .item-row-actions {
     display: none;
-  }
-
-  .item-favorite {
-    font-size: var(--font-size-xs);
-    min-height: 1.75rem;
-    width: 0.875rem;
   }
 
   .item-card h3 {
@@ -3331,16 +3429,7 @@ kbd {
     flex-wrap: nowrap;
     gap: 0.25rem;
     line-height: 1.2;
-    margin: 0;
-  }
-
-  .item-meta > span:nth-child(2),
-  .item-meta > span:nth-child(3) {
-    display: none;
-  }
-
-  .item-preview {
-    display: block;
+    margin: 0.1875rem 0 0;
   }
 
   .item-row-copy {
@@ -3365,7 +3454,7 @@ kbd {
     display: grid;
     flex: 0 0 auto;
     gap: 0.375rem;
-    grid-template-columns: 1fr auto auto;
+    grid-template-columns: 1fr auto;
     left: 0;
     padding: 0.375rem 0.75rem max(0.5rem, env(safe-area-inset-bottom));
     position: sticky;
@@ -3387,15 +3476,18 @@ kbd {
     max-height: calc(100dvh - 5rem);
   }
 
+  /* An opened save is a pushed screen, not an overlay: the masthead above it
+     stays, carrying the way back and the sync chip, and only the column
+     underneath is replaced. That is the same shell an opened document uses. */
   .reader-view {
-    display: block;
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
     inset: auto;
-    min-height: 100dvh;
+    min-height: 0;
     position: static;
   }
 
-  .app-shell:has(> .reader-view) > .skip-link,
-  .app-shell:has(> .reader-view) > .workspace-chrome,
   .app-shell:has(> .reader-view) > .workspace-layout {
     display: none;
   }
@@ -3405,60 +3497,82 @@ kbd {
   }
 
   .reader-article {
-    min-height: 100dvh;
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
     overflow: visible;
   }
 
   .reader-mobile-header {
     align-items: center;
-    border-bottom: var(--rule) solid var(--color-border);
+    border-bottom: var(--rule) solid var(--color-border-subtle);
     display: flex;
     gap: 0.5rem;
-    min-height: 3.25rem;
-    padding: 0 0.5rem;
+    min-height: 2.75rem;
+    padding: 0 0.5rem 0 1rem;
   }
 
-  .reader-mobile-header button {
+  .reader-mobile-title {
+    flex: 1 1 auto;
+    font-size: var(--font-size-sm);
+    font-weight: 750;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .reader-mobile-header .icon-button {
+    flex: 0 0 auto;
+    height: 2.75rem;
+    min-height: 2.75rem;
+    width: 2.75rem;
+  }
+
+  .reader-mobile-header .icon-button[aria-pressed="true"] {
+    background: transparent;
+    border-color: transparent;
+  }
+
+  .reader-mobile-footer {
+    align-items: center;
+    border-top: var(--rule) solid var(--color-border-subtle);
+    bottom: 0;
+    background: var(--color-canvas);
+    color: var(--color-text-muted);
+    display: flex;
+    font-size: var(--font-size-xs);
+    gap: 0.75rem;
+    margin-top: auto;
+    min-height: 2.75rem;
+    padding: 0 0.75rem env(safe-area-inset-bottom);
+    position: sticky;
+  }
+
+  .reader-mobile-footer > span {
+    margin-right: auto;
+    padding-left: 0.25rem;
+  }
+
+  .reader-mobile-footer button {
     background: transparent;
     border: 0;
-    color: var(--color-text-soft);
-    font-size: 1rem;
-    width: 2.25rem;
-  }
-
-  .reader-mobile-header span {
     color: var(--color-text-muted);
     font-size: var(--font-size-xs);
+    min-height: 2.75rem;
+    padding: 0 0.25rem;
   }
 
   .reader-content {
-    padding: 1.25rem 1.25rem 6rem;
+    flex: 1 1 auto;
+    padding: 1.25rem 1.25rem 2rem;
   }
 
-  .reader-meta > span {
-    display: none;
-  }
-
+  /* Favourite, open, edit and archive all moved into the bars above and below,
+     so the desktop action strip has nothing left to show here. */
   .reader-meta > div {
-    bottom: 0;
-    background: var(--color-canvas);
-    border-top: var(--rule) solid var(--color-border-strong);
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    left: 0;
-    padding: 0.5rem 0.75rem max(1rem, env(safe-area-inset-bottom));
-    position: fixed;
-    right: 0;
-    z-index: 2;
-  }
-
-  .reader-meta button,
-  .reader-meta a {
-    border: var(--rule) solid var(--color-border);
-    font-size: 1.125rem;
-    height: 2.5rem;
-    min-height: 2.5rem;
-    width: auto;
+    display: none;
   }
 
   .reader-content h1 {
@@ -5304,24 +5418,6 @@ kbd {
   margin: 0;
 }
 
-/* The local indicator is the way into sync, so it reads as pressable. */
-button.local-status {
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-  padding: 0;
-}
-
-/* Desktop shows the whole status sentence, so a bare count would repeat it. */
-.status-pending {
-  display: none;
-}
-
-button.local-status:hover .status-copy,
-button.local-status:focus-visible .status-copy {
-  color: var(--color-text);
-}
-
 .zen-footer-mobile {
   display: none;
 }
@@ -5346,10 +5442,11 @@ button.local-status:focus-visible .status-copy {
   }
 
   .zen-footer {
-    /* The status belongs on screen while writing, not below a tall body. The
-       offset clears the actions bar, which is sticky in the same scroller. */
+    /* The status belongs on screen while writing, not below a tall body. An
+       open document is a pushed screen, so there is no actions bar under this
+       one to clear. */
     background: var(--color-canvas);
-    bottom: var(--mobile-actions-size);
+    bottom: 0;
     justify-content: space-between;
     position: sticky;
   }
@@ -5361,6 +5458,17 @@ button.local-status:focus-visible .status-copy {
   .zen-toolbar {
     gap: 0.5rem;
     padding: 0 1rem;
+  }
+
+  /* The masthead above already carries "← Zen"; a second way back in the same
+     corner reads as two different destinations. */
+  .zen-breadcrumb button,
+  .zen-breadcrumb > span[aria-hidden="true"] {
+    display: none;
+  }
+
+  .zen-breadcrumb-current {
+    font-size: var(--font-size-sm);
   }
 
   .zen-page {
