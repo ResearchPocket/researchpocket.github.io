@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   MarkdownDocument,
   type MarkdownImage,
@@ -356,6 +357,28 @@ export function App() {
     window.addEventListener("keydown", handleShortcut);
     return () => window.removeEventListener("keydown", handleShortcut);
   }, [busyAction, undoNotice]);
+
+  // Pasting a URL with nothing focused stages it in the omnibar and puts the
+  // caret there. It stops short of saving: writing an item straight from the
+  // clipboard is not a thing to do without the owner seeing what it was.
+  useEffect(() => {
+    function handlePaste(event: ClipboardEvent) {
+      if (view !== "library") return;
+      if (readerItem || capturing || editingItem || commandOpen) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.matches("input, textarea, select") || target?.isContentEditable) {
+        return;
+      }
+      const pasted = event.clipboardData?.getData("text")?.trim() ?? "";
+      if (!readOmnibarUrl(pasted)) return;
+      event.preventDefault();
+      setQuery(pasted);
+      document.querySelector<HTMLInputElement>("#library-search")?.focus();
+    }
+
+    window.addEventListener("paste", handlePaste);
+    return () => window.removeEventListener("paste", handlePaste);
+  }, [capturing, commandOpen, editingItem, readerItem, view]);
 
   const items = libraryState.items as unknown as LibraryItemView[];
   const activeCount = items.filter((item) => !item.deleted).length;
@@ -832,6 +855,21 @@ export function App() {
   const repositoryError = readStateError(libraryState.error);
   const displayedError = localError ?? repositoryError;
 
+  /**
+   * The two pushed screens — an open document and an open save — share one
+   * shell: the way back sits in the brand slot, the sync chip stays put, and
+   * the content column below is the only thing that differs. On a phone that
+   * back button is the only one there is.
+   */
+  const pushedScreen = readerItem
+    ? { label: "Library", onBack: closeReader }
+    : openZen
+      ? { label: "Zen", onBack: closeZenDocument }
+      : null;
+  // The rail is a library-and-Zen control strip. Elsewhere, and under a pushed
+  // screen, it has nothing to say and an empty strip reads as a fault.
+  const railApplies = (view === "library" || view === "zen") && !pushedScreen;
+
   if (libraryState.loading) {
     return <BootScreen />;
   }
@@ -855,18 +893,33 @@ export function App() {
       </a>
 
       <div className="workspace-chrome">
-        <header className="masthead">
-          <button
-            aria-label={view === "library" ? "ResearchPocket library" : "Back to library"}
-            className="brand-lockup"
-            onClick={() => navigateToView("library")}
-            type="button"
-          >
-            <span aria-hidden="true" className="brand-mark">
-              rp
-            </span>
-            <p className="brand-name">ResearchPocket</p>
-          </button>
+        <header className={`masthead${pushedScreen ? " masthead-pushed" : ""}`}>
+          <div className="masthead-lead">
+            {pushedScreen ? (
+              <button
+                className="masthead-back"
+                onClick={pushedScreen.onBack}
+                type="button"
+              >
+                <span aria-hidden="true">←</span>
+                <span>{pushedScreen.label}</span>
+              </button>
+            ) : null}
+            <button
+              aria-label={view === "library" ? "ResearchPocket library" : "Back to library"}
+              className="brand-lockup"
+              onClick={() => navigateToView("library")}
+              type="button"
+            >
+              <span aria-hidden="true" className="brand-mark">
+                rp
+              </span>
+              <p className="brand-name">ResearchPocket</p>
+              {/* A phone has no room for the product name and every reason to
+                  say which screen it is on, so the two swap places there. */}
+              <p className="brand-view">{formatViewLabel(view)}</p>
+            </button>
+          </div>
 
           <div className="masthead-actions">
             {profiles.length > 1 ? (
@@ -892,24 +945,26 @@ export function App() {
                 </select>
               </div>
             ) : null}
+            {/* The one route to Sync that is on screen from every view, so it
+                carries a chip's outline and says what pressing it does. */}
             <button
-              aria-label={`Sync — ${formatHeaderStatus(libraryState.status, libraryState.pendingCount)}`}
+              aria-label={`Open sync — ${formatHeaderStatus(libraryState.status, libraryState.pendingCount)}`}
               className="local-status"
+              data-pending={libraryState.pendingCount > 0 ? "true" : undefined}
               onClick={() => navigateToView("sync")}
+              title="Open sync"
               type="button"
             >
               <span aria-hidden="true" className="status-dot" />
               <span className="status-label">local</span>
               <span aria-live="polite" className="status-copy" role="status">
-                {formatHeaderStatus(libraryState.status, libraryState.pendingCount)}
+                {formatSyncCopy(libraryState.status, libraryState.pendingCount)}
               </span>
-              {/* The full status sentence does not fit on a phone, so the
-                  pending count stands in for it there. */}
-              {libraryState.pendingCount > 0 ? (
-                <span aria-hidden="true" className="status-pending">
-                  {libraryState.pendingCount}
-                </span>
-              ) : null}
+              {/* The full status sentence does not fit on a phone, so a shorter
+                  reading of the same state stands in for it there. */}
+              <span aria-hidden="true" className="status-chip">
+                {formatSyncChip(libraryState.status, libraryState.pendingCount)}
+              </span>
             </button>
             <button
               className="command-trigger"
@@ -923,7 +978,7 @@ export function App() {
       </div>
 
       <div className="workspace-layout">
-        <aside className={`tag-rail${view === "library" ? "" : " tag-rail-empty"}`}>
+        <aside className={`tag-rail${railApplies ? "" : " tag-rail-empty"}`}>
           <nav aria-label="Library views" className="rail-nav">
             <button
               aria-current={view === "library" && filter === "active" && !favoriteOnly ? "page" : undefined}
@@ -979,19 +1034,34 @@ export function App() {
                 }}
                 type="button"
               >
-                <span>Documents</span>
+                {/* The rail heading says ZEN above it; the chip strip drops
+                    headings, so the chip has to name itself. */}
+                <span className="rail-label-wide">Documents</span>
+                <span className="rail-label-narrow">Zen</span>
                 <small>{zenDocuments.length}</small>
               </button>
             </nav>
           </div>
 
-          {view === "library" && (
-          <>
+          {/* Tags belong to the library, but they stay reachable from Zen: on a
+              phone this strip is the whole navigation, and a filter that
+              disappears when a document opens is a filter nobody trusts. */}
           <div className="rail-tags">
             <div className="rail-heading">
               <p>Tags</p>
-              <button onClick={() => setFiltersOpen(true)} type="button">
-                {hiddenTagCount > 0 ? `+${hiddenTagCount} more` : "manage"}
+              {/* With the omnibar carrying search and saving, this is the way
+                  into the filters the strip has no room for. */}
+              <button
+                aria-controls="library-filters"
+                aria-expanded={filtersOpen}
+                onClick={() => setFiltersOpen((open) => !open)}
+                type="button"
+              >
+                {appliedFilterCount > 0
+                  ? `filters · ${appliedFilterCount}`
+                  : hiddenTagCount > 0
+                    ? `+${hiddenTagCount} more`
+                    : "manage"}
               </button>
             </div>
             <div className="rail-tag-list">
@@ -1015,10 +1085,8 @@ export function App() {
             onClick={() => setFiltersOpen(true)}
             type="button"
           >
-            Tags{selectedTags.length > 0 ? ` · ${selectedTags.length}` : ""}
+            Filters{appliedFilterCount > 0 ? ` · ${appliedFilterCount}` : ""}
           </button>
-          </>
-          )}
 
           <nav aria-label="Workspace utilities" className="rail-utilities">
             <button onClick={() => navigateToView("sync")} type="button">
@@ -1092,10 +1160,9 @@ export function App() {
               </h2>
               <p className="library-count">{pluralize(visibleItems.length, "item")}</p>
             </div>
-            <div className="density-controls" aria-label="List density">
-              <button aria-pressed={density === "compact"} onClick={() => setDensity("compact")} type="button">compact</button>
-              <button aria-pressed={density === "comfortable"} onClick={() => setDensity("comfortable")} type="button">comfortable</button>
-            </div>
+            {/* Density is a preference, not a toolbar decision, so it lives in
+                Settings and this row keeps only the one control that changes
+                what the list is showing. */}
             <label className="sort-control">
               <span className="sr-only">Sort order</span>
               <select onChange={(event) => setSortMode(event.target.value as SortMode)} value={sortMode}>
@@ -1106,51 +1173,15 @@ export function App() {
             </label>
           </div>
 
-          <QuickAdd busy={busyAction !== null} onAdd={addItem} />
-
-          <div className="library-tools">
-            <div className="search-control" role="search">
-              <label className="sr-only" htmlFor="library-search">
-                Search your library
-              </label>
-              <svg aria-hidden="true" className="search-glyph" viewBox="0 0 24 24">
-                <circle cx="10.5" cy="10.5" r="6.5" />
-                <path d="m15.5 15.5 4 4" />
-              </svg>
-              <input
-                autoComplete="off"
-                id="library-search"
-                name="query"
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Title, URL, note, or tag"
-                type="search"
-                value={query}
-              />
-              {query ? (
-                <button
-                  aria-label="Clear search"
-                  className="search-clear"
-                  onClick={() => setQuery("")}
-                  title="Clear search"
-                  type="button"
-                >
-                  <span aria-hidden="true">×</span>
-                </button>
-              ) : null}
-            </div>
-            <button
-              aria-controls="library-filters"
-              aria-expanded={filtersOpen}
-              className="filter-toggle"
-              onClick={() => setFiltersOpen((open) => !open)}
-              type="button"
-            >
-              Filter{appliedFilterCount > 0 ? ` · ${appliedFilterCount}` : ""}
-            </button>
-          </div>
+          <Omnibar
+            busy={busyAction !== null}
+            onAdd={addItem}
+            onQueryChange={setQuery}
+            query={query}
+          />
 
           <div className="library-filters" hidden={!filtersOpen} id="library-filters">
-            <div className="mobile-filter-heading">
+            <div className="filter-heading">
               <strong>Filter library</strong>
               <button onClick={() => setFiltersOpen(false)} type="button">Done</button>
             </div>
@@ -1329,18 +1360,21 @@ export function App() {
               : `Showing ${renderedItems.length.toLocaleString()} of ${pluralize(visibleItems.length, "result")}`}
           </div>
           <footer className="keyboard-footer">
-            <span><b>Ctrl Shift P</b> command</span>
             <span><b>/</b> search</span>
+            <span><b>⌘V</b> save a URL</span>
             <span><b>⏎</b> reader</span>
-            <span><b>↗</b> open</span>
           </footer>
           </section>
         </main>
-        <nav aria-label="Mobile actions" className="mobile-actions">
-          <button className="primary-button" onClick={(event) => openCapture(event.currentTarget)} type="button">＋ Save a link</button>
-          <button className="secondary-button" onClick={() => { setOpenZen(null); navigateToView("zen"); }} type="button">Zen</button>
-          <button className="secondary-button" onClick={() => navigateToView("settings")} type="button">Settings</button>
-        </nav>
+        {/* Zen moved into the chip strip, so this keeps only what the strip and
+            the omnibar cannot carry: an authored capture, and Settings. It is
+            gone entirely under a pushed screen, which has its own footer. */}
+        {pushedScreen ? null : (
+          <nav aria-label="Mobile actions" className="mobile-actions">
+            <button className="primary-button" onClick={(event) => openCapture(event.currentTarget)} type="button">＋ Save a link</button>
+            <button className="secondary-button" onClick={() => navigateToView("settings")} type="button">Settings</button>
+          </nav>
+        )}
       </div>
 
       <div aria-atomic="true" aria-live="polite" className="sr-only">
@@ -2144,44 +2178,88 @@ function TokenFields() {
   );
 }
 
-function QuickAdd({
+/**
+ * One field for the two things a library is asked for: find something, or take
+ * something in. Typing filters as you go; a pasted URL turns the same field
+ * into a save, which is why it replaced a capture form, a search box and a
+ * filter button standing in a row.
+ *
+ * A save needs the scheme. Without it "inkandswitch.com" is indistinguishable
+ * from a search for that host, and guessing wrong writes an item.
+ */
+function Omnibar({
   busy,
   onAdd,
+  onQueryChange,
+  query,
 }: {
   busy: boolean;
   onAdd: (input: AddInput) => Promise<boolean>;
+  onQueryChange: (value: string) => void;
+  query: string;
 }) {
-  const [value, setValue] = useState("");
+  const parsed = readOmnibarUrl(query);
 
   async function submit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
-    const parts = value.trim().split(/\s+/);
-    const url = parts.find((part) => !part.startsWith("#")) ?? "";
-    const tags = parts
-      .filter((part) => part.startsWith("#") && part.length > 1)
-      .map((part) => part.slice(1));
-    if (!url) return;
-    if (await onAdd({ favorite: false, tags, url } as AddInput)) setValue("");
+    if (!parsed) return;
+    if (await onAdd({ favorite: false, tags: parsed.tags, url: parsed.url } as AddInput)) {
+      onQueryChange("");
+    }
   }
 
   return (
-    <form className="quick-add" onSubmit={(event) => void submit(event)}>
-      <span aria-hidden="true">+</span>
-      <label className="sr-only" htmlFor="quick-add-url">Quickly save a URL</label>
+    <form className="omnibar" onSubmit={(event) => void submit(event)} role="search">
+      <label className="sr-only" htmlFor="library-search">
+        Search your library, or paste a URL to save it
+      </label>
+      <svg aria-hidden="true" className="search-glyph" viewBox="0 0 24 24">
+        <circle cx="10.5" cy="10.5" r="6.5" />
+        <path d="m15.5 15.5 4 4" />
+      </svg>
       <input
         autoCapitalize="none"
-        autoComplete="url"
+        autoComplete="off"
         disabled={busy}
-        id="quick-add-url"
-        inputMode="url"
-        onChange={(event) => setValue(event.target.value)}
-        placeholder="Paste or type a URL — ↵ saves it. Add #tags right here."
+        id="library-search"
+        name="query"
+        onChange={(event) => onQueryChange(event.target.value)}
+        placeholder="Search — or paste a URL to save it"
         type="text"
-        value={value}
+        value={query}
       />
-      <span className="quick-add-hint">or ⌘V anywhere</span>
+      {parsed ? (
+        <span className="omnibar-hint">
+          <kbd>↵</kbd> save{parsed.tags.length > 0 ? ` · ${parsed.tags.length} tag${parsed.tags.length === 1 ? "" : "s"}` : ""}
+        </span>
+      ) : query ? (
+        <button
+          aria-label="Clear search"
+          className="search-clear"
+          onClick={() => onQueryChange("")}
+          title="Clear search"
+          type="button"
+        >
+          <span aria-hidden="true">×</span>
+        </button>
+      ) : (
+        <kbd className="omnibar-key">/</kbd>
+      )}
     </form>
   );
+}
+
+/** Reads an omnibar value as a save: one absolute URL plus any `#tags`. */
+function readOmnibarUrl(value: string): { tags: string[]; url: string } | null {
+  const parts = value.trim().split(/\s+/).filter(Boolean);
+  const urls = parts.filter((part) => /^https?:\/\/\S+$/i.test(part));
+  if (urls.length !== 1) return null;
+  const tags = parts
+    .filter((part) => part.startsWith("#") && part.length > 1)
+    .map((part) => part.slice(1));
+  // Anything that is neither the URL nor a tag means this is prose, not a save.
+  if (parts.length !== urls.length + tags.length) return null;
+  return { tags, url: urls[0]! };
 }
 
 interface CommandOption {
@@ -2539,9 +2617,30 @@ function ReaderView({
         <footer><span><b>j/k</b> next</span><span><b>esc</b> back</span></footer>
       </aside>
       <article className="reader-article">
+        {/* The pushed-screen title bar. Back sits in the masthead above it, so
+            this row carries the title and the two things a reader does to a
+            save without leaving it. */}
         <header className="reader-mobile-header">
-          <button aria-label="Back to all saves" onClick={onBack} type="button">←</button>
-          <span>{readHostname(item.url)}</span>
+          <span className="reader-mobile-title">{label}</span>
+          <button
+            aria-label={item.favorite ? "Remove favorite" : "Favorite"}
+            aria-pressed={item.favorite}
+            className="icon-button"
+            disabled={busy}
+            onClick={() => void onFavorite(item)}
+            type="button"
+          >
+            <span aria-hidden="true">★</span>
+          </button>
+          <a
+            aria-label="Open original"
+            className="icon-button"
+            href={item.url}
+            rel="noreferrer"
+            target="_blank"
+          >
+            <span aria-hidden="true">↗</span>
+          </a>
         </header>
         <div className="reader-content">
           <div className="reader-meta">
@@ -2579,6 +2678,25 @@ function ReaderView({
             <p className="reader-source">ResearchPocket keeps the URL and your authored context locally. The original page remains at <a href={item.url} rel="noreferrer" target="_blank">{readHostname(item.url)}</a>.</p>
           </div>
         </div>
+        <footer className="reader-mobile-footer">
+          <span>reader · saved copy</span>
+          <button
+            aria-haspopup="dialog"
+            disabled={busy}
+            onClick={(event) => onEdit(item, event.currentTarget)}
+            type="button"
+          >
+            <span aria-hidden="true">✎</span> edit details
+          </button>
+          <button
+            aria-label="Archive this save"
+            disabled={busy}
+            onClick={() => void onDelete(item).then(onBack)}
+            type="button"
+          >
+            <span aria-hidden="true">⌫</span>
+          </button>
+        </footer>
       </article>
       {expandedImage ? (
         <div
@@ -2907,7 +3025,6 @@ function LibraryItem({
   selectedTags: string[];
 }) {
   const label = item.title?.trim() || item.url;
-  const preview = item.note?.trim() || item.excerpt?.trim();
 
   return (
     <li>
@@ -2916,17 +3033,6 @@ function LibraryItem({
           item.deleted ? " item-card-deleted" : " item-card-editable"
         }${item.favorite ? " item-card-favorite" : ""}`}
       >
-        <button
-          aria-label={item.favorite ? `Remove ${label} from favorites` : `Add ${label} to favorites`}
-          aria-pressed={item.favorite}
-          className="item-favorite"
-          disabled={busy || item.deleted}
-          onClick={() => void onFavorite(item)}
-          title={item.favorite ? "Remove favorite" : "Favorite"}
-          type="button"
-        >
-          <span aria-hidden="true">{item.favorite ? "★" : "·"}</span>
-        </button>
         {!item.deleted ? (
           <button
             aria-label={`Read ${label}${item.favorite ? ", favorite" : ""}`}
@@ -2939,6 +3045,13 @@ function LibraryItem({
         ) : null}
         <div className="item-row-copy">
           <h3>
+            {/* The star reads as a mark on the title rather than a column of
+                its own, which is what let the row lose a whole grid track. */}
+            {item.favorite ? (
+              <span aria-hidden="true" className="item-star">
+                ★
+              </span>
+            ) : null}
             {item.deleted ? (
               <a href={item.url} rel="noreferrer" target="_blank">
                 {label}
@@ -2981,74 +3094,199 @@ function LibraryItem({
               </span>
             ) : null}
           </p>
-          {preview ? (
-            <p className="item-preview">
-              <span className="sr-only">Context: </span>
-              {preview}
-            </p>
-          ) : null}
         </div>
 
+        {/* Two controls carry the row: the one thing that leaves the app, and
+            everything else. Reader is the row itself, so it is not repeated
+            here — it stays in the menu for the keyboard. */}
         <div aria-label={`Actions for ${label}`} className="item-row-actions" role="group">
+          <a
+            aria-label={`Open ${label} in a new tab`}
+            className="icon-button"
+            href={item.url}
+            rel="noreferrer"
+            target="_blank"
+            title="Open in new tab"
+          >
+            <span aria-hidden="true">↗</span>
+          </a>
+          <ItemMenu
+            busy={busy}
+            item={item}
+            label={label}
+            onDelete={onDelete}
+            onEdit={onEdit}
+            onFavorite={onFavorite}
+            onRead={onRead}
+            onRestore={onRestore}
+          />
+        </div>
+      </article>
+    </li>
+  );
+}
+
+/**
+ * The row's second control. Everything that used to sit in a four-icon strip
+ * lives here, which is what let the resting row show two.
+ */
+function ItemMenu({
+  busy,
+  item,
+  label,
+  onDelete,
+  onEdit,
+  onFavorite,
+  onRead,
+  onRestore,
+}: {
+  busy: boolean;
+  item: LibraryItemView;
+  label: string;
+  onDelete: (item: LibraryItemView) => Promise<void>;
+  onEdit: (item: LibraryItemView, opener: HTMLButtonElement) => void;
+  onFavorite: (item: LibraryItemView) => Promise<void>;
+  onRead: (item: LibraryItemView) => void;
+  onRestore: (item: LibraryItemView) => Promise<void>;
+}) {
+  // Rows carry paint containment so a long list stays cheap to scroll, which
+  // no absolutely positioned child can escape. The menu is placed against the
+  // viewport instead, and closes on anything that would move it.
+  const [anchor, setAnchor] = useState<{ right: number; top: number } | null>(
+    null,
+  );
+  const open = anchor !== null;
+  const trigger = useRef<HTMLButtonElement>(null);
+  const wrapper = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function close() {
+      setAnchor(null);
+    }
+    function handlePointer(event: MouseEvent) {
+      const target = event.target as Node;
+      if (wrapper.current?.contains(target)) return;
+      if ((target as HTMLElement).closest?.(".item-menu-list")) return;
+      close();
+    }
+    function handleKey(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      // Stopped here so the same key does not also close the reader behind it.
+      event.stopPropagation();
+      close();
+      trigger.current?.focus();
+    }
+    window.addEventListener("pointerdown", handlePointer);
+    window.addEventListener("keydown", handleKey, true);
+    window.addEventListener("resize", close);
+    window.addEventListener("scroll", close, true);
+    return () => {
+      window.removeEventListener("pointerdown", handlePointer);
+      window.removeEventListener("keydown", handleKey, true);
+      window.removeEventListener("resize", close);
+      window.removeEventListener("scroll", close, true);
+    };
+  }, [open]);
+
+  function run(action: () => void) {
+    setAnchor(null);
+    action();
+  }
+
+  function toggle() {
+    if (open) {
+      setAnchor(null);
+      return;
+    }
+    const rect = trigger.current?.getBoundingClientRect();
+    if (!rect) return;
+    // Rows near the foot of the window have no room beneath them.
+    const dropUp = rect.bottom > window.innerHeight - 12 * 16;
+    setAnchor({
+      right: Math.max(8, window.innerWidth - rect.right),
+      top: dropUp ? rect.top - 4 : rect.bottom + 4,
+    });
+  }
+
+  return (
+    <div className="item-menu" ref={wrapper}>
+      <button
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-label={`More actions for ${label}`}
+        className="icon-button"
+        disabled={busy}
+        onClick={toggle}
+        ref={trigger}
+        title="More"
+        type="button"
+      >
+        <span aria-hidden="true">⋯</span>
+      </button>
+      {anchor ? createPortal(
+        <div
+          className="item-menu-list"
+          role="menu"
+          style={{
+            insetInlineEnd: `${anchor.right}px`,
+            top: `${anchor.top}px`,
+            transform:
+              anchor.top < window.innerHeight / 2 ? undefined : "translateY(-100%)",
+          }}
+        >
           {item.deleted ? (
             <button
-              aria-label={`Restore ${label}`}
-              className="icon-button restore-button"
-              disabled={busy}
-              onClick={() => void onRestore(item)}
-              title="Restore"
+              onClick={() => run(() => void onRestore(item))}
+              role="menuitem"
               type="button"
             >
-              <span aria-hidden="true">↶</span>
+              <span aria-hidden="true">↶</span> Restore
             </button>
           ) : (
             <>
               <button
-                aria-label={`Read ${label}`}
-                className="icon-button"
-                disabled={busy}
-                onClick={() => onRead(item)}
-                title="Reader"
+                onClick={() => run(() => onRead(item))}
+                role="menuitem"
                 type="button"
               >
-                <span aria-hidden="true">¶</span>
+                <span aria-hidden="true">¶</span> Reader
               </button>
               <button
-                aria-haspopup="dialog"
-                aria-label={`Edit ${label}`}
-                className="icon-button"
-                disabled={busy}
-                onClick={(event) => onEdit(item, event.currentTarget)}
-                title="Edit"
+                onClick={() => run(() => void onFavorite(item))}
+                role="menuitem"
                 type="button"
               >
-                <span aria-hidden="true">✎</span>
+                <span aria-hidden="true">★</span>{" "}
+                {item.favorite ? "Remove favorite" : "Favorite"}
               </button>
-              <a
-                aria-label={`Open ${label} in a new tab`}
-                className="icon-button"
-                href={item.url}
-                rel="noreferrer"
-                target="_blank"
-                title="Open in new tab"
-              >
-                <span aria-hidden="true">↗</span>
-              </a>
               <button
-                aria-label={`Delete ${label}`}
-                className="icon-button danger-button"
-                disabled={busy}
-                onClick={() => void onDelete(item)}
-                title="Delete"
+                onClick={(event) => {
+                  const opener = trigger.current ?? event.currentTarget;
+                  run(() => onEdit(item, opener));
+                }}
+                role="menuitem"
                 type="button"
               >
-                <span aria-hidden="true">⌫</span>
+                <span aria-hidden="true">✎</span> Edit details
+              </button>
+              <button
+                className="item-menu-danger"
+                onClick={() => run(() => void onDelete(item))}
+                role="menuitem"
+                type="button"
+              >
+                <span aria-hidden="true">⌫</span> Delete
               </button>
             </>
           )}
-        </div>
-      </article>
-    </li>
+        </div>,
+        // Inside the shell, not the body: every control in this app takes its
+        // press feel from `.app-shell`, and a menu that escapes containment
+        // must not escape that too.
+        document.querySelector(".app-shell") ?? document.body,
+      ) : null}
+    </div>
   );
 }
 
@@ -3548,6 +3786,34 @@ function readStateError(error: unknown) {
     return null;
   }
   return readError(error);
+}
+
+function formatViewLabel(view: WorkspaceView) {
+  if (view === "library") return "Library";
+  if (view === "zen") return "Zen";
+  if (view === "sync") return "Sync";
+  return "Settings";
+}
+
+/**
+ * What the chip shows. The arrow already says the count is waiting to leave
+ * this device, so the word "pending" beside it is saying it twice — it stays
+ * only in the accessible name, where there is no arrow to read.
+ */
+function formatSyncChip(status: unknown, pendingCount: number) {
+  if (pendingCount > 0) return `↑ ${pendingCount.toLocaleString()}`;
+  if (status === "error") return "! attention";
+  if (status === "saving") return "· saving";
+  if (status === "loading" || status === "opening" || status === "initializing") {
+    return "· opening";
+  }
+  return "✓ synced";
+}
+
+/** The wide-window reading, which has room for a word but not a repeated one. */
+function formatSyncCopy(status: unknown, pendingCount: number) {
+  if (pendingCount > 0) return `↑ ${pendingCount.toLocaleString()}`;
+  return formatHeaderStatus(status, pendingCount);
 }
 
 function formatHeaderStatus(status: unknown, pendingCount: number) {
