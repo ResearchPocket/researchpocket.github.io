@@ -76,9 +76,13 @@ resolves the UUID against the local projection at view time:
   title; and
 - an unknown UUID renders as an explicit unresolved reference.
 
-Mentions are one-way references. There is no backlink index, no graph query
-surface, and no automatic insertion of mentions. New `research:` reference
-kinds require an ADR; the namespace is append-only.
+Mentions are one-way references. No backlink index is persisted or
+synchronized, mentions are never inserted automatically, and no mention
+structure is part of the wire format, the projection, or any publication
+artifact. A read-only view may derive relationships from bodies already in
+memory, provided it stores nothing and the derivation is discarded with the
+view ([ADR 0012](./ADR_0012_DERIVED_LIBRARY_GRAPH.md)). New `research:`
+reference kinds require an ADR; the namespace is append-only.
 
 ### Todos and lists
 

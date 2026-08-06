@@ -13,11 +13,13 @@ import {
   MarkdownDocument,
   type MarkdownImage,
 } from "./components/MarkdownDocument.tsx";
+import { LibraryGraph } from "./components/LibraryGraph.tsx";
 import {
   ZenWorkspace,
   type ZenMentionTarget,
 } from "./components/ZenWorkspace.tsx";
 import type { PersistedZenDocument } from "./data/db";
+import type { GraphMentionSource } from "./data/graph.ts";
 import {
   type LibraryState,
   type CapturedDocumentReference,
@@ -65,6 +67,12 @@ type SearchScope = "all" | "title" | "url" | "context" | "tags";
 type SortMode = "recent" | "oldest" | "title";
 type TagMatchMode = "any" | "all";
 type WorkspaceView = "library" | "settings" | "sync" | "zen";
+/**
+ * Graph is a projection of the library, not a fourth view: the same search,
+ * tags, favourites and lifecycle filter drive both, so switching modes never
+ * changes the result set.
+ */
+type LibraryMode = "list" | "graph";
 type Density = "comfortable" | "compact";
 
 interface ThemeColors {
@@ -87,6 +95,7 @@ interface UndoNotice {
 }
 
 const DENSITY_STORAGE_KEY = "researchpocket.ui.density";
+const LIBRARY_MODE_STORAGE_KEY = "researchpocket.ui.library-mode";
 const THEME_STORAGE_KEY = "researchpocket.ui.theme";
 const IMAGE_BACKGROUND_STORAGE_KEY = "researchpocket.ui.image-background";
 const DEFAULT_IMAGE_BACKGROUND = "#ffffff";
@@ -207,6 +216,10 @@ export function App() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [visibleLimit, setVisibleLimit] = useState(LIST_BATCH_SIZE);
   const [view, setView] = useState<WorkspaceView>(() => readWorkspaceView());
+  const [libraryMode, setLibraryMode] = useState<LibraryMode>(() =>
+    readInitialLibraryMode(),
+  );
+  const [zenMentions, setZenMentions] = useState<GraphMentionSource[]>([]);
   const [capturing, setCapturing] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const [readerItem, setReaderItem] = useState<LibraryItemView | null>(null);
@@ -274,6 +287,42 @@ export function App() {
       // The preference remains active for this tab when storage is unavailable.
     }
   }, [density]);
+
+  // The remembered mode is written into the URL once, on open. After that the
+  // parameter is the only thing that decides, so going back out of the graph
+  // returns to the list instead of being overruled by the preference.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if ((params.get("mode") === "graph" ? "graph" : "list") === libraryMode) return;
+    if (libraryMode === "graph") params.set("mode", "graph");
+    else params.delete("mode");
+    window.history.replaceState(
+      window.history.state,
+      "",
+      formatUrl(params, window.location.hash),
+    );
+    // Runs for the opening preference only; every later change writes its own
+    // history entry through changeLibraryMode.
+  }, []);
+
+  // Co-mention edges are the one part of the graph that is not already in
+  // memory, so the bodies are read only when the graph is actually on screen.
+  useEffect(() => {
+    if (!libraryState.initialized) return;
+    if (view !== "library" || libraryMode !== "graph") return;
+    let active = true;
+    void libraryRepository
+      .listZenMentions()
+      .then((next) => {
+        if (active) setZenMentions(next);
+      })
+      .catch(() => {
+        if (active) setZenMentions([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [libraryMode, libraryState.initialized, view, zenDocuments]);
 
   useEffect(() => {
     applyThemePreference(theme);
@@ -416,6 +465,10 @@ export function App() {
 
   useEffect(() => {
     function restoreNavigationFromHistory() {
+      // The projection rides the URL, so back out of the graph lands on the
+      // list whichever surface the entry above it was.
+      setLibraryMode(readLibraryModeFromUrl());
+
       const item = window.location.hash.match(/^#item=(.+)$/);
       if (item) {
         const itemId = decodeURIComponent(item[1]!);
@@ -527,6 +580,28 @@ export function App() {
       window.history.pushState(window.history.state, "", nextUrl);
     }
     setView(nextView);
+  }
+
+  /**
+   * Switching projection is a navigation the way opening a document is: the
+   * phone's only back gesture has to return to the list rather than leave the
+   * application, so the change earns its own history entry.
+   */
+  function changeLibraryMode(nextMode: LibraryMode) {
+    if (nextMode === libraryMode) return;
+    setLibraryMode(nextMode);
+    try {
+      window.localStorage.setItem(LIBRARY_MODE_STORAGE_KEY, nextMode);
+    } catch {
+      // The preference remains active for this tab when storage is unavailable.
+    }
+    const params = new URLSearchParams(window.location.search);
+    if (nextMode === "graph") params.set("mode", "graph");
+    else params.delete("mode");
+    const nextUrl = formatUrl(params, window.location.hash);
+    if (nextUrl !== `${window.location.pathname}${window.location.search}${window.location.hash}`) {
+      window.history.pushState(window.history.state, "", nextUrl);
+    }
   }
 
   async function refreshZenDocuments() {
@@ -1017,6 +1092,21 @@ export function App() {
             >
               <span>Archive</span><small>{deletedCount}</small>
             </button>
+            {/* The strip is the phone's whole navigation, and the heading row
+                that carries the desktop's List/Graph control is not on it. */}
+            <button
+              aria-current={
+                view === "library" && libraryMode === "graph" ? "page" : undefined
+              }
+              className="mobile-graph-toggle"
+              onClick={() => {
+                navigateToView("library");
+                changeLibraryMode(libraryMode === "graph" ? "list" : "graph");
+              }}
+              type="button"
+            >
+              <span>Graph</span>
+            </button>
           </nav>
 
           <div className="rail-tags">
@@ -1160,17 +1250,36 @@ export function App() {
               </h2>
               <p className="library-count">{pluralize(visibleItems.length, "item")}</p>
             </div>
+            <div aria-label="Library projection" className="library-mode" role="group">
+              <button
+                aria-pressed={libraryMode === "list"}
+                onClick={() => changeLibraryMode("list")}
+                type="button"
+              >
+                List
+              </button>
+              <button
+                aria-pressed={libraryMode === "graph"}
+                onClick={() => changeLibraryMode("graph")}
+                type="button"
+              >
+                Graph
+              </button>
+            </div>
             {/* Density is a preference, not a toolbar decision, so it lives in
                 Settings and this row keeps only the one control that changes
-                what the list is showing. */}
-            <label className="sort-control">
-              <span className="sr-only">Sort order</span>
-              <select onChange={(event) => setSortMode(event.target.value as SortMode)} value={sortMode}>
-                <option value="recent">newest ↓</option>
-                <option value="oldest">oldest ↑</option>
-                <option value="title">title A–Z</option>
-              </select>
-            </label>
+                what the list is showing. Order is a list idea; the graph has
+                no first row to put anything at the top of. */}
+            {libraryMode === "list" ? (
+              <label className="sort-control">
+                <span className="sr-only">Sort order</span>
+                <select onChange={(event) => setSortMode(event.target.value as SortMode)} value={sortMode}>
+                  <option value="recent">newest ↓</option>
+                  <option value="oldest">oldest ↑</option>
+                  <option value="title">title A–Z</option>
+                </select>
+              </label>
+            ) : null}
           </div>
 
           <Omnibar
@@ -1327,6 +1436,17 @@ export function App() {
 
           {visibleItems.length === 0 ? (
             <EmptyLibrary filter={filter} hasQuery={query.trim().length > 0} />
+          ) : libraryMode === "graph" ? (
+            <LibraryGraph
+              hidden={view !== "library" || readerItem !== null}
+              items={visibleItems}
+              mentions={zenMentions}
+              onFilterTag={toggleTagFilter}
+              onOpenItem={(itemId) => {
+                const item = items.find((candidate) => candidate.id === itemId);
+                if (item) openReader(item);
+              }}
+            />
           ) : (
             <ol className={`item-list item-list-${density}`}>
               {renderedItems.map((item) => (
@@ -1345,7 +1465,7 @@ export function App() {
               ))}
             </ol>
           )}
-          {renderedItems.length < visibleItems.length ? (
+          {libraryMode === "list" && renderedItems.length < visibleItems.length ? (
             <button
               className="list-more"
               onClick={() => setVisibleLimit((current) => current + LIST_BATCH_SIZE)}
@@ -1357,12 +1477,15 @@ export function App() {
           <div aria-atomic="true" aria-live="polite" className="sr-only">
             {searchPending
               ? "Updating library results."
-              : `Showing ${renderedItems.length.toLocaleString()} of ${pluralize(visibleItems.length, "result")}`}
+              : libraryMode === "graph"
+                ? `Graphing ${pluralize(visibleItems.length, "result")}`
+                : `Showing ${renderedItems.length.toLocaleString()} of ${pluralize(visibleItems.length, "result")}`}
           </div>
           <footer className="keyboard-footer">
             <span><b>/</b> search</span>
             <span><b>⌘V</b> save a URL</span>
             <span><b>⏎</b> reader</span>
+            {libraryMode === "graph" ? <span><b>0</b> reframe</span> : null}
           </footer>
           </section>
         </main>
@@ -3689,6 +3812,33 @@ function readWorkspaceView(): WorkspaceView {
  */
 function hashForView(target: WorkspaceView) {
   return target === "zen" ? "" : `#${target}`;
+}
+
+/** Builds a same-document URL, keeping an empty query out of the address bar. */
+function formatUrl(params: URLSearchParams, hash: string) {
+  const search = params.toString();
+  return `${window.location.pathname}${search ? `?${search}` : ""}${hash}`;
+}
+
+/** The URL decides, and it always carries the mode once the app has opened. */
+function readLibraryModeFromUrl(): LibraryMode {
+  return new URLSearchParams(window.location.search).get("mode") === "graph"
+    ? "graph"
+    : "list";
+}
+
+/** Opening reading only: a shared link wins over the remembered preference. */
+function readInitialLibraryMode(): LibraryMode {
+  const parameter = new URLSearchParams(window.location.search).get("mode");
+  if (parameter === "graph") return "graph";
+  if (parameter === "list") return "list";
+  try {
+    return window.localStorage.getItem(LIBRARY_MODE_STORAGE_KEY) === "graph"
+      ? "graph"
+      : "list";
+  } catch {
+    return "list";
+  }
 }
 
 function readDensityPreference(): Density {

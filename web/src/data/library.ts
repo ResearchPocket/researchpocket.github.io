@@ -18,6 +18,7 @@ import {
   type RemoteObservation,
 } from "./db";
 import { domainCore } from "./domain.ts";
+import { extractMentions, type GraphMentionSource } from "./graph.ts";
 import {
   createUndoableChange,
   matchesUndoExpectation,
@@ -212,6 +213,8 @@ class LibraryRepository {
   private readonly pending = new Set<Promise<unknown>>();
   private databasePromise: Promise<BrowserDatabase> | undefined;
   private closed = false;
+  /** Derived zen mention index, keyed by document and replica revision. */
+  private mentions = new Map<string, { updatedAt: string; itemIds: string[] }>();
 
   constructor(names: ProfileStorageNames) {
     this.names = names;
@@ -1234,7 +1237,60 @@ class LibraryRepository {
       );
   }
 
-  /** Reads one document body. The only call that loads body bytes. */
+  /**
+   * Every zen body reduced to the item UUIDs it mentions, for the library
+   * graph's co-mention edges.
+   *
+   * The result is derived and thrown away: no backlink index is written, no
+   * mention travels as an update, and a closed graph leaves nothing behind
+   * ([ADR 0012](../../../docs/v2/ADR_0012_DERIVED_LIBRARY_GRAPH.md)). Bodies
+   * are expensive to materialize, so each document is cached against its
+   * replica's `updatedAt` and only an edited document is read again.
+   */
+  async listZenMentions(): Promise<GraphMentionSource[]> {
+    const database = await this.database();
+    const meta = await database.get("meta", "library");
+    if (!meta) return [];
+    const documents = await database.getAll("zenDocuments");
+    const sources: GraphMentionSource[] = [];
+    const retained = new Map<string, { updatedAt: string; itemIds: string[] }>();
+
+    for (const document of documents) {
+      if (document.deleted) continue;
+      const replica = await database.get("zenReplicas", document.documentId);
+      if (!replica) continue;
+
+      const cached = this.mentions.get(document.documentId);
+      let entry = cached?.updatedAt === replica.updatedAt ? cached : undefined;
+      if (!entry) {
+        try {
+          const view = JSON.parse(
+            await domainCore.call(
+              "zenDocumentView",
+              replica.snapshot,
+              meta.peerId,
+              document.documentId,
+            ),
+          ) as ZenDocumentView;
+          entry = {
+            updatedAt: replica.updatedAt,
+            itemIds: extractMentions(view.body),
+          };
+        } catch {
+          // One unreadable document costs its edges, not the whole graph.
+          continue;
+        }
+      }
+      retained.set(document.documentId, entry);
+      sources.push({ documentId: document.documentId, itemIds: entry.itemIds });
+    }
+
+    // Rebuilt rather than pruned, so a deleted document leaves no residue.
+    this.mentions = retained;
+    return sources;
+  }
+
+  /** Reads one document body. The other call that loads body bytes. */
   async zenDocument(documentId: string): Promise<ZenDocumentView> {
     const database = await this.database();
     const replica = await database.get("zenReplicas", documentId);
@@ -2441,6 +2497,10 @@ class LibraryWorkspace {
 
   async zenDocument(documentId: string): Promise<ZenDocumentView> {
     return (await this.instance()).zenDocument(documentId);
+  }
+
+  async listZenMentions(): Promise<GraphMentionSource[]> {
+    return (await this.instance()).listZenMentions();
   }
 
   async createZenDocument(input: {

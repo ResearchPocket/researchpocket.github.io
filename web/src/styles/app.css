@@ -5485,3 +5485,481 @@ kbd {
     display: none;
   }
 }
+
+/* ------------------------------------------------------------------ *
+ * Library graph
+ *
+ * A second projection of the library, not a second view. All of its motion
+ * lives inside the canvas, which is the only place the design system allows
+ * any: the panel around it is as still as every other surface.
+ * ------------------------------------------------------------------ */
+
+.library-mode {
+  border: var(--rule) solid var(--color-border-strong);
+  border-radius: var(--radius);
+  display: flex;
+  flex: 0 0 auto;
+  margin-left: auto;
+  overflow: hidden;
+}
+
+.library-mode button {
+  background: transparent;
+  border: 0;
+  color: var(--color-text-soft);
+  font-size: var(--font-size-xs);
+  min-height: 1.95rem;
+  padding: 0 0.75rem;
+}
+
+.library-mode button + button {
+  border-left: var(--rule) solid var(--color-border-strong);
+}
+
+.library-mode button[aria-pressed="true"] {
+  background: var(--color-inverse-surface);
+  color: var(--color-inverse);
+  font-weight: 700;
+}
+
+/* The desktop control lives in the heading row, which a phone does not show.
+   There, Graph is a chip in the strip beside Zen and the tags. */
+.mobile-graph-toggle {
+  display: none;
+}
+
+.library-graph {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.graph-toolbar {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--space-2);
+  overflow-x: auto;
+  padding-bottom: var(--space-3);
+}
+
+.graph-toolbar button {
+  background: transparent;
+  border: var(--rule) solid var(--color-border);
+  border-radius: var(--radius);
+  color: var(--color-text-soft);
+  flex: 0 0 auto;
+  font-size: var(--font-size-xs);
+  min-height: 1.875rem;
+  padding: 0 0.625rem;
+}
+
+.graph-toolbar button[aria-pressed="true"] {
+  border-color: var(--color-border-strong);
+  color: var(--color-accent-strong);
+}
+
+.graph-release {
+  margin-left: auto;
+}
+
+.graph-body {
+  border-top: var(--rule) solid var(--color-border-subtle);
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: minmax(0, 1fr) 20rem;
+  min-height: 0;
+}
+
+.graph-stage {
+  min-height: 24rem;
+  min-width: 0;
+  position: relative;
+}
+
+.graph-canvas {
+  display: block;
+  height: 100%;
+  inset: 0;
+  position: absolute;
+  touch-action: none;
+  width: 100%;
+}
+
+/* Every overlay is inert: the graph underneath must stay grabbable through
+   the corner it happens to be sitting in. */
+.graph-stats,
+.graph-legend {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  margin: 0;
+  pointer-events: none;
+  position: absolute;
+}
+
+.graph-stats,
+.graph-legend {
+  background: var(--color-surface);
+  border: var(--rule) solid var(--color-border-subtle);
+}
+
+.graph-stats {
+  display: flex;
+  gap: var(--space-2);
+  padding: 0.3rem 0.625rem;
+  right: 0.75rem;
+  top: 0.75rem;
+}
+
+.graph-orphan-count {
+  color: var(--color-accent-strong);
+}
+
+.graph-legend {
+  bottom: 0.75rem;
+  display: grid;
+  gap: 0.3rem;
+  left: 0.75rem;
+  padding: 0.625rem 0.75rem;
+}
+
+.graph-legend div {
+  align-items: center;
+  display: flex;
+  gap: var(--space-2);
+}
+
+.graph-legend dd {
+  margin: 0;
+}
+
+/* The shape is the legend's whole point — a round item against a square tag
+   hub — and the stylesheet has no rounded corner to spend, so the node keys
+   are the glyphs themselves rather than boxes pretending to be them. */
+.graph-key {
+  flex: 0 0 auto;
+  font-size: var(--font-size-xs);
+  line-height: 1;
+  text-align: center;
+  width: 0.75rem;
+}
+
+.graph-key-item {
+  color: var(--color-text-soft);
+}
+
+.graph-key-favorite {
+  color: var(--color-accent-strong);
+}
+
+.graph-key-tag {
+  color: var(--color-accent);
+}
+
+.graph-key-tag-edge,
+.graph-key-mention-edge {
+  height: 1px;
+  width: 1rem;
+}
+
+.graph-key-tag-edge {
+  background: var(--color-border);
+}
+
+.graph-key-mention-edge {
+  background: var(--accent);
+}
+
+.graph-zoom {
+  align-items: center;
+  background: var(--color-surface);
+  border: var(--rule) solid var(--color-border-subtle);
+  bottom: 0.75rem;
+  display: flex;
+  position: absolute;
+  right: 0.75rem;
+}
+
+.graph-zoom button {
+  background: transparent;
+  border: 0;
+  color: var(--color-text-soft);
+  font-size: var(--font-size-sm);
+  min-height: 1.875rem;
+  padding: 0 0.625rem;
+}
+
+.graph-zoom button:last-child {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.graph-zoom button + span,
+.graph-zoom span + button {
+  border-left: var(--rule) solid var(--color-border-subtle);
+}
+
+.graph-zoom span {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  padding: 0 var(--space-2);
+  text-align: center;
+  width: 3.25rem;
+}
+
+.graph-notice {
+  display: grid;
+  gap: var(--space-3);
+  left: 50%;
+  margin: 0;
+  max-width: 28rem;
+  padding: var(--space-5);
+  position: absolute;
+  text-align: center;
+  top: 50%;
+  translate: -50% -50%;
+}
+
+.graph-notice span {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+/* Visible only when no drawing surface could be opened, when it stops being
+   the keyboard's route through the graph and becomes the graph. */
+.graph-nodes:not(.sr-only) {
+  display: grid;
+  gap: 1px;
+  inset: 0;
+  list-style: none;
+  margin: 0;
+  overflow: auto;
+  padding: 9rem var(--space-4) var(--space-4);
+  position: absolute;
+}
+
+.graph-nodes button {
+  background: transparent;
+  border: var(--rule) solid transparent;
+  border-radius: var(--radius);
+  color: var(--color-text-soft);
+  display: block;
+  font-size: var(--font-size-sm);
+  min-height: 2rem;
+  overflow: hidden;
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+}
+
+.graph-inspector {
+  border-left: var(--rule) solid var(--color-border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-5);
+}
+
+.graph-inspector-heading {
+  align-items: baseline;
+  border-bottom: var(--rule) solid var(--color-border-subtle);
+  display: flex;
+  justify-content: space-between;
+  padding-bottom: var(--space-2);
+}
+
+.graph-inspector-heading p {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.12em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.graph-inspector-heading span {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.graph-inspector-subject {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.graph-inspector-title {
+  color: var(--color-accent-strong);
+  font-size: var(--font-size-md);
+  font-weight: 700;
+  line-height: var(--line-height-tight);
+  margin: 0;
+  text-wrap: pretty;
+}
+
+.graph-inspector-meta {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  margin: 0;
+}
+
+.graph-inspector-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.graph-inspector-tags span {
+  border: var(--rule) solid var(--color-border);
+  border-radius: var(--radius);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  padding: 0 var(--space-2);
+}
+
+.graph-inspector-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.graph-inspector-actions button {
+  flex: 1 1 auto;
+}
+
+.graph-neighbourhood {
+  display: grid;
+  gap: var(--space-2);
+  min-height: 0;
+}
+
+.graph-neighbourhood ol {
+  display: grid;
+  gap: 1px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.graph-neighbourhood button {
+  align-items: center;
+  background: transparent;
+  border: var(--rule) solid transparent;
+  border-radius: var(--radius);
+  color: var(--color-text-soft);
+  display: grid;
+  font-size: var(--font-size-xs);
+  gap: var(--space-2);
+  grid-template-columns: auto minmax(0, 1fr);
+  min-height: 2rem;
+  padding: var(--space-1) var(--space-2);
+  text-align: left;
+  width: 100%;
+}
+
+.graph-neighbourhood button span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-glyph-mention {
+  color: var(--color-focus);
+}
+
+.graph-glyph-tag {
+  color: var(--color-accent);
+}
+
+.graph-glyph-item {
+  color: var(--color-text-muted);
+}
+
+.graph-inspector-footnote {
+  border-top: var(--rule) solid var(--color-border-subtle);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-body);
+  margin: auto 0 0;
+  padding-top: var(--space-3);
+}
+
+.graph-inspector-footnote span {
+  color: var(--color-text-soft);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .graph-toolbar button:hover,
+  .graph-zoom button:hover,
+  .graph-nodes button:hover,
+  .graph-neighbourhood button:hover {
+    border-color: var(--color-border-strong);
+    color: var(--color-text);
+  }
+}
+
+@media (max-width: 68rem) {
+  .graph-body {
+    grid-template-columns: minmax(0, 1fr) 16rem;
+  }
+
+  .graph-legend {
+    display: none;
+  }
+}
+
+@media (max-width: 48rem) {
+  /* The phone reads the tag constellation, so the strip carries the mode and
+     the heading row's control is not there to be reached. */
+  .mobile-graph-toggle {
+    display: flex;
+  }
+
+  .library-graph {
+    /* Escapes the section's own padding: the field wants the full width. */
+    margin: 0 -1rem;
+  }
+
+  .graph-toolbar {
+    padding: 0 1rem 0.625rem;
+  }
+
+  /* One column: the inspector becomes the card the design raises under the
+     field, with only what a tap needs to answer. */
+  .graph-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+
+  .graph-stage {
+    min-height: 18rem;
+  }
+
+  .graph-zoom,
+  .graph-neighbourhood,
+  .graph-inspector-footnote {
+    display: none;
+  }
+
+  .graph-inspector {
+    border-left: 0;
+    border-top: var(--rule) solid var(--color-border-strong);
+    background: var(--color-surface);
+    gap: var(--space-3);
+    overflow: visible;
+    padding: var(--space-4) 1rem max(var(--space-5), env(safe-area-inset-bottom));
+  }
+
+  .graph-inspector-heading {
+    display: none;
+  }
+
+  .graph-inspector-actions button {
+    min-height: var(--control-height);
+  }
+
+  .graph-notice {
+    padding: var(--space-4);
+  }
+}
