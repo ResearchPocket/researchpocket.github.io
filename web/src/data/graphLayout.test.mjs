@@ -73,6 +73,53 @@ test("a thousand-save library comes to rest", () => {
   assert.ok(width < 40_000 && height < 40_000, `the cloud exploded: ${width}x${height}`);
 });
 
+test("the layout is at rest before the first frame is drawn", () => {
+  const { nodes, edges } = fixture(1000);
+  const layout = new GraphLayout();
+  layout.sync(nodes, edges);
+
+  // What the renderer does on open: settle first, then paint. Nobody should
+  // have to watch a thousand-node layout resolve itself. The time budget is
+  // lifted here so the assertion is tick-bound and cannot flake under load.
+  const ticks = layout.settle({}, 600, Number.POSITIVE_INFINITY);
+  assert.ok(layout.settled, `settle() returned unsettled after ${ticks} ticks`);
+
+  let furthest = 0;
+  const before = layout.order.map((body) => ({ x: body.x, y: body.y }));
+  for (let tick = 0; tick < 30; tick += 1) layout.step();
+  layout.order.forEach((body, index) => {
+    furthest = Math.max(
+      furthest,
+      Math.hypot(body.x - before[index].x, body.y - before[index].y),
+    );
+  });
+  assert.ok(furthest < 1, `first painted frames moved ${furthest.toFixed(2)}px`);
+});
+
+test("handling one node nudges the layout instead of restarting it", () => {
+  const { nodes, edges } = fixture(1000);
+  const layout = new GraphLayout();
+  layout.sync(nodes, edges);
+  layout.settle({}, 600, Number.POSITIVE_INFINITY);
+
+  // Grabbing a save must not re-energise the whole field to opening amplitude.
+  layout.reheat(0.25);
+  assert.equal(layout.alpha, 0.25);
+
+  // Long enough for alpha to fall from the nudge back under the floor.
+  const before = layout.order.map((body) => ({ x: body.x, y: body.y }));
+  for (let tick = 0; tick < 260; tick += 1) layout.step();
+  let furthest = 0;
+  layout.order.forEach((body, index) => {
+    furthest = Math.max(
+      furthest,
+      Math.hypot(body.x - before[index].x, body.y - before[index].y),
+    );
+  });
+  assert.ok(furthest < 60, `a nudge moved the field ${furthest.toFixed(0)}px`);
+  assert.ok(layout.settled, "a nudge must come back to rest");
+});
+
 test("a settled layout stays still when it is stepped again", () => {
   const { nodes, edges } = fixture(600);
   const layout = new GraphLayout();
