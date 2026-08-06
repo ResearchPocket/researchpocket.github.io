@@ -47,7 +47,7 @@ export interface StepOptions {
  * points each on their own random walk is not life, it is noise, and it costs
  * a frame's work forever to draw. Small libraries keep the breathing.
  */
-export const DRIFT_NODE_LIMIT = 300;
+export const DRIFT_NODE_LIMIT = 120;
 
 /**
  * Cooling schedule. Roughly 200 ticks to a standstill — about three seconds,
@@ -142,10 +142,34 @@ export class GraphLayout {
     this.reheat();
   }
 
-  /** Returns the layout to full energy — a new node set, or a released pin. */
-  reheat(): void {
-    this.alphaValue = 1;
+  /**
+   * Puts energy back in. A new node set earns the full amount; handling one
+   * node earns a fraction, or grabbing a save would set the whole field off.
+   */
+  reheat(amplitude = 1): void {
+    this.alphaValue = Math.max(this.alphaValue, amplitude);
     this.settledValue = false;
+  }
+
+  /**
+   * Runs the layout to rest before anything is drawn.
+   *
+   * A force layout resolving itself is not a thing anyone needs to watch: at a
+   * thousand nodes it is five seconds of everything moving at once. The work is
+   * the same either way, so it happens up front and the first painted frame is
+   * the settled one. The budget bounds the pause on very large graphs; whatever
+   * is left finishes live, by which point alpha is low and the motion is small.
+   */
+  settle(options: StepOptions = {}, maxTicks = 600, budgetMs = 550): number {
+    const started = performance.now();
+    let ticks = 0;
+    while (ticks < maxTicks) {
+      if (!this.step(options)) break;
+      ticks += 1;
+      // Checked in blocks, because the clock costs more than the tick does.
+      if (ticks % 32 === 0 && performance.now() - started > budgetMs) break;
+    }
+    return ticks;
   }
 
   private applyFloor(): void {
@@ -214,10 +238,15 @@ export class GraphLayout {
       }
       body.vx *= VELOCITY_DECAY;
       body.vy *= VELOCITY_DECAY;
-      const speed = Math.hypot(body.vx, body.vy);
+      let speed = Math.hypot(body.vx, body.vy);
       if (speed > MAX_SPEED) {
         body.vx = (body.vx / speed) * MAX_SPEED;
         body.vy = (body.vy / speed) * MAX_SPEED;
+        // Measured after the clamp, because this is what "is anything still
+        // moving" has to mean. Two nearly-coincident nodes carry a repulsion
+        // force in the thousands, and reading the speed before the cap let a
+        // single such pair hold the whole layout "in motion" indefinitely.
+        speed = MAX_SPEED;
       }
       if (!body.pinned || options.dragging === body.id) {
         // Alpha scales the displacement, not the forces: the layout still
@@ -233,12 +262,10 @@ export class GraphLayout {
     // of the panel and becomes unreachable.
     if (options.limitX && options.limitY) {
       for (const body of bodies) {
-        if (Math.abs(body.x) > options.limitX) {
-          body.vx -= (body.x - Math.sign(body.x) * options.limitX) * 0.05;
-        }
-        if (Math.abs(body.y) > options.limitY) {
-          body.vy -= (body.y - Math.sign(body.y) * options.limitY) * 0.05;
-        }
+        const overX = Math.abs(body.x) - options.limitX;
+        const overY = Math.abs(body.y) - options.limitY;
+        if (overX > 0) body.vx -= Math.sign(body.x) * Math.min(overX, 400) * 0.012;
+        if (overY > 0) body.vy -= Math.sign(body.y) * Math.min(overY, 400) * 0.012;
       }
     }
 

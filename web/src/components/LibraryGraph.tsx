@@ -39,7 +39,9 @@ interface Palette {
   tagLabel: string;
 }
 
-const MIN_SCALE = 0.25;
+// Low enough that a thousand-node cloud frames whole. The old 0.25 floor was
+// set for the prototype's forty nodes and quietly clipped anything larger.
+const MIN_SCALE = 0.08;
 const MAX_SCALE = 4;
 const MOBILE_QUERY = "(max-width: 48rem)";
 
@@ -700,7 +702,7 @@ function createSimulation(
       limitY: warmed ? Math.max(60, (height / 2 - 26) / scale) : undefined,
     });
     ticks += 1;
-    if (fitPending && (ticks > (warmed ? 8 : 150) || !moving)) fit();
+    if (fitPending && ticks > 8) fit();
 
     draw();
 
@@ -884,7 +886,7 @@ function createSimulation(
       // read, and a finger that wanders must not silently pin the node.
       if (!narrow) {
         drag = { body: hit, dx: hit.x - point.x, dy: hit.y - point.y, moved: false };
-        layout.reheat();
+        layout.reheat(0.25);
       }
     } else {
       pan = { x: event.clientX - translateX, y: event.clientY - translateY };
@@ -956,7 +958,7 @@ function createSimulation(
     if (hit?.pinned) {
       hit.pinned = false;
       reportPinned();
-      layout.reheat();
+      layout.reheat(0.25);
       thaw();
     }
   };
@@ -1045,8 +1047,14 @@ function createSimulation(
         projection.nodes.map((node) => ({ id: node.id, radius: radiusFor(node) })),
         projection.edges,
       );
-      ticks = 0;
+      // Settled before anything is drawn, and framed once around the result:
+      // no reframe lands mid-flight, and the walls below are measured against
+      // a cloud that has already finished growing.
+      layout.settle({ narrow });
+      warmed = true;
       fitPending = true;
+      fit();
+      ticks = 0;
       reportPinned();
       thaw();
     },
@@ -1079,13 +1087,12 @@ function createSimulation(
       fitPending = true;
       warmed = true;
       fit();
-      layout.reheat();
       thaw();
     },
     releaseAll() {
       for (const body of layout.order) body.pinned = false;
       reportPinned();
-      layout.reheat();
+      layout.reheat(0.35);
       thaw();
     },
     destroy() {
