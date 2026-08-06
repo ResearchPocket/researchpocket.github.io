@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { GraphLayout, type LayoutBody } from "../data/graphLayout.ts";
 import {
   buildGraphProjection,
   constellationProjection,
@@ -23,18 +24,6 @@ export interface LibraryGraphProps {
   onFilterTag(tag: string): void;
 }
 
-/** A node under simulation. Positions survive a filter change by node id. */
-interface Body {
-  id: string;
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  radius: number;
-  pinned: boolean;
-  node: GraphNode;
-}
-
 interface Palette {
   canvas: string;
   item: string;
@@ -52,11 +41,6 @@ interface Palette {
 
 const MIN_SCALE = 0.25;
 const MAX_SCALE = 4;
-/** Barnes–Hut opening angle. Higher approximates more and costs less. */
-const THETA = 0.9;
-const REPULSION = 1500;
-/** Ticks a reduced-motion layout settles for before it is frozen and drawn once. */
-const SETTLE_TICKS = 320;
 const MOBILE_QUERY = "(max-width: 48rem)";
 
 export function LibraryGraph({
@@ -601,11 +585,11 @@ function createSimulation(
   let context = canvas.getContext("2d");
   if (!context) return null;
 
-  const bodies = new Map<string, Body>();
-  let order: Body[] = [];
+  const layout = new GraphLayout();
+  const bodies = layout.bodies;
+  let nodesById = new Map<string, GraphNode>();
   let projection: GraphProjection = EMPTY_PROJECTION;
   let narrow = false;
-  let reducedMotion = false;
   let palette = readPalette();
   let width = 0;
   let height = 0;
@@ -624,7 +608,7 @@ function createSimulation(
   let frame = 0;
   let drawFrame = 0;
   let fontsReady = false;
-  let drag: { body: Body; dx: number; dy: number; moved: boolean } | null = null;
+  let drag: { body: LayoutBody; dx: number; dy: number; moved: boolean } | null = null;
   let pan: { x: number; y: number } | null = null;
   const pointers = new Map<number, { x: number; y: number }>();
   let pinch: { distance: number; scale: number } | null = null;
@@ -644,15 +628,15 @@ function createSimulation(
     };
   };
 
-  const project = (body: Body) => ({
+  const project = (body: LayoutBody) => ({
     x: body.x * scale + width / 2 + translateX,
     y: body.y * scale + height / 2 + translateY,
   });
 
-  function pick(worldX: number, worldY: number): Body | null {
-    let best: Body | null = null;
+  function pick(worldX: number, worldY: number): LayoutBody | null {
+    let best: LayoutBody | null = null;
     let bestDistance = Infinity;
-    for (const body of order) {
+    for (const body of layout.order) {
       const dx = body.x - worldX;
       const dy = body.y - worldY;
       const distance = dx * dx + dy * dy;
@@ -706,144 +690,32 @@ function createSimulation(
   function loop() {
     frame = 0;
     if (!running) return;
-    const settled = reducedMotion && ticks > SETTLE_TICKS;
-    if (!settled) {
-      step();
-      ticks += 1;
-      if (fitPending && ticks > (warmed ? 8 : 150)) fit();
-    } else {
-      frozen = true;
-    }
+
+    // Soft walls only once the view has been framed, or a layout that has not
+    // spread yet is clamped into the opening viewport and never escapes it.
+    const moving = layout.step({
+      narrow,
+      dragging: drag?.body.id ?? null,
+      limitX: warmed ? Math.max(60, (width / 2 - 26) / scale) : undefined,
+      limitY: warmed ? Math.max(60, (height / 2 - 26) / scale) : undefined,
+    });
+    ticks += 1;
+    if (fitPending && (ticks > (warmed ? 8 : 150) || !moving)) fit();
+
     draw();
+
+    // A large graph settles and the loop stops; a small one drifts forever by
+    // design, so it never reports settled and keeps asking for frames.
+    if (!moving) frozen = true;
     if (!frozen) frame = requestAnimationFrame(loop);
-  }
-
-  /* ---- forces ---- */
-
-  function step() {
-    if (order.length === 0) return;
-
-    const tree = order.length > 48 ? buildQuadtree(order) : null;
-    for (const body of order) {
-      if (tree) applyRepulsion(tree, body);
-      else {
-        for (const other of order) {
-          if (other === body) continue;
-          repel(body, other.x, other.y, 1);
-        }
-      }
-    }
-
-    for (const edge of projection.edges) {
-      const from = bodies.get(edge.source);
-      const to = bodies.get(edge.target);
-      if (!from || !to) continue;
-      // Co-mentions pull tighter than tag membership: a pair someone wrote about
-      // together is a stronger statement than a tag they both happen to carry.
-      const target =
-        edge.kind === "mention" ? (narrow ? 42 : 56) : narrow ? 58 : 82;
-      const dx = to.x - from.x;
-      const dy = to.y - from.y;
-      const distance = Math.max(1, Math.hypot(dx, dy));
-      const strength =
-        ((distance - target) * (edge.kind === "mention" ? 0.014 : 0.02)) /
-        Math.max(1, Math.log2(1 + edge.weight));
-      from.vx += (dx / distance) * strength;
-      from.vy += (dy / distance) * strength;
-      to.vx -= (dx / distance) * strength;
-      to.vy -= (dy / distance) * strength;
-    }
-
-    const drifting = !reducedMotion;
-    for (const body of order) {
-      body.vx -= body.x * 0.0022;
-      body.vy -= body.y * 0.0026;
-      if (drifting) {
-        // The design system bans CSS motion, so the graph's aliveness has to
-        // live in the pixels. This is that: a permanent, tiny unrest.
-        body.vx += (Math.random() - 0.5) * 0.09;
-        body.vy += (Math.random() - 0.5) * 0.09;
-      }
-      body.vx *= 0.86;
-      body.vy *= 0.86;
-      const speed = Math.hypot(body.vx, body.vy);
-      if (speed > 6) {
-        body.vx = (body.vx / speed) * 6;
-        body.vy = (body.vy / speed) * 6;
-      }
-      if (!body.pinned || drag?.body === body) {
-        body.x += body.vx;
-        body.y += body.vy;
-      }
-    }
-
-    // Soft walls at the frame edge: the drift stays alive, but nothing is
-    // allowed to wander out of the panel and become unreachable.
-    if (warmed) {
-      const limitX = Math.max(60, (width / 2 - 26) / scale);
-      const limitY = Math.max(60, (height / 2 - 26) / scale);
-      for (const body of order) {
-        if (Math.abs(body.x) > limitX) {
-          body.vx -= (body.x - Math.sign(body.x) * limitX) * 0.05;
-        }
-        if (Math.abs(body.y) > limitY) {
-          body.vy -= (body.y - Math.sign(body.y) * limitY) * 0.05;
-        }
-      }
-    }
-  }
-
-  function repel(body: Body, x: number, y: number, mass: number) {
-    let dx = body.x - x;
-    let dy = body.y - y;
-    let squared = dx * dx + dy * dy;
-    if (squared < 1) {
-      // Two bodies exactly on top of each other have no direction to separate
-      // along, so one is invented deterministically from the id.
-      dx = ((body.id.charCodeAt(0) % 3) - 1) || 0.7;
-      dy = ((body.id.charCodeAt(1) % 3) - 1) || 0.7;
-      squared = 2;
-    }
-    if (squared > 90_000) return;
-    const distance = Math.sqrt(squared);
-    const force = (REPULSION * mass) / squared;
-    body.vx += (dx / distance) * force;
-    body.vy += (dy / distance) * force;
-  }
-
-  function applyRepulsion(cell: Cell, body: Body) {
-    if (cell.mass === 0) return;
-    const dx = cell.cx - body.x;
-    const dy = cell.cy - body.y;
-    const distance = Math.hypot(dx, dy);
-    if (cell.children === null) {
-      if (cell.body && cell.body !== body) repel(body, cell.cx, cell.cy, cell.mass);
-      return;
-    }
-    // Far enough that the whole cell can stand in for its contents.
-    if (cell.size / Math.max(distance, 0.001) < THETA) {
-      repel(body, cell.cx, cell.cy, cell.mass);
-      return;
-    }
-    for (const child of cell.children) {
-      if (child) applyRepulsion(child, body);
-    }
   }
 
   /* ---- framing ---- */
 
   function fit() {
-    if (order.length === 0 || !width) return;
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (const body of order) {
-      if (body.x < minX) minX = body.x;
-      if (body.y < minY) minY = body.y;
-      if (body.x > maxX) maxX = body.x;
-      if (body.y > maxY) maxY = body.y;
-    }
+    const box = layout.bounds();
+    if (!box || !width) return;
+    const { minX, minY, maxX, maxY } = box;
     // Labels are drawn to the right of their node and are not in the bounds,
     // so the frame is padded for them. A phone shows tag labels only, but it
     // is also where there is least room for one to run off the edge.
@@ -901,16 +773,23 @@ function createSimulation(
     }
     context.globalAlpha = 1;
 
-    const labels: { body: Body; x: number; y: number; radius: number; strong: boolean }[] =
-      [];
-    for (const body of order) {
+    const labels: {
+      node: GraphNode;
+      x: number;
+      y: number;
+      radius: number;
+      strong: boolean;
+    }[] = [];
+    for (const body of layout.order) {
+      const node = nodesById.get(body.id);
+      if (!node) continue;
       const point = project(body);
       const lit = !dimming || near.has(body.id);
       const isSelected = body.id === selection;
       const radius = Math.max(2.5, body.radius * Math.min(1.4, scale));
       context.globalAlpha = lit ? 1 : 0.18;
 
-      if (body.node.kind === "tag") {
+      if (node.kind === "tag") {
         context.fillStyle = palette.tag;
         context.fillRect(point.x - radius, point.y - radius, radius * 2, radius * 2);
         context.strokeStyle = isSelected ? palette.ring : palette.canvas;
@@ -919,9 +798,9 @@ function createSimulation(
       } else {
         context.beginPath();
         context.arc(point.x, point.y, radius, 0, Math.PI * 2);
-        context.fillStyle = body.node.favorite
+        context.fillStyle = node.favorite
           ? palette.favorite
-          : body.node.degree > 0
+          : node.degree > 0
             ? palette.item
             : palette.orphan;
         context.fill();
@@ -945,13 +824,13 @@ function createSimulation(
       // (they are what makes a cluster readable), items only when they are the
       // subject or the view is zoomed in far enough to have room.
       const wanted =
-        body.node.kind === "tag"
+        node.kind === "tag"
           ? true
           : !narrow &&
             (body.id === focus || body.id === selection || (!dimming && scale > 1.5));
       if (wanted && (!dimming || near.has(body.id))) {
         labels.push({
-          body,
+          node,
           x: point.x,
           y: point.y,
           radius,
@@ -964,7 +843,7 @@ function createSimulation(
     if (fontsReady) {
       context.textBaseline = "middle";
       for (const label of labels) {
-        const text = nodeTitle(label.body.node);
+        const text = nodeTitle(label.node);
         const limit = narrow ? 16 : 42;
         const clipped = text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
         context.font = `${label.strong ? "700 " : ""}11px "TX-02", ui-monospace, monospace`;
@@ -975,7 +854,7 @@ function createSimulation(
         context.fillRect(label.x + label.radius + 4, label.y - 7, measured + 6, 14);
         context.globalAlpha = 1;
         context.fillStyle =
-          label.body.node.kind === "tag"
+          label.node.kind === "tag"
             ? palette.tagLabel
             : label.strong
               ? palette.labelStrong
@@ -1005,6 +884,7 @@ function createSimulation(
       // read, and a finger that wanders must not silently pin the node.
       if (!narrow) {
         drag = { body: hit, dx: hit.x - point.x, dy: hit.y - point.y, moved: false };
+        layout.reheat();
       }
     } else {
       pan = { x: event.clientX - translateX, y: event.clientY - translateY };
@@ -1076,6 +956,7 @@ function createSimulation(
     if (hit?.pinned) {
       hit.pinned = false;
       reportPinned();
+      layout.reheat();
       thaw();
     }
   };
@@ -1126,7 +1007,7 @@ function createSimulation(
 
   function reportPinned() {
     let count = 0;
-    for (const body of order) if (body.pinned) count += 1;
+    for (const body of layout.order) if (body.pinned) count += 1;
     handlers.onPinnedChange(count);
   }
 
@@ -1154,39 +1035,16 @@ function createSimulation(
     configure(config) {
       projection = config.projection;
       narrow = config.narrow;
-      reducedMotion = config.reducedMotion;
+      layout.setReducedMotion(config.reducedMotion);
+      nodesById = new Map(projection.nodes.map((node) => [node.id, node]));
 
-      const next: Body[] = [];
-      const keep = new Set<string>();
-      for (const node of projection.nodes) {
-        keep.add(node.id);
-        const existing = bodies.get(node.id);
-        if (existing) {
-          existing.node = node;
-          existing.radius = radiusFor(node);
-          next.push(existing);
-          continue;
-        }
-        const seeded = seedPosition(node.id);
-        const body: Body = {
-          id: node.id,
-          x: seeded.x,
-          y: seeded.y,
-          vx: 0,
-          vy: 0,
-          radius: radiusFor(node),
-          pinned: false,
-          node,
-        };
-        bodies.set(node.id, body);
-        next.push(body);
-      }
-      // A node the filter removed leaves the simulation rather than hiding, so
-      // the layout re-forms around what is left.
-      for (const id of [...bodies.keys()]) {
-        if (!keep.has(id)) bodies.delete(id);
-      }
-      order = next;
+      // The layout reconciles the body set: a surviving node keeps its
+      // position and velocity, a filtered node leaves the simulation rather
+      // than hiding, and the whole thing reheats around what is left.
+      layout.sync(
+        projection.nodes.map((node) => ({ id: node.id, radius: radiusFor(node) })),
+        projection.edges,
+      );
       ticks = 0;
       fitPending = true;
       reportPinned();
@@ -1221,11 +1079,13 @@ function createSimulation(
       fitPending = true;
       warmed = true;
       fit();
+      layout.reheat();
       thaw();
     },
     releaseAll() {
-      for (const body of order) body.pinned = false;
+      for (const body of layout.order) body.pinned = false;
       reportPinned();
+      layout.reheat();
       thaw();
     },
     destroy() {
@@ -1245,8 +1105,7 @@ function createSimulation(
       canvas.removeEventListener("wheel", onWheel);
       canvas.removeEventListener("contextlost", onContextLost);
       canvas.removeEventListener("contextrestored", onContextRestored);
-      bodies.clear();
-      order = [];
+      layout.sync([], []);
     },
   };
 }
@@ -1259,115 +1118,6 @@ function radiusFor(node: GraphNode): number {
   // Tag hubs are count-weighted so a cluster's weight is legible before its
   // label is; items stay uniform, because a save is a save.
   return node.kind === "tag" ? 5 + Math.min(5, node.count * 0.6) : 4.5;
-}
-
-/**
- * A node's opening position is a function of its id, so the same library opens
- * to the same layout instead of a different scatter on every mount.
- */
-function seedPosition(id: string): { x: number; y: number } {
-  let hash = 0x811c9dc5;
-  for (let index = 0; index < id.length; index += 1) {
-    hash ^= id.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193) >>> 0;
-  }
-  const angle = ((hash & 0xffff) / 0xffff) * Math.PI * 2;
-  const radius = 40 + ((hash >>> 16) / 0xffff) * 260;
-  return { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius };
-}
-
-/* ---- Barnes–Hut ---- */
-
-interface Cell {
-  cx: number;
-  cy: number;
-  mass: number;
-  size: number;
-  body: Body | null;
-  children: (Cell | null)[] | null;
-  x0: number;
-  y0: number;
-  x1: number;
-  y1: number;
-}
-
-/**
- * Repulsion is the only O(n²) force here, so it goes through a quadtree.
- * Without it the 2,000-node budget is four million pair tests a frame.
- */
-function buildQuadtree(bodies: Body[]): Cell {
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  for (const body of bodies) {
-    if (body.x < minX) minX = body.x;
-    if (body.y < minY) minY = body.y;
-    if (body.x > maxX) maxX = body.x;
-    if (body.y > maxY) maxY = body.y;
-  }
-  const size = Math.max(maxX - minX, maxY - minY, 1) + 2;
-  const root = makeCell(minX - 1, minY - 1, minX - 1 + size, minY - 1 + size);
-  for (const body of bodies) insert(root, body, 0);
-  return root;
-}
-
-function makeCell(x0: number, y0: number, x1: number, y1: number): Cell {
-  return {
-    cx: 0,
-    cy: 0,
-    mass: 0,
-    size: x1 - x0,
-    body: null,
-    children: null,
-    x0,
-    y0,
-    x1,
-    y1,
-  };
-}
-
-function insert(cell: Cell, body: Body, depth: number): void {
-  // Center of mass is accumulated on the way down, so no second pass is needed.
-  cell.cx = (cell.cx * cell.mass + body.x) / (cell.mass + 1);
-  cell.cy = (cell.cy * cell.mass + body.y) / (cell.mass + 1);
-  cell.mass += 1;
-
-  if (cell.children === null) {
-    if (cell.body === null) {
-      cell.body = body;
-      return;
-    }
-    // Coincident bodies would subdivide forever, so depth is the backstop.
-    if (depth > 20) return;
-    const existing = cell.body;
-    cell.body = null;
-    cell.children = [null, null, null, null];
-    place(cell, existing, depth);
-    place(cell, body, depth);
-    return;
-  }
-  place(cell, body, depth);
-}
-
-function place(cell: Cell, body: Body, depth: number): void {
-  const midX = (cell.x0 + cell.x1) / 2;
-  const midY = (cell.y0 + cell.y1) / 2;
-  const east = body.x >= midX;
-  const south = body.y >= midY;
-  const index = (south ? 2 : 0) + (east ? 1 : 0);
-  const children = cell.children!;
-  let child = children[index] ?? null;
-  if (!child) {
-    child = makeCell(
-      east ? midX : cell.x0,
-      south ? midY : cell.y0,
-      east ? cell.x1 : midX,
-      south ? cell.y1 : midY,
-    );
-    children[index] = child;
-  }
-  insert(child, body, depth + 1);
 }
 
 /* ---- palette ---- */
