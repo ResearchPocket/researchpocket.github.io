@@ -2766,7 +2766,8 @@ kbd {
 
 .capture-dialog::backdrop,
 .edit-dialog::backdrop,
-.command-dialog::backdrop {
+.command-dialog::backdrop,
+.shortcuts-dialog::backdrop {
   background: var(--color-backdrop);
 }
 
@@ -2816,6 +2817,70 @@ kbd {
   max-width: 40rem;
   padding: 0;
   width: calc(100% - 2rem);
+}
+
+.shortcuts-dialog {
+  background: var(--color-surface);
+  border: var(--rule) solid var(--color-border-strong);
+  border-radius: var(--radius);
+  color: var(--color-text);
+  max-height: calc(100dvh - 2rem);
+  max-width: 46rem;
+  overflow: hidden;
+  padding: 0;
+  width: calc(100% - 2rem);
+}
+
+.shortcuts-heading {
+  align-items: center;
+  border-bottom: var(--rule) solid var(--color-border-strong);
+  display: flex;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+}
+
+.shortcuts-heading h2,
+.shortcuts-heading p {
+  margin: 0;
+}
+
+.shortcuts-heading h2 {
+  font-size: var(--font-size-md);
+}
+
+.shortcuts-heading p {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  margin-top: 0.25rem;
+}
+
+.shortcuts-heading button {
+  background: transparent;
+  border: var(--rule) solid var(--color-border-strong);
+  border-radius: var(--radius);
+  color: var(--color-text);
+  font-size: var(--font-size-lg);
+  min-height: var(--control-height);
+  min-width: var(--control-height);
+}
+
+.shortcuts-body {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-height: calc(100dvh - 7rem);
+  overflow-y: auto;
+  padding: var(--space-4);
+}
+
+.shortcuts-body h3 {
+  font-size: var(--font-size-sm);
+  margin: 0 0 0.375rem;
+}
+
+.shortcuts-body .shortcut-list dd kbd {
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
 }
 
 .command-input {
@@ -3745,6 +3810,10 @@ kbd {
   .command-dialog {
     margin-top: 4rem;
     max-height: calc(100dvh - 5rem);
+  }
+
+  .shortcuts-body {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .reader-view {

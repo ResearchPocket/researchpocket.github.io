@@ -247,6 +247,7 @@ export function App() {
   const [zenMentions, setZenMentions] = useState<GraphMentionSource[]>([]);
   const [capturing, setCapturing] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [shortcutHintsVisible, setShortcutHintsVisible] = useState(false);
   const [readerItem, setReaderItem] = useState<LibraryItemView | null>(null);
   const [editingItem, setEditingItem] = useState<LibraryItemView | null>(null);
@@ -427,6 +428,20 @@ export function App() {
         : event.ctrlKey && event.altKey && !event.metaKey;
       setShortcutHintsVisible(shortcutModifierDown);
 
+      if (
+        (event.key === "?" || (event.code === "Slash" && event.shiftKey)) &&
+        !isTyping &&
+        !shortcutsOpen &&
+        !commandOpen &&
+        !capturing &&
+        !editingItem &&
+        !readerItem
+      ) {
+        event.preventDefault();
+        setShortcutsOpen(true);
+        return;
+      }
+
       const viewShortcutModifier = isMacPlatform()
         ? event.ctrlKey && !event.altKey && !event.metaKey
         : event.ctrlKey && event.altKey && !event.metaKey;
@@ -537,7 +552,7 @@ export function App() {
       window.removeEventListener("keyup", handleModifierRelease);
       window.removeEventListener("blur", hideShortcutHints);
     };
-  }, [busyAction, capturing, commandOpen, editingItem, filtersOpen, libraryMode, readerItem, undoNotice, view]);
+  }, [busyAction, capturing, commandOpen, editingItem, filtersOpen, libraryMode, readerItem, shortcutsOpen, undoNotice, view]);
 
   // Pasting a URL with nothing focused stages it in the omnibar and puts the
   // caret there. It stops short of saving: writing an item straight from the
@@ -1970,6 +1985,10 @@ export function App() {
         />
       ) : null}
 
+      {shortcutsOpen ? (
+        <KeyboardShortcutsDialog onClose={() => setShortcutsOpen(false)} />
+      ) : null}
+
     </div>
   );
 }
@@ -2994,6 +3013,79 @@ function CommandPalette({
         ))}
       </div>
       <footer className="command-footer"><span><b>Ctrl P/N · ↑↓</b> navigate</span><span><b>↵</b> select</span><span><b>esc</b> close</span></footer>
+    </dialog>
+  );
+}
+
+function KeyboardShortcutsDialog({ onClose }: { onClose: () => void }) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const mac = isMacPlatform();
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    dialog.showModal();
+    dialog.querySelector<HTMLButtonElement>("button")?.focus();
+    return () => {
+      if (dialog.open) dialog.close();
+    };
+  }, []);
+
+  return (
+    <dialog
+      aria-labelledby="shortcuts-heading"
+      className="shortcuts-dialog"
+      onCancel={(event) => {
+        event.preventDefault();
+        onClose();
+      }}
+      ref={dialogRef}
+    >
+      <div className="shortcuts-heading">
+        <div>
+          <h2 id="shortcuts-heading">Keyboard shortcuts</h2>
+          <p>Shortcuts for this workspace</p>
+        </div>
+        <button aria-label="Close keyboard shortcuts" onClick={onClose} type="button">×</button>
+      </div>
+      <div className="shortcuts-body">
+        <section>
+          <h3>Navigation</h3>
+          <dl className="shortcut-list">
+            <div><dt>All saves</dt><dd><kbd>{mac ? "Control A" : "Ctrl Alt A"}</kbd></dd></div>
+            <div><dt>Favorites</dt><dd><kbd>{mac ? "Control F" : "Ctrl Alt F"}</kbd></dd></div>
+            <div><dt>Archive</dt><dd><kbd>{mac ? "Control V" : "Ctrl Alt V"}</kbd></dd></div>
+            <div><dt>Graph</dt><dd><kbd>{mac ? "Control G" : "Ctrl Alt G"}</kbd></dd></div>
+            <div><dt>Documents</dt><dd><kbd>{mac ? "Control D" : "Ctrl Alt D"}</kbd></dd></div>
+            <div><dt>Search library</dt><dd><kbd>/</kbd></dd></div>
+          </dl>
+        </section>
+        <section>
+          <h3>Actions</h3>
+          <dl className="shortcut-list">
+            <div><dt>Command palette</dt><dd><kbd>{mac ? "⌘ Shift P" : "Ctrl Shift P"}</kbd></dd></div>
+            <div><dt>Undo last change</dt><dd><kbd>{mac ? "⌘ Z" : "Ctrl Z"}</kbd></dd></div>
+            <div><dt>Close reader or dialog</dt><dd><kbd>Esc</kbd></dd></div>
+            <div><dt>Show these shortcuts</dt><dd><kbd>?</kbd></dd></div>
+          </dl>
+        </section>
+        <section>
+          <h3>Command palette</h3>
+          <dl className="shortcut-list">
+            <div><dt>Move through results</dt><dd><kbd>↑ ↓</kbd></dd></div>
+            <div><dt>Move through results</dt><dd><kbd>{mac ? "Control P / N" : "Ctrl P / N"}</kbd></dd></div>
+            <div><dt>Open selected result</dt><dd><kbd>Enter</kbd></dd></div>
+          </dl>
+        </section>
+        <section>
+          <h3>Graph</h3>
+          <dl className="shortcut-list">
+            <div><dt>Fit all nodes</dt><dd><kbd>0</kbd></dd></div>
+            <div><dt>Zoom</dt><dd><kbd>+ / −</kbd></dd></div>
+            <div><dt>Focus selected save</dt><dd><kbd>C</kbd></dd></div>
+          </dl>
+        </section>
+      </div>
     </dialog>
   );
 }
