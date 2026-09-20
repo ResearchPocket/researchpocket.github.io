@@ -513,6 +513,12 @@ export function App() {
 
       if (event.key === "Escape") {
         setCommandOpen(false);
+        if (isTyping) {
+          // The focused field is the topmost layer: leave it first, so a second
+          // Escape reaches the view behind it instead of skipping straight out.
+          (event.target as HTMLElement | null)?.blur();
+          return;
+        }
         if (filtersOpen) {
           setFiltersOpen(false);
         } else {
