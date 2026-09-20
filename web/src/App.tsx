@@ -3077,11 +3077,11 @@ function KeyboardShortcutsDialog({ onClose }: { onClose: () => void }) {
         <section>
           <h3>Navigation</h3>
           <dl className="shortcut-list">
-            <div><dt>All saves</dt><dd><kbd>{mac ? "Control A" : "Ctrl Alt A"}</kbd></dd></div>
-            <div><dt>Favorites</dt><dd><kbd>{mac ? "Control F" : "Ctrl Alt F"}</kbd></dd></div>
-            <div><dt>Archive</dt><dd><kbd>{mac ? "Control V" : "Ctrl Alt V"}</kbd></dd></div>
-            <div><dt>Graph</dt><dd><kbd>{mac ? "Control G" : "Ctrl Alt G"}</kbd></dd></div>
-            <div><dt>Documents</dt><dd><kbd>{mac ? "Control D" : "Ctrl Alt D"}</kbd></dd></div>
+            <div><dt>All saves</dt><dd><kbd>{mac ? "Ctrl A" : "Ctrl Alt A"}</kbd></dd></div>
+            <div><dt>Favorites</dt><dd><kbd>{mac ? "Ctrl F" : "Ctrl Alt F"}</kbd></dd></div>
+            <div><dt>Archive</dt><dd><kbd>{mac ? "Ctrl V" : "Ctrl Alt V"}</kbd></dd></div>
+            <div><dt>Graph</dt><dd><kbd>{mac ? "Ctrl G" : "Ctrl Alt G"}</kbd></dd></div>
+            <div><dt>Documents</dt><dd><kbd>{mac ? "Ctrl D" : "Ctrl Alt D"}</kbd></dd></div>
             <div><dt>Search library</dt><dd><kbd>/</kbd></dd></div>
           </dl>
         </section>
@@ -3098,7 +3098,7 @@ function KeyboardShortcutsDialog({ onClose }: { onClose: () => void }) {
           <h3>Command palette</h3>
           <dl className="shortcut-list">
             <div><dt>Move through results</dt><dd><kbd>↑ ↓</kbd></dd></div>
-            <div><dt>Move through results</dt><dd><kbd>{mac ? "Control P / N" : "Ctrl P / N"}</kbd></dd></div>
+            <div><dt>Move through results</dt><dd><kbd>{mac ? "Ctrl P / N" : "Ctrl P / N"}</kbd></dd></div>
             <div><dt>Open selected result</dt><dd><kbd>Enter</kbd></dd></div>
           </dl>
         </section>
