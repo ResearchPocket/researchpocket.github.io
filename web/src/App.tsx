@@ -419,14 +419,25 @@ export function App() {
   }, [readerMeasure]);
 
   useEffect(() => {
-    function handleShortcut(event: KeyboardEvent) {
-      const target = event.target as HTMLElement | null;
-      const isTyping =
-        target?.matches("input, textarea, select") || target?.isContentEditable;
-      const shortcutModifierDown = isMacPlatform()
+    let shortcutModifierHeld = false;
+
+    function shortcutModifierActive(event: KeyboardEvent) {
+      return isMacPlatform()
         ? event.ctrlKey && !event.altKey && !event.metaKey
         : event.ctrlKey && event.altKey && !event.metaKey;
-      setShortcutHintsVisible(shortcutModifierDown);
+    }
+
+    function targetAcceptsText(target: EventTarget | null) {
+      const element = target as HTMLElement | null;
+      return Boolean(
+        element?.matches("input, textarea, select") || element?.isContentEditable,
+      );
+    }
+
+    function handleShortcut(event: KeyboardEvent) {
+      const isTyping = targetAcceptsText(event.target);
+      shortcutModifierHeld = shortcutModifierActive(event);
+      setShortcutHintsVisible(shortcutModifierHeld && !isTyping);
 
       if (
         (event.key === "?" || (event.code === "Slash" && event.shiftKey)) &&
@@ -442,11 +453,8 @@ export function App() {
         return;
       }
 
-      const viewShortcutModifier = isMacPlatform()
-        ? event.ctrlKey && !event.altKey && !event.metaKey
-        : event.ctrlKey && event.altKey && !event.metaKey;
       if (
-        viewShortcutModifier &&
+        shortcutModifierHeld &&
         !event.shiftKey &&
         !isTyping &&
         !commandOpen &&
@@ -534,22 +542,33 @@ export function App() {
     }
 
     function handleModifierRelease(event: KeyboardEvent) {
-      const modifierStillDown = isMacPlatform()
-        ? event.ctrlKey && !event.altKey && !event.metaKey
-        : event.ctrlKey && event.altKey && !event.metaKey;
-      setShortcutHintsVisible(modifierStillDown);
+      shortcutModifierHeld = shortcutModifierActive(event);
+      setShortcutHintsVisible(
+        shortcutModifierHeld && !targetAcceptsText(event.target),
+      );
+    }
+
+    function handleFocusChange(event: FocusEvent) {
+      // Focus can move while the modifier is already held, so the hints have to
+      // re-evaluate against the newly focused element as well.
+      setShortcutHintsVisible(
+        shortcutModifierHeld && !targetAcceptsText(event.target),
+      );
     }
 
     function hideShortcutHints() {
+      shortcutModifierHeld = false;
       setShortcutHintsVisible(false);
     }
 
     window.addEventListener("keydown", handleShortcut);
     window.addEventListener("keyup", handleModifierRelease);
+    window.addEventListener("focusin", handleFocusChange);
     window.addEventListener("blur", hideShortcutHints);
     return () => {
       window.removeEventListener("keydown", handleShortcut);
       window.removeEventListener("keyup", handleModifierRelease);
+      window.removeEventListener("focusin", handleFocusChange);
       window.removeEventListener("blur", hideShortcutHints);
     };
   }, [busyAction, capturing, commandOpen, editingItem, filtersOpen, libraryMode, readerItem, shortcutsOpen, undoNotice, view]);
