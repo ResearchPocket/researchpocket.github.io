@@ -247,6 +247,7 @@ export function App() {
   const [zenMentions, setZenMentions] = useState<GraphMentionSource[]>([]);
   const [capturing, setCapturing] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
+  const [shortcutHintsVisible, setShortcutHintsVisible] = useState(false);
   const [readerItem, setReaderItem] = useState<LibraryItemView | null>(null);
   const [editingItem, setEditingItem] = useState<LibraryItemView | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
@@ -421,6 +422,57 @@ export function App() {
       const target = event.target as HTMLElement | null;
       const isTyping =
         target?.matches("input, textarea, select") || target?.isContentEditable;
+      const shortcutModifierDown = isMacPlatform()
+        ? event.ctrlKey && !event.altKey && !event.metaKey
+        : event.ctrlKey && event.altKey && !event.metaKey;
+      setShortcutHintsVisible(shortcutModifierDown);
+
+      const viewShortcutModifier = isMacPlatform()
+        ? event.ctrlKey && !event.altKey && !event.metaKey
+        : event.ctrlKey && event.altKey && !event.metaKey;
+      if (
+        viewShortcutModifier &&
+        !event.shiftKey &&
+        !isTyping &&
+        !commandOpen &&
+        !capturing &&
+        !editingItem &&
+        !readerItem
+      ) {
+        switch (event.key.toLowerCase()) {
+          case "a":
+            event.preventDefault();
+            navigateToView("library");
+            setFilter("active");
+            setFavoriteOnly(false);
+            setSelectedTags([]);
+            return;
+          case "f":
+            event.preventDefault();
+            navigateToView("library");
+            setFilter("active");
+            setFavoriteOnly(true);
+            setSelectedTags([]);
+            return;
+          case "v":
+            event.preventDefault();
+            navigateToView("library");
+            setFilter("deleted");
+            setFavoriteOnly(false);
+            setSelectedTags([]);
+            return;
+          case "g":
+            event.preventDefault();
+            navigateToView("library");
+            changeLibraryMode(libraryMode === "graph" ? "list" : "graph");
+            return;
+          case "d":
+            event.preventDefault();
+            setOpenZen(null);
+            navigateToView("zen");
+            return;
+        }
+      }
 
       const commandPaletteModifier = isMacPlatform()
         ? event.metaKey && !event.ctrlKey
@@ -466,9 +518,26 @@ export function App() {
       }
     }
 
+    function handleModifierRelease(event: KeyboardEvent) {
+      const modifierStillDown = isMacPlatform()
+        ? event.ctrlKey && !event.altKey && !event.metaKey
+        : event.ctrlKey && event.altKey && !event.metaKey;
+      setShortcutHintsVisible(modifierStillDown);
+    }
+
+    function hideShortcutHints() {
+      setShortcutHintsVisible(false);
+    }
+
     window.addEventListener("keydown", handleShortcut);
-    return () => window.removeEventListener("keydown", handleShortcut);
-  }, [busyAction, filtersOpen, undoNotice, view]);
+    window.addEventListener("keyup", handleModifierRelease);
+    window.addEventListener("blur", hideShortcutHints);
+    return () => {
+      window.removeEventListener("keydown", handleShortcut);
+      window.removeEventListener("keyup", handleModifierRelease);
+      window.removeEventListener("blur", hideShortcutHints);
+    };
+  }, [busyAction, capturing, commandOpen, editingItem, filtersOpen, libraryMode, readerItem, undoNotice, view]);
 
   // Pasting a URL with nothing focused stages it in the omnibar and puts the
   // caret there. It stops short of saving: writing an item straight from the
@@ -1254,7 +1323,14 @@ export function App() {
                 }}
                 type="button"
               >
-                <span>All saves</span><small>{activeCount}</small>
+                <span>All saves</span>
+                <span className="rail-nav-trailing">
+                  <kbd
+                    aria-hidden="true"
+                    className={`rail-shortcut-hint${shortcutHintsVisible ? " rail-shortcut-hint-visible" : ""}`}
+                  >A</kbd>
+                  <small>{activeCount}</small>
+                </span>
               </button>
               <button
                 aria-current={view === "library" && favoriteOnly ? "page" : undefined}
@@ -1267,7 +1343,13 @@ export function App() {
                 type="button"
               >
                 <span>★ Favorites</span>
-                <small>{items.filter((item) => !item.deleted && item.favorite).length}</small>
+                <span className="rail-nav-trailing">
+                  <kbd
+                    aria-hidden="true"
+                    className={`rail-shortcut-hint${shortcutHintsVisible ? " rail-shortcut-hint-visible" : ""}`}
+                  >F</kbd>
+                  <small>{items.filter((item) => !item.deleted && item.favorite).length}</small>
+                </span>
               </button>
               <button
                 aria-current={view === "library" && filter === "deleted" ? "page" : undefined}
@@ -1279,7 +1361,14 @@ export function App() {
                 }}
                 type="button"
               >
-                <span>Archive</span><small>{deletedCount}</small>
+                <span>Archive</span>
+                <span className="rail-nav-trailing">
+                  <kbd
+                    aria-hidden="true"
+                    className={`rail-shortcut-hint${shortcutHintsVisible ? " rail-shortcut-hint-visible" : ""}`}
+                  >V</kbd>
+                  <small>{deletedCount}</small>
+                </span>
               </button>
               {/* The strip is the phone's whole navigation, and the heading row
                   that carries the desktop's List/Graph control is not on it. */}
@@ -1295,6 +1384,13 @@ export function App() {
                 type="button"
               >
                 <span>Graph</span>
+                <span className="rail-nav-trailing">
+                  <kbd
+                    aria-hidden="true"
+                    className={`rail-shortcut-hint${shortcutHintsVisible ? " rail-shortcut-hint-visible" : ""}`}
+                  >G</kbd>
+                  <small aria-hidden="true" />
+                </span>
               </button>
             </nav>
 
@@ -1317,7 +1413,13 @@ export function App() {
                       headings, so the chip has to name itself. */}
                   <span className="rail-label-wide">Documents</span>
                   <span className="rail-label-narrow">Zen</span>
-                  <small>{zenDocuments.length}</small>
+                  <span className="rail-nav-trailing">
+                    <kbd
+                      aria-hidden="true"
+                      className={`rail-shortcut-hint${shortcutHintsVisible ? " rail-shortcut-hint-visible" : ""}`}
+                    >D</kbd>
+                    <small>{zenDocuments.length}</small>
+                  </span>
                 </button>
               </nav>
             </div>
