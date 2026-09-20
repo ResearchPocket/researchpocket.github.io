@@ -247,6 +247,8 @@ export function App() {
   const [zenMentions, setZenMentions] = useState<GraphMentionSource[]>([]);
   const [capturing, setCapturing] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [shortcutHintsVisible, setShortcutHintsVisible] = useState(false);
   const [readerItem, setReaderItem] = useState<LibraryItemView | null>(null);
   const [editingItem, setEditingItem] = useState<LibraryItemView | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
@@ -417,16 +419,91 @@ export function App() {
   }, [readerMeasure]);
 
   useEffect(() => {
+    let shortcutModifierHeld = false;
+
+    function shortcutModifierActive(event: KeyboardEvent) {
+      return isMacPlatform()
+        ? event.ctrlKey && !event.altKey && !event.metaKey
+        : event.ctrlKey && event.altKey && !event.metaKey;
+    }
+
+    function targetAcceptsText(target: EventTarget | null) {
+      const element = target as HTMLElement | null;
+      return Boolean(
+        element?.matches("input, textarea, select") || element?.isContentEditable,
+      );
+    }
+
     function handleShortcut(event: KeyboardEvent) {
-      const target = event.target as HTMLElement | null;
-      const isTyping =
-        target?.matches("input, textarea, select") || target?.isContentEditable;
+      const isTyping = targetAcceptsText(event.target);
+      shortcutModifierHeld = shortcutModifierActive(event);
+      setShortcutHintsVisible(shortcutModifierHeld && !isTyping);
 
       if (
-        event.ctrlKey &&
+        (event.key === "?" || (event.code === "Slash" && event.shiftKey)) &&
+        !isTyping &&
+        !shortcutsOpen &&
+        !commandOpen &&
+        !capturing &&
+        !editingItem &&
+        !readerItem
+      ) {
+        event.preventDefault();
+        setShortcutsOpen(true);
+        return;
+      }
+
+      if (
+        shortcutModifierHeld &&
+        !event.shiftKey &&
+        !isTyping &&
+        !commandOpen &&
+        !capturing &&
+        !editingItem &&
+        !readerItem
+      ) {
+        switch (event.key.toLowerCase()) {
+          case "a":
+            event.preventDefault();
+            navigateToView("library");
+            setFilter("active");
+            setFavoriteOnly(false);
+            setSelectedTags([]);
+            return;
+          case "f":
+            event.preventDefault();
+            navigateToView("library");
+            setFilter("active");
+            setFavoriteOnly(true);
+            setSelectedTags([]);
+            return;
+          case "v":
+            event.preventDefault();
+            navigateToView("library");
+            setFilter("deleted");
+            setFavoriteOnly(false);
+            setSelectedTags([]);
+            return;
+          case "g":
+            event.preventDefault();
+            navigateToView("library");
+            changeLibraryMode(libraryMode === "graph" ? "list" : "graph");
+            return;
+          case "d":
+            event.preventDefault();
+            setOpenZen(null);
+            navigateToView("zen");
+            return;
+        }
+      }
+
+      const commandPaletteModifier = isMacPlatform()
+        ? event.metaKey && !event.ctrlKey
+        : event.ctrlKey && !event.metaKey;
+      if (
+        commandPaletteModifier &&
         event.shiftKey &&
         !event.altKey &&
-        !event.metaKey &&
         event.key.toLowerCase() === "p"
       ) {
         event.preventDefault();
@@ -436,6 +513,12 @@ export function App() {
 
       if (event.key === "Escape") {
         setCommandOpen(false);
+        if (isTyping) {
+          // The focused field is the topmost layer: leave it first, so a second
+          // Escape reaches the view behind it instead of skipping straight out.
+          (event.target as HTMLElement | null)?.blur();
+          return;
+        }
         if (filtersOpen) {
           setFiltersOpen(false);
         } else {
@@ -464,9 +547,37 @@ export function App() {
       }
     }
 
+    function handleModifierRelease(event: KeyboardEvent) {
+      shortcutModifierHeld = shortcutModifierActive(event);
+      setShortcutHintsVisible(
+        shortcutModifierHeld && !targetAcceptsText(event.target),
+      );
+    }
+
+    function handleFocusChange(event: FocusEvent) {
+      // Focus can move while the modifier is already held, so the hints have to
+      // re-evaluate against the newly focused element as well.
+      setShortcutHintsVisible(
+        shortcutModifierHeld && !targetAcceptsText(event.target),
+      );
+    }
+
+    function hideShortcutHints() {
+      shortcutModifierHeld = false;
+      setShortcutHintsVisible(false);
+    }
+
     window.addEventListener("keydown", handleShortcut);
-    return () => window.removeEventListener("keydown", handleShortcut);
-  }, [busyAction, filtersOpen, undoNotice, view]);
+    window.addEventListener("keyup", handleModifierRelease);
+    window.addEventListener("focusin", handleFocusChange);
+    window.addEventListener("blur", hideShortcutHints);
+    return () => {
+      window.removeEventListener("keydown", handleShortcut);
+      window.removeEventListener("keyup", handleModifierRelease);
+      window.removeEventListener("focusin", handleFocusChange);
+      window.removeEventListener("blur", hideShortcutHints);
+    };
+  }, [busyAction, capturing, commandOpen, editingItem, filtersOpen, libraryMode, readerItem, shortcutsOpen, undoNotice, view]);
 
   // Pasting a URL with nothing focused stages it in the omnibar and puts the
   // caret there. It stops short of saving: writing an item straight from the
@@ -1118,7 +1229,7 @@ export function App() {
               onClick={() => setCommandOpen(true)}
               type="button"
             >
-              search <kbd>Ctrl Shift P</kbd>
+              search <kbd>{isMacPlatform() ? "⌘ Shift P" : "Ctrl Shift P"}</kbd>
             </button>
           </div>
         </header>
@@ -1252,7 +1363,14 @@ export function App() {
                 }}
                 type="button"
               >
-                <span>All saves</span><small>{activeCount}</small>
+                <span>All saves</span>
+                <span className="rail-nav-trailing">
+                  <kbd
+                    aria-hidden="true"
+                    className={`rail-shortcut-hint${shortcutHintsVisible ? " rail-shortcut-hint-visible" : ""}`}
+                  >A</kbd>
+                  <small>{activeCount}</small>
+                </span>
               </button>
               <button
                 aria-current={view === "library" && favoriteOnly ? "page" : undefined}
@@ -1265,7 +1383,13 @@ export function App() {
                 type="button"
               >
                 <span>★ Favorites</span>
-                <small>{items.filter((item) => !item.deleted && item.favorite).length}</small>
+                <span className="rail-nav-trailing">
+                  <kbd
+                    aria-hidden="true"
+                    className={`rail-shortcut-hint${shortcutHintsVisible ? " rail-shortcut-hint-visible" : ""}`}
+                  >F</kbd>
+                  <small>{items.filter((item) => !item.deleted && item.favorite).length}</small>
+                </span>
               </button>
               <button
                 aria-current={view === "library" && filter === "deleted" ? "page" : undefined}
@@ -1277,7 +1401,14 @@ export function App() {
                 }}
                 type="button"
               >
-                <span>Archive</span><small>{deletedCount}</small>
+                <span>Archive</span>
+                <span className="rail-nav-trailing">
+                  <kbd
+                    aria-hidden="true"
+                    className={`rail-shortcut-hint${shortcutHintsVisible ? " rail-shortcut-hint-visible" : ""}`}
+                  >V</kbd>
+                  <small>{deletedCount}</small>
+                </span>
               </button>
               {/* The strip is the phone's whole navigation, and the heading row
                   that carries the desktop's List/Graph control is not on it. */}
@@ -1293,6 +1424,13 @@ export function App() {
                 type="button"
               >
                 <span>Graph</span>
+                <span className="rail-nav-trailing">
+                  <kbd
+                    aria-hidden="true"
+                    className={`rail-shortcut-hint${shortcutHintsVisible ? " rail-shortcut-hint-visible" : ""}`}
+                  >G</kbd>
+                  <small aria-hidden="true" />
+                </span>
               </button>
             </nav>
 
@@ -1315,7 +1453,13 @@ export function App() {
                       headings, so the chip has to name itself. */}
                   <span className="rail-label-wide">Documents</span>
                   <span className="rail-label-narrow">Zen</span>
-                  <small>{zenDocuments.length}</small>
+                  <span className="rail-nav-trailing">
+                    <kbd
+                      aria-hidden="true"
+                      className={`rail-shortcut-hint${shortcutHintsVisible ? " rail-shortcut-hint-visible" : ""}`}
+                    >D</kbd>
+                    <small>{zenDocuments.length}</small>
+                  </span>
                 </button>
               </nav>
             </div>
@@ -1866,6 +2010,10 @@ export function App() {
         />
       ) : null}
 
+      {shortcutsOpen ? (
+        <KeyboardShortcutsDialog onClose={() => setShortcutsOpen(false)} />
+      ) : null}
+
     </div>
   );
 }
@@ -2264,7 +2412,7 @@ function SettingsPanel({
           <h3>Keyboard</h3>
         </div>
         <dl className="shortcut-list">
-          <div><dt>Command palette</dt><dd><kbd>Ctrl Shift P</kbd></dd></div>
+          <div><dt>Command palette</dt><dd><kbd>{isMacPlatform() ? "⌘ Shift P" : "Ctrl Shift P"}</kbd></dd></div>
           <div><dt>Search library</dt><dd><kbd>/</kbd></dd></div>
           <div><dt>Close a focused view</dt><dd><kbd>Esc</kbd></dd></div>
         </dl>
@@ -2890,6 +3038,79 @@ function CommandPalette({
         ))}
       </div>
       <footer className="command-footer"><span><b>Ctrl P/N · ↑↓</b> navigate</span><span><b>↵</b> select</span><span><b>esc</b> close</span></footer>
+    </dialog>
+  );
+}
+
+function KeyboardShortcutsDialog({ onClose }: { onClose: () => void }) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const mac = isMacPlatform();
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    dialog.showModal();
+    dialog.querySelector<HTMLButtonElement>("button")?.focus();
+    return () => {
+      if (dialog.open) dialog.close();
+    };
+  }, []);
+
+  return (
+    <dialog
+      aria-labelledby="shortcuts-heading"
+      className="shortcuts-dialog"
+      onCancel={(event) => {
+        event.preventDefault();
+        onClose();
+      }}
+      ref={dialogRef}
+    >
+      <div className="shortcuts-heading">
+        <div>
+          <h2 id="shortcuts-heading">Keyboard shortcuts</h2>
+          <p>Shortcuts for this workspace</p>
+        </div>
+        <button aria-label="Close keyboard shortcuts" onClick={onClose} type="button">×</button>
+      </div>
+      <div className="shortcuts-body">
+        <section>
+          <h3>Navigation</h3>
+          <dl className="shortcut-list">
+            <div><dt>All saves</dt><dd><kbd>{mac ? "Ctrl A" : "Ctrl Alt A"}</kbd></dd></div>
+            <div><dt>Favorites</dt><dd><kbd>{mac ? "Ctrl F" : "Ctrl Alt F"}</kbd></dd></div>
+            <div><dt>Archive</dt><dd><kbd>{mac ? "Ctrl V" : "Ctrl Alt V"}</kbd></dd></div>
+            <div><dt>Graph</dt><dd><kbd>{mac ? "Ctrl G" : "Ctrl Alt G"}</kbd></dd></div>
+            <div><dt>Documents</dt><dd><kbd>{mac ? "Ctrl D" : "Ctrl Alt D"}</kbd></dd></div>
+            <div><dt>Search library</dt><dd><kbd>/</kbd></dd></div>
+          </dl>
+        </section>
+        <section>
+          <h3>Actions</h3>
+          <dl className="shortcut-list">
+            <div><dt>Command palette</dt><dd><kbd>{mac ? "⌘ Shift P" : "Ctrl Shift P"}</kbd></dd></div>
+            <div><dt>Undo last change</dt><dd><kbd>{mac ? "⌘ Z" : "Ctrl Z"}</kbd></dd></div>
+            <div><dt>Close reader or dialog</dt><dd><kbd>Esc</kbd></dd></div>
+            <div><dt>Show these shortcuts</dt><dd><kbd>?</kbd></dd></div>
+          </dl>
+        </section>
+        <section>
+          <h3>Command palette</h3>
+          <dl className="shortcut-list">
+            <div><dt>Move through results</dt><dd><kbd>↑ ↓</kbd></dd></div>
+            <div><dt>Move through results</dt><dd><kbd>{mac ? "Ctrl P / N" : "Ctrl P / N"}</kbd></dd></div>
+            <div><dt>Open selected result</dt><dd><kbd>Enter</kbd></dd></div>
+          </dl>
+        </section>
+        <section>
+          <h3>Graph</h3>
+          <dl className="shortcut-list">
+            <div><dt>Fit all nodes</dt><dd><kbd>0</kbd></dd></div>
+            <div><dt>Zoom</dt><dd><kbd>+ / −</kbd></dd></div>
+            <div><dt>Focus selected save</dt><dd><kbd>C</kbd></dd></div>
+          </dl>
+        </section>
+      </div>
     </dialog>
   );
 }
@@ -4048,6 +4269,10 @@ function formatDateTime(value: string) {
 
 function pluralize(count: number, noun: string) {
   return `${count.toLocaleString()} ${noun}${count === 1 ? "" : "s"}`;
+}
+
+function isMacPlatform() {
+  return /Mac|iPhone|iPad|iPod/u.test(navigator.platform);
 }
 
 function readWorkspaceView(): WorkspaceView {

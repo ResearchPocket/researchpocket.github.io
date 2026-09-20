@@ -2456,6 +2456,34 @@ kbd {
   font-weight: 400;
 }
 
+.rail-nav-trailing {
+  align-items: center;
+  display: inline-grid;
+  flex: 0 0 auto;
+  gap: 0.375rem;
+  grid-template-columns: 1.25rem 3ch;
+  margin-left: auto;
+}
+
+.rail-nav-trailing small {
+  text-align: right;
+}
+
+.rail-shortcut-hint {
+  background: transparent;
+  border-color: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: 400;
+  opacity: 0.65;
+  text-align: center;
+  visibility: hidden;
+}
+
+.rail-shortcut-hint-visible {
+  visibility: visible;
+}
+
 .rail-label-narrow {
   display: none;
 }
@@ -2738,7 +2766,8 @@ kbd {
 
 .capture-dialog::backdrop,
 .edit-dialog::backdrop,
-.command-dialog::backdrop {
+.command-dialog::backdrop,
+.shortcuts-dialog::backdrop {
   background: var(--color-backdrop);
 }
 
@@ -2788,6 +2817,70 @@ kbd {
   max-width: 40rem;
   padding: 0;
   width: calc(100% - 2rem);
+}
+
+.shortcuts-dialog {
+  background: var(--color-surface);
+  border: var(--rule) solid var(--color-border-strong);
+  border-radius: var(--radius);
+  color: var(--color-text);
+  max-height: calc(100dvh - 2rem);
+  max-width: 46rem;
+  overflow: hidden;
+  padding: 0;
+  width: calc(100% - 2rem);
+}
+
+.shortcuts-heading {
+  align-items: center;
+  border-bottom: var(--rule) solid var(--color-border-strong);
+  display: flex;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+}
+
+.shortcuts-heading h2,
+.shortcuts-heading p {
+  margin: 0;
+}
+
+.shortcuts-heading h2 {
+  font-size: var(--font-size-md);
+}
+
+.shortcuts-heading p {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  margin-top: 0.25rem;
+}
+
+.shortcuts-heading button {
+  background: transparent;
+  border: var(--rule) solid var(--color-border-strong);
+  border-radius: var(--radius);
+  color: var(--color-text);
+  font-size: var(--font-size-lg);
+  min-height: var(--control-height);
+  min-width: var(--control-height);
+}
+
+.shortcuts-body {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-height: calc(100dvh - 7rem);
+  overflow-y: auto;
+  padding: var(--space-4);
+}
+
+.shortcuts-body h3 {
+  font-size: var(--font-size-sm);
+  margin: 0 0 0.375rem;
+}
+
+.shortcuts-body .shortcut-list dd kbd {
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
 }
 
 .command-input {
@@ -3500,6 +3593,11 @@ kbd {
     width: auto;
   }
 
+  .rail-nav-trailing {
+    gap: 0.25rem;
+    grid-template-columns: 1.25rem max-content;
+  }
+
   /* The chip's whole edge marks the current view; the rail's left bar has no
      meaning once the buttons are laid out in a row. */
   .rail-nav button[aria-current="page"],
@@ -3712,6 +3810,10 @@ kbd {
   .command-dialog {
     margin-top: 4rem;
     max-height: calc(100dvh - 5rem);
+  }
+
+  .shortcuts-body {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .reader-view {
