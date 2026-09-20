@@ -422,11 +422,13 @@ export function App() {
       const isTyping =
         target?.matches("input, textarea, select") || target?.isContentEditable;
 
+      const commandPaletteModifier = isMacPlatform()
+        ? event.metaKey && !event.ctrlKey
+        : event.ctrlKey && !event.metaKey;
       if (
-        event.ctrlKey &&
+        commandPaletteModifier &&
         event.shiftKey &&
         !event.altKey &&
-        !event.metaKey &&
         event.key.toLowerCase() === "p"
       ) {
         event.preventDefault();
@@ -1118,7 +1120,7 @@ export function App() {
               onClick={() => setCommandOpen(true)}
               type="button"
             >
-              search <kbd>Ctrl Shift P</kbd>
+              search <kbd>{isMacPlatform() ? "⌘ Shift P" : "Ctrl Shift P"}</kbd>
             </button>
           </div>
         </header>
@@ -2264,7 +2266,7 @@ function SettingsPanel({
           <h3>Keyboard</h3>
         </div>
         <dl className="shortcut-list">
-          <div><dt>Command palette</dt><dd><kbd>Ctrl Shift P</kbd></dd></div>
+          <div><dt>Command palette</dt><dd><kbd>{isMacPlatform() ? "⌘ Shift P" : "Ctrl Shift P"}</kbd></dd></div>
           <div><dt>Search library</dt><dd><kbd>/</kbd></dd></div>
           <div><dt>Close a focused view</dt><dd><kbd>Esc</kbd></dd></div>
         </dl>
@@ -4048,6 +4050,10 @@ function formatDateTime(value: string) {
 
 function pluralize(count: number, noun: string) {
   return `${count.toLocaleString()} ${noun}${count === 1 ? "" : "s"}`;
+}
+
+function isMacPlatform() {
+  return /Mac|iPhone|iPad|iPod/u.test(navigator.platform);
 }
 
 function readWorkspaceView(): WorkspaceView {
