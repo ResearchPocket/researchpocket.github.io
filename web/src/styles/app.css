@@ -546,7 +546,6 @@ button.local-status:focus-visible .status-copy {
 }
 
 .sync-settings {
-  border-block: var(--rule) solid var(--color-border);
   padding-block: var(--space-2);
 }
 
@@ -659,10 +658,6 @@ button.local-status:focus-visible .status-copy {
   list-style: none;
   margin: 0;
   padding: 0;
-}
-
-.sync-change {
-  border-bottom: var(--rule) solid var(--color-border-subtle);
 }
 
 .sync-change > summary {
