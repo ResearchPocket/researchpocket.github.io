@@ -98,6 +98,29 @@ for focus and secondary emphasis. Surfaces, borders, muted text, and destructive
 states are derived only from those five source colors. Hierarchy should primarily
 come from rules, spacing, weight, and labels rather than adding palette entries.
 
+Owner Settings includes a Kanagawa Wave preset using the upstream
+[Kanagawa palette](https://github.com/rebelot/kanagawa.nvim/blob/master/lua/kanagawa/colors.lua):
+Fuji White text, Sumi Ink 3 background, Crystal Blue primary, Spring Blue
+secondary, and Oni Violet accent. Like the other presets, it uses the existing
+five-color customization and browser-local preference storage; derived semantic
+tokens apply it throughout the owner workspace.
+
+### Sync workspace
+
+Keep Sync minimal: a compact heading and sync action, one status line, and a
+collapsed repository disclosure. Open connection setup or token renewal only
+when needed. Pending totals include document updates; item changes appear as
+single-line rows, ten at a time, with optional details and item actions behind
+individual disclosures. Avoid hero panels, explanatory sidebars, and persistent
+multi-line logs. Offline and error states must remain explicit without claiming
+remote success. Token storage and synchronization behavior remain defined by
+WEB.md and the threat model.
+
+Desktop sidebar destinations use consistent 22px first-party SVG icons in both
+the expanded sidebar and the collapsed rail. Collapsed controls have a minimum
+40px target on fine pointers and use the control-height token for touch. Keep
+the mobile text navigation compact and retain accessible destination labels.
+
 ### Type
 
 All surfaces use the self-hosted Berkeley Mono family, falling back to the

@@ -130,6 +130,17 @@ const DEFAULT_THEME: ThemeColors = {
 const THEME_PRESETS: ThemePreset[] = [
   { id: "researchpocket", label: "ResearchPocket", colors: DEFAULT_THEME },
   {
+    id: "kanagawa",
+    label: "Kanagawa Wave",
+    colors: {
+      text: "#dcd7ba",
+      background: "#1f1f28",
+      primary: "#7e9cd8",
+      secondary: "#7fb4ca",
+      accent: "#957fb8",
+    },
+  },
+  {
     id: "dracula",
     label: "Dracula",
     colors: {
@@ -214,6 +225,21 @@ const EMPTY_SYNC_STATE: BrowserSyncState = {
   error: null,
   lastCycle: null,
 };
+
+function RailIcon({ name }: {
+  name: "saves" | "favorites" | "archive" | "zen" | "tags" | "sync" | "settings";
+}) {
+  const paths = {
+    saves: <><path d="M5 3h14v18l-7-4-7 4z" /><path d="M9 7h6" /></>,
+    favorites: <path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9z" />,
+    archive: <><path d="M3 4h18v5H3zM5 9v12h14V9M9 13h6" /></>,
+    zen: <><path d="M5 3h10l4 4v14H5zM14 3v5h5M9 12h6M9 16h4" /></>,
+    tags: <><path d="M3 3h8l10 10-8 8L3 11z" /><circle cx="7.5" cy="7.5" r="1" /></>,
+    sync: <><path d="M20 10a8 8 0 0 0-14-4L3 9m0-6v6h6M4 14a8 8 0 0 0 14 4l3-3m0 6v-6h-6" /></>,
+    settings: <><path d="m9 3-1 3-3 1-2 3 2 2v3l3 2 1 4h6l1-4 3-2v-3l2-2-2-3-3-1-1-3z" /><circle cx="12" cy="12" r="3" /></>,
+  };
+  return <svg aria-hidden="true" className="rail-icon" viewBox="0 0 24 24">{paths[name]}</svg>;
+}
 
 export function App() {
   const [libraryState, setLibraryState] =
@@ -1157,7 +1183,7 @@ export function App() {
               title="All saves"
               type="button"
             >
-              <span aria-hidden="true">▣</span>
+              <RailIcon name="saves" />
               <span className="sr-only">All saves</span>
             </button>
             <button
@@ -1171,7 +1197,7 @@ export function App() {
               title="Favorites"
               type="button"
             >
-              <span aria-hidden="true">★</span>
+              <RailIcon name="favorites" />
               <span className="sr-only">Favorites</span>
             </button>
             <button
@@ -1185,7 +1211,7 @@ export function App() {
               title="Archive"
               type="button"
             >
-              <span aria-hidden="true">▤</span>
+              <RailIcon name="archive" />
               <span className="sr-only">Archive</span>
             </button>
 
@@ -1200,7 +1226,7 @@ export function App() {
               title="Zen documents"
               type="button"
             >
-              <span aria-hidden="true">¶</span>
+              <RailIcon name="zen" />
               <span className="sr-only">Zen documents</span>
             </button>
             {/* Tags are a list, and a list has nowhere to go in a 52px rail, so
@@ -1212,7 +1238,7 @@ export function App() {
               title="Tags"
               type="button"
             >
-              <span aria-hidden="true">#</span>
+              <RailIcon name="tags" />
               <span className="sr-only">Tags — show sidebar</span>
             </button>
 
@@ -1225,7 +1251,7 @@ export function App() {
               title="Sync"
               type="button"
             >
-              <span aria-hidden="true">↻</span>
+              <RailIcon name="sync" />
               <span className="sr-only">Sync</span>
             </button>
             <button
@@ -1235,7 +1261,7 @@ export function App() {
               title="Settings"
               type="button"
             >
-              <span aria-hidden="true">⚙</span>
+              <RailIcon name="settings" />
               <span className="sr-only">Settings</span>
             </button>
           </nav>
@@ -1252,7 +1278,7 @@ export function App() {
                 }}
                 type="button"
               >
-                <span>All saves</span><small>{activeCount}</small>
+                <span className="rail-destination"><RailIcon name="saves" />All saves</span><small>{activeCount}</small>
               </button>
               <button
                 aria-current={view === "library" && favoriteOnly ? "page" : undefined}
@@ -1264,7 +1290,7 @@ export function App() {
                 }}
                 type="button"
               >
-                <span>★ Favorites</span>
+                <span className="rail-destination"><RailIcon name="favorites" />Favorites</span>
                 <small>{items.filter((item) => !item.deleted && item.favorite).length}</small>
               </button>
               <button
@@ -1277,7 +1303,7 @@ export function App() {
                 }}
                 type="button"
               >
-                <span>Archive</span><small>{deletedCount}</small>
+                <span className="rail-destination"><RailIcon name="archive" />Archive</span><small>{deletedCount}</small>
               </button>
               {/* The strip is the phone's whole navigation, and the heading row
                   that carries the desktop's List/Graph control is not on it. */}
@@ -1313,7 +1339,7 @@ export function App() {
                 >
                   {/* The rail heading says ZEN above it; the chip strip drops
                       headings, so the chip has to name itself. */}
-                  <span className="rail-label-wide">Documents</span>
+                  <span className="rail-label-wide rail-destination"><RailIcon name="zen" />Documents</span>
                   <span className="rail-label-narrow">Zen</span>
                   <small>{zenDocuments.length}</small>
                 </button>
@@ -1365,14 +1391,14 @@ export function App() {
                 onClick={() => navigateToView("sync")}
                 type="button"
               >
-                <span>Sync</span><small>{libraryState.pendingCount} pending</small>
+                <span className="rail-destination"><RailIcon name="sync" />Sync</span><small>{libraryState.pendingCount} pending</small>
               </button>
               <button
                 aria-current={view === "settings" ? "page" : undefined}
                 onClick={() => navigateToView("settings")}
                 type="button"
               >
-                <span>Settings</span>
+                <span className="rail-destination"><RailIcon name="settings" />Settings</span>
               </button>
             </nav>
           </div>
@@ -1401,6 +1427,7 @@ export function App() {
             if (item && !item.deleted) void deleteItem(item);
           }}
           pendingChanges={libraryState.pendingChanges}
+          pendingCount={libraryState.pendingCount}
           state={syncState}
         />
 
@@ -2286,6 +2313,7 @@ function SyncPanel({
   hidden,
   onDeletePendingItem,
   pendingChanges,
+  pendingCount,
   state,
 }: {
   activeItemIds: ReadonlySet<string>;
@@ -2293,11 +2321,27 @@ function SyncPanel({
   hidden: boolean;
   onDeletePendingItem: (itemId: string) => void;
   pendingChanges: PendingSyncChange[];
+  pendingCount: number;
   state: BrowserSyncState;
 }) {
   const [repository, setRepository] = useState("");
   const [branch, setBranch] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
+  const [online, setOnline] = useState(() => navigator.onLine);
+
+  useEffect(() => {
+    const updateOnline = () => setOnline(navigator.onLine);
+    window.addEventListener("online", updateOnline);
+    window.addEventListener("offline", updateOnline);
+    return () => {
+      window.removeEventListener("online", updateOnline);
+      window.removeEventListener("offline", updateOnline);
+    };
+  }, []);
+
+  useEffect(() => {
+    setFormError(null);
+  }, [state.configuration]);
 
   async function connect(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -2340,144 +2384,113 @@ function SyncPanel({
 
   const error = formError ?? state.error;
   const remote = state.configuration;
+  const canSync = Boolean(remote && state.credentialAvailable);
+  const status = state.syncing
+    ? state.status
+    : !online
+      ? "Offline · changes saved locally"
+      : error
+        ? "Sync needs attention"
+        : !remote
+          ? "Not connected"
+          : !state.credentialAvailable
+            ? "Token required"
+            : pendingCount > 0
+              ? `${pluralize(pendingCount, "change")} waiting`
+              : remote.lastSuccessAt
+                ? "Up to date"
+                : "Ready to sync";
 
   return (
-    <section
-      aria-labelledby="sync-heading"
-      className="sync-section"
-      hidden={hidden}
-    >
+    <section aria-labelledby="sync-heading" className="sync-section" hidden={hidden}>
       <header className="sync-header">
-        <div>
-          <h2 id="sync-heading">Sync</h2>
-          <p>Private GitHub repository</p>
-        </div>
-        <div className="sync-state" role="status">
-          <span aria-hidden="true" className="status-dot" />
-          <span>{state.status}</span>
-        </div>
+        <h2 id="sync-heading">Sync</h2>
+        {canSync ? (
+          <button
+            className="primary-button"
+            disabled={state.syncing || !online}
+            onClick={() => void syncNow()}
+            type="button"
+          >
+            {state.syncing ? "Syncing…" : error ? "Retry sync" : "Sync now"}
+          </button>
+        ) : null}
       </header>
 
-      <div className="sync-layout">
-        <section aria-labelledby="sync-connection-heading" className="sync-connection">
-          <div className="sync-panel-heading">
-            <h3 id="sync-connection-heading">
-              {remote ? "Connection" : "Connect GitHub"}
-            </h3>
-            {remote ? <span>{remote.owner}/{remote.repository}</span> : null}
-          </div>
-
-          {remote ? (
-            <dl className="sync-facts">
-              <div>
-                <dt>Repository</dt>
-                <dd>{remote.owner}/{remote.repository}</dd>
-              </div>
-              <div>
-                <dt>Branch</dt>
-                <dd>{remote.branch}</dd>
-              </div>
-              <div>
-                <dt>Last sync</dt>
-                <dd>
-                  {remote.lastSuccessAt ? formatDateTime(remote.lastSuccessAt) : "Never"}
-                </dd>
-              </div>
-              {state.lastCycle ? (
-                <div>
-                  <dt>Last cycle</dt>
-                  <dd>
-                    {state.lastCycle.downloaded + state.lastCycle.aggregatesApplied} down ·{" "}
-                    {state.lastCycle.uploaded + state.lastCycle.aggregatesUploaded} up
-                  </dd>
-                </div>
-              ) : null}
-            </dl>
-          ) : null}
-
-          {!remote ? (
-            <form className="sync-form" onSubmit={(event) => void connect(event)}>
-              <div className="sync-repository-fields">
-                <label className="field">
-                  <span>Private repository</span>
-                  <input
-                    autoCapitalize="none"
-                    autoComplete="off"
-                    id="sync-repository"
-                    name="repository"
-                    onChange={(event) => setRepository(event.target.value)}
-                    placeholder="owner/private-repository"
-                    required
-                    spellCheck={false}
-                    value={repository}
-                  />
-                </label>
-                <label className="field">
-                  <span>Branch <small>optional</small></span>
-                  <input
-                    autoCapitalize="none"
-                    autoComplete="off"
-                    id="sync-branch"
-                    name="branch"
-                    onChange={(event) => setBranch(event.target.value)}
-                    placeholder="main"
-                    spellCheck={false}
-                    value={branch}
-                  />
-                </label>
-              </div>
-              <TokenFields />
-              {error ? <p className="sync-error" role="alert">{error}</p> : null}
-              <button className="primary-button" disabled={state.syncing} type="submit">
-                {state.syncing ? "Connecting…" : "Connect"}
-              </button>
-            </form>
-          ) : !state.credentialAvailable ? (
-            <form className="sync-form" onSubmit={(event) => void unlock(event)}>
-              <p className="sync-connection-note">
-                Repository saved. Enter the token again to pull and push.
-              </p>
-              <TokenFields />
-              {error ? <p className="sync-error" role="alert">{error}</p> : null}
-              <button className="primary-button" disabled={state.syncing} type="submit">
-                {state.syncing ? "Synchronizing…" : "Unlock and sync"}
-              </button>
-            </form>
-          ) : (
-            <div className="sync-controls">
-              <p>Token available only in this browser context.</p>
-              {error ? <p className="sync-error" role="alert">{error}</p> : null}
-              <div className="sync-actions">
-                <button
-                  className="primary-button"
-                  disabled={state.syncing}
-                  onClick={() => void syncNow()}
-                  type="button"
-                >
-                  {state.syncing ? "Synchronizing…" : "Sync now"}
-                </button>
-                <button
-                  className="secondary-button"
-                  disabled={state.syncing}
-                  onClick={() => browserSync.forgetCredential()}
-                  type="button"
-                >
-                  Forget token
-                </button>
-              </div>
-            </div>
-          )}
-        </section>
-
-        <PendingSyncChanges
-          activeItemIds={activeItemIds}
-          changes={pendingChanges}
-          hasSynced={Boolean(remote?.lastSuccessAt)}
-          mutating={busy}
-          onDeleteItem={onDeletePendingItem}
-          syncing={state.syncing}
-        />
+      <div className="sync-status-line">
+        <span role="status">{status}</span>
+        {remote?.lastSuccessAt ? (
+          <span>Last synced {formatDateTime(remote.lastSuccessAt)}</span>
+        ) : null}
       </div>
+      {error ? <p className="sync-error" role="alert">{error}</p> : null}
+
+      <details className="sync-settings" open={!remote || !state.credentialAvailable}>
+        <summary>{remote ? `${remote.owner}/${remote.repository}` : "Connect GitHub"}</summary>
+        {remote ? <p className="sync-branch-note">Branch: {remote.branch}</p> : null}
+        {!remote || !state.credentialAvailable ? (
+          <form className="sync-form" onSubmit={(event) => void (remote ? unlock(event) : connect(event))}>
+            <fieldset className="sync-inputs" disabled={state.syncing}>
+              {!remote ? (
+                <>
+                  <label className="field">
+                    <span>Private repository</span>
+                    <input
+                      autoCapitalize="none"
+                      autoComplete="off"
+                      id="sync-repository"
+                      name="repository"
+                      onChange={(event) => setRepository(event.target.value)}
+                      placeholder="owner/private-repository"
+                      required
+                      spellCheck={false}
+                      value={repository}
+                    />
+                  </label>
+                  <details className="sync-advanced">
+                    <summary>Branch options</summary>
+                    <label className="field">
+                      <span>Branch <small>optional</small></span>
+                      <input
+                        autoCapitalize="none"
+                        autoComplete="off"
+                        id="sync-branch"
+                        name="branch"
+                        onChange={(event) => setBranch(event.target.value)}
+                        placeholder="Use repository default"
+                        spellCheck={false}
+                        value={branch}
+                      />
+                    </label>
+                  </details>
+                </>
+              ) : null}
+              <TokenFields />
+              <button className="primary-button" disabled={!online} type="submit">
+                {state.syncing ? "Syncing…" : remote ? "Unlock and sync" : "Connect and sync"}
+              </button>
+            </fieldset>
+          </form>
+        ) : (
+          <button
+            className="secondary-button"
+            disabled={state.syncing}
+            onClick={() => { setFormError(null); browserSync.forgetCredential(); }}
+            type="button"
+          >
+            Forget token
+          </button>
+        )}
+      </details>
+
+      <PendingSyncChanges
+        activeItemIds={activeItemIds}
+        changes={pendingChanges}
+        mutating={busy}
+        onDeleteItem={onDeletePendingItem}
+        pendingCount={pendingCount}
+        syncing={state.syncing}
+      />
     </section>
   );
 }
@@ -2485,63 +2498,72 @@ function SyncPanel({
 function PendingSyncChanges({
   activeItemIds,
   changes,
-  hasSynced,
   mutating,
   onDeleteItem,
+  pendingCount,
   syncing,
 }: {
   activeItemIds: ReadonlySet<string>;
   changes: PendingSyncChange[];
-  hasSynced: boolean;
   mutating: boolean;
   onDeleteItem: (itemId: string) => void;
+  pendingCount: number;
   syncing: boolean;
 }) {
-  return (
-    <section
-      aria-busy={syncing}
-      aria-labelledby="sync-pending-heading"
-      className="sync-pending"
-    >
-      <div className="sync-pending-heading">
-        <h3 id="sync-pending-heading">Pending</h3>
-        <span>{pluralize(changes.length, "change")}</span>
-      </div>
-      <p className="sync-pending-help">
-        Kept locally until GitHub confirms them.
-      </p>
+  const [visibleLimit, setVisibleLimit] = useState(10);
+  const documentCount = Math.max(0, pendingCount - changes.length);
 
+  return (
+    <section aria-busy={syncing} aria-labelledby="sync-pending-heading" className="sync-pending">
+      <div className="sync-pending-heading">
+        <h3 id="sync-pending-heading">Pending changes</h3>
+        <span>{pendingCount}</span>
+      </div>
+      {documentCount > 0 ? (
+        <p className="sync-document-changes">{pluralize(documentCount, "document change")}</p>
+      ) : null}
       {changes.length > 0 ? (
         <ol className="sync-change-list">
-          {changes.map((change) => (
-            <li className="sync-change" key={change.path}>
-              <span className="sync-change-kind">{pendingChangeAction(change.kind)}</span>
-              <div className="sync-change-copy">
-                <p>{change.label}</p>
-                <p>{pendingChangeDetails(change)}</p>
-              </div>
-              <time dateTime={change.enqueuedAt}>{formatDateTime(change.enqueuedAt)}</time>
-              {change.kind === "create" && change.itemId && activeItemIds.has(change.itemId) ? (
-                <button
-                  aria-label={`Delete pending item ${change.label}`}
-                  className="sync-change-delete"
-                  disabled={syncing || mutating}
-                  onClick={() => onDeleteItem(change.itemId!)}
-                  type="button"
-                >
-                  Delete item
-                </button>
-              ) : null}
+          {changes.slice(0, visibleLimit).map((change) => (
+            <li key={change.path}>
+              <details className="sync-change">
+                <summary>
+                  <span className="sync-change-kind">{pendingChangeAction(change.kind)}</span>
+                  <span className="sync-change-label">{change.label}</span>
+                  <time dateTime={change.enqueuedAt} title={formatDateTime(change.enqueuedAt)}>
+                    {formatDate(change.enqueuedAt)}
+                  </time>
+                </summary>
+                <div className="sync-change-details">
+                  <p>{formatDateTime(change.enqueuedAt)} · {pendingChangeDetails(change)}</p>
+                  {change.kind === "create" && change.itemId && activeItemIds.has(change.itemId) ? (
+                    <button
+                      aria-label={`Delete pending item ${change.label}`}
+                      className="sync-change-delete"
+                      disabled={syncing || mutating}
+                      onClick={() => onDeleteItem(change.itemId!)}
+                      type="button"
+                    >
+                      Delete item
+                    </button>
+                  ) : null}
+                </div>
+              </details>
             </li>
           ))}
         </ol>
-      ) : (
-        <p className="sync-pending-empty">
-          {hasSynced
-            ? "Everything is synced."
-            : "No changes waiting."}
-        </p>
-      )}
+      ) : pendingCount === 0 ? (
+        <p className="sync-pending-empty">No pending changes.</p>
+      ) : null}
+      {changes.length > visibleLimit ? (
+        <button
+          className="secondary-button sync-show-more"
+          onClick={() => setVisibleLimit((limit) => limit + 10)}
+          type="button"
+        >
+          Show {Math.min(10, changes.length - visibleLimit)} more
+        </button>
+      ) : null}
     </section>
   );
 }
@@ -2552,6 +2574,7 @@ function TokenFields() {
       <label className="field sync-token-field">
         <span>Fine-grained GitHub token</span>
         <input
+          aria-describedby="sync-token-help"
           autoCapitalize="none"
           autoComplete="off"
           id="github-token"
@@ -2567,10 +2590,10 @@ function TokenFields() {
           name="remember-for-tab"
           type="checkbox"
         />
-        <span>Keep token for this tab</span>
+        <span>Remember for this tab</span>
       </label>
-      <p className="sync-help">
-        Expiring fine-grained token · this repository only · Contents read/write.
+      <p className="sync-help" id="sync-token-help">
+        Expiring token · private data repository only · Contents read/write.
       </p>
     </>
   );
