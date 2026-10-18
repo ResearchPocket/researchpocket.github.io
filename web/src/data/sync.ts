@@ -1,4 +1,10 @@
 import {
+  forgetRememberedCredential,
+  readCredential,
+  rememberCredential,
+  type CredentialBinding,
+} from "./credentials.ts";
+import {
   AGGREGATE_OPS_ROOT,
   CONTENT_PREFIX,
   GENESIS_PATH,
@@ -31,6 +37,8 @@ import {
 export interface BrowserSyncState {
   configuration: SyncConfiguration | null;
   credentialAvailable: boolean;
+  credentialRemembered: boolean;
+  credentialWarning: string | null;
   syncing: boolean;
   status: string;
   error: string | null;
@@ -41,12 +49,12 @@ export interface ConnectSyncInput {
   repository: string;
   branch?: string;
   token: string;
-  rememberForTab: boolean;
+  rememberInBrowser: boolean;
 }
 
 export interface UnlockSyncInput {
   token: string;
-  rememberForTab: boolean;
+  rememberInBrowser: boolean;
 }
 
 export interface SyncCycleResult {
@@ -105,6 +113,8 @@ class BrowserSyncService {
   private state: BrowserSyncState = {
     configuration: null,
     credentialAvailable: false,
+    credentialRemembered: false,
+    credentialWarning: null,
     syncing: false,
     status: "Private sync is not connected",
     error: null,
@@ -112,6 +122,7 @@ class BrowserSyncService {
   };
 
   #token: string | null = null;
+  #credentialEpoch = 0;
   #names: ProfileStorageNames | null = null;
   private retryNotBefore = 0;
   private running: Promise<void> | null = null;
@@ -187,6 +198,7 @@ class BrowserSyncService {
     }
     this.rerunAfterCurrentSync = false;
     await this.running?.catch(() => undefined);
+    this.#credentialEpoch += 1;
     this.#names = null;
     this.#token = null;
     this.retryNotBefore = 0;
@@ -195,6 +207,8 @@ class BrowserSyncService {
     this.state = {
       configuration: null,
       credentialAvailable: false,
+      credentialRemembered: false,
+      credentialWarning: null,
       syncing: false,
       status: "Opening your private library…",
       error: null,
@@ -203,14 +217,22 @@ class BrowserSyncService {
     for (const listener of this.listeners) listener(this.state);
   }
 
-  /** Binds sync to one profile's lock, channel, and session credential. */
+  /** Binds sync to one profile's lock, channel, and local-only credential. */
   private async bind(profile: LibraryProfile): Promise<void> {
     const names = profileStorageNames(profile.namespace);
     this.#names = names;
     this.#token = readSessionToken(names.sessionTokenKey);
     this.channel?.close();
     this.channel = new BroadcastChannel(names.stateChannel);
-    this.channel.addEventListener("message", () => {
+    this.channel.addEventListener("message", (event: MessageEvent) => {
+      if (event.data?.type === "forget-credential") {
+        this.clearActiveCredential();
+        return;
+      }
+      if (event.data?.type === "forget-remembered-credential") {
+        this.patch({ credentialRemembered: false });
+        return;
+      }
       if (this.#token && this.state.configuration && document.visibilityState === "visible") {
         this.scheduleLocalChangeSync();
       }
@@ -242,11 +264,11 @@ class BrowserSyncService {
 
   async connect(input: ConnectSyncInput): Promise<void> {
     const [owner, repository] = parseRepository(input.repository);
-    this.setCredential(input.token, input.rememberForTab);
+    const attempt = await this.setCredential(input.token, input.rememberInBrowser);
     this.patch({ syncing: true, status: "Checking your private repository…", error: null });
     try {
       if (this.running) await this.running;
-      await this.withSyncLock(
+      this.running = this.withSyncLock(
         async () => {
           const client = new GitHubClient(this.requireToken());
           const repositoryInfo = await client.inspectRepository(owner, repository);
@@ -274,13 +296,16 @@ class BrowserSyncService {
             status: "Repository connected — restoring your library…",
           });
           await this.runConfigured(client, remote);
+          await this.persistCredential(attempt);
         },
         true,
       );
+      await this.running;
     } catch (error) {
       await this.handleFailure(error);
       throw error;
     } finally {
+      this.running = null;
       this.patch({ syncing: false });
     }
   }
@@ -289,19 +314,23 @@ class BrowserSyncService {
     if (!this.state.configuration) {
       throw new Error("Connect a private synchronization repository first.");
     }
-    this.setCredential(input.token, input.rememberForTab);
+    const attempt = await this.setCredential(input.token, input.rememberInBrowser);
     await this.syncNow();
+    await this.persistCredential(attempt);
   }
 
   async syncNow(): Promise<void> {
     await this.requestSync("manual sync", true);
   }
 
-  forgetCredential(): void {
+  private clearActiveCredential(): void {
+    this.#credentialEpoch += 1;
     this.#token = null;
     if (this.#names) removeSessionToken(this.#names.sessionTokenKey);
     this.patch({
       credentialAvailable: false,
+      credentialRemembered: false,
+      credentialWarning: null,
       status: this.state.configuration
         ? "Repository connected — enter your token to synchronize"
         : "Private sync is not connected",
@@ -309,8 +338,58 @@ class BrowserSyncService {
     });
   }
 
-  private async load(): Promise<void> {
+  async forgetCredential(): Promise<void> {
+    const names = this.#names;
+    this.clearActiveCredential();
+    this.channel?.postMessage({ type: "forget-credential" });
+    if (names) {
+      try {
+        await forgetRememberedCredential(names.credentialDatabase);
+      } catch {
+        this.patch({ credentialWarning: "Couldn't remove the saved token. Clear this site's browser data to remove it." });
+      }
+    }
+  }
+
+  async rememberActiveCredential(): Promise<void> {
+    await this.unlock({ token: this.requireToken(), rememberInBrowser: true });
+  }
+
+  async stopRememberingCredential(): Promise<void> {
+    const names = this.requireNames();
+    this.#credentialEpoch += 1;
+    removeSessionToken(names.sessionTokenKey);
+    try {
+      await forgetRememberedCredential(names.credentialDatabase);
+      this.patch({ credentialRemembered: false, credentialWarning: null });
+      this.channel?.postMessage({ type: "forget-remembered-credential" });
+    } catch {
+      this.patch({ credentialWarning: "Couldn't remove the saved token. Try again or clear this site's browser data." });
+    }
+  }
+
+  private async credentialBinding(): Promise<CredentialBinding | null> {
     const configuration = await libraryRepository.syncConfiguration();
+    if (!configuration) return null;
+    const { libraryId } = await libraryRepository.syncIdentity();
+    return { ...remoteFrom(configuration), libraryId };
+  }
+
+  private async load(): Promise<void> {
+    const epoch = this.#credentialEpoch;
+    const configuration = await libraryRepository.syncConfiguration();
+    const names = this.requireNames();
+    try {
+      const saved = await readCredential(names.credentialDatabase, await this.credentialBinding());
+      if (epoch !== this.#credentialEpoch || this.#names !== names) return;
+      if (saved.token) {
+        this.#token = saved.token;
+        this.patch({ credentialRemembered: true });
+      }
+    } catch {
+      // Unavailable persistent storage must not prevent offline library use.
+    }
+    if (epoch !== this.#credentialEpoch || this.#names !== names) return;
     this.patch({
       configuration,
       credentialAvailable: this.#token !== null,
@@ -981,20 +1060,52 @@ class BrowserSyncService {
     }
   }
 
-  private setCredential(token: string, rememberForTab: boolean): void {
+  private async setCredential(token: string, rememberInBrowser: boolean) {
     const normalizedToken = token.trim();
     const client = new GitHubClient(normalizedToken);
     void client;
+    const names = this.requireNames();
+    const epoch = ++this.#credentialEpoch;
     this.#token = normalizedToken;
+    removeSessionToken(names.sessionTokenKey);
+    this.patch({ credentialAvailable: true, credentialRemembered: false, credentialWarning: null, error: null });
+    let revision: number | null = null;
     try {
-      const key = this.requireNames().sessionTokenKey;
-      if (rememberForTab) writeSessionToken(key, normalizedToken);
-      else removeSessionToken(key);
-    } catch (error) {
-      this.#token = null;
-      throw error;
+      // Remove an older token even when the replacement is memory-only.
+      revision = await forgetRememberedCredential(names.credentialDatabase);
+    } catch {
+      this.patch({ credentialWarning: rememberInBrowser
+        ? "Connected in memory only. This browser couldn't save your token."
+        : "Couldn't clear saved token storage. Clear this site's browser data to remove an older token." });
     }
-    this.patch({ credentialAvailable: true, error: null });
+    if (epoch !== this.#credentialEpoch || this.#names !== names) {
+      throw new GitHubSyncError("The active library or token changed. Reconnect to continue.", "local_state");
+    }
+    return { names, epoch, revision, token: normalizedToken, rememberInBrowser };
+  }
+
+  private async persistCredential(attempt: {
+    names: ProfileStorageNames;
+    epoch: number;
+    revision: number | null;
+    token: string;
+    rememberInBrowser: boolean;
+  }): Promise<void> {
+    if (!attempt.rememberInBrowser || attempt.revision === null ||
+      attempt.epoch !== this.#credentialEpoch || this.#names !== attempt.names || !this.#token) return;
+    try {
+      const binding = await this.credentialBinding();
+      if (!binding || attempt.epoch !== this.#credentialEpoch) return;
+      const remembered = await rememberCredential(
+        attempt.names.credentialDatabase, binding, attempt.token, attempt.revision,
+      );
+      if (attempt.epoch === this.#credentialEpoch) {
+        this.patch({ credentialRemembered: remembered, credentialWarning: remembered
+          ? null : "Token wasn't saved because its saved state changed in another tab. Reconnect to remember it." });
+      }
+    } catch {
+      this.patch({ credentialWarning: "Connected in memory only. This browser couldn't save your token." });
+    }
   }
 
   private requireToken(): string {
@@ -1022,7 +1133,7 @@ class BrowserSyncService {
         "upgrade_required",
       ].includes(syncError.kind)
     ) {
-      this.forgetCredential();
+      await this.forgetCredential();
     }
     if (syncError.retryAfterSeconds !== null) {
       this.retryNotBefore = Date.now() + syncError.retryAfterSeconds * 1_000;
@@ -1301,17 +1412,6 @@ function readSessionToken(key: string): string | null {
     return token?.trim() ? token : null;
   } catch {
     return null;
-  }
-}
-
-function writeSessionToken(key: string, token: string): void {
-  try {
-    sessionStorage.setItem(key, token);
-  } catch {
-    throw new GitHubSyncError(
-      "This browser blocked tab-only token storage. Leave the option off to keep it in memory.",
-      "local_state",
-    );
   }
 }
 

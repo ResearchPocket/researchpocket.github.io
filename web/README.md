@@ -8,8 +8,15 @@ GitHub repository without using Git history as application conflict resolution.
 
 Use an expiring fine-grained PAT limited to the private data repository with
 `Contents: read/write`. The app holds it in JavaScript memory by default. The
-explicit tab-only option uses `sessionStorage`; no token is written to IndexedDB,
-`localStorage`, an API URL, logs, or service-worker caches.
+off-by-default **Remember token in this browser** option saves it in a separate,
+versioned IndexedDB credential database bound to the local profile, repository,
+branch, and library ID. Reopening restores it automatically. Disable remembering
+to remove the saved copy while keeping this page connected, or use **Forget
+token** to clear active copies across tabs too. Browser-profile access can expose
+the saved token; the form explains this before consent. Existing tab-only tokens
+are never silently persisted. No token enters the library IndexedDB, exports,
+`localStorage`, an API URL, logs, or service-worker caches. See
+[ADR 0013](../docs/v2/ADR_0013_REMEMBER_BROWSER_TOKEN.md).
 
 Install the WASM target and the CLI version pinned by the Rust crate once:
 

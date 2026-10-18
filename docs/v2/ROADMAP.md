@@ -52,9 +52,9 @@ V2 must preserve the following boundaries throughout delivery:
 - CLI, TUI, local web, and hosted web call the same application semantics.
 - The local API binds only to loopback, uses a per-session credential, validates
   browser origin, and does not enable general cross-origin access.
-- Hosted owner mode stores pending updates durably while keeping its
-  repository-scoped PAT out of persistent browser storage and generated
-  artifacts.
+- Hosted owner mode stores pending updates durably. Its repository-scoped PAT
+  stays in memory by default; ADR 0013 permits a separate opt-in credential
+  database. Tokens remain excluded from library data and generated artifacts.
 
 ### Publication
 
@@ -178,10 +178,11 @@ V2 must preserve the following boundaries throughout delivery:
 - Build the same protocol/domain core for WASM and use it in the GitHub Pages
   owner application.
 - Implement fine-grained PAT onboarding with least-privilege validation and
-  in-memory credential handling.
+  memory-default, opt-in persistent credential handling (ADR 0013).
 - Persist the browser's private materialized state and outbound updates in
-  IndexedDB, while ensuring the PAT never enters IndexedDB, local storage,
-  service-worker caches, URLs, logs, analytics, or generated output.
+  IndexedDB, while ensuring the PAT never enters the library IndexedDB,
+  localStorage, service-worker caches, URLs, logs, analytics, or generated
+  output. Explicit remembering uses a separate local-only credential database.
 - Pull on startup, focus, before upload, after remote-head races, and at a
   documented visible-page interval; serialize uploads and verify ambiguous
   results by immutable update identity and hash.
@@ -196,8 +197,9 @@ V2 must preserve the following boundaries throughout delivery:
   ambiguous upload responses preserve all queued user changes.
 - Hosted browser, native clients, and multiple tabs pass the same partition and
   convergence scenarios without relying on Git merge behavior.
-- Automated inspection proves credentials are absent from browser persistence,
-  logs, network URLs, service workers, source maps, and public artifacts.
+- Automated inspection proves credentials are absent from library persistence,
+  logs, network URLs, service workers, source maps, and public artifacts. The
+  separate opt-in browser credential store follows ADR 0013.
 
 ## Phase 5: Selective publication
 

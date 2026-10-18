@@ -545,8 +545,9 @@ unknown required features. CI runs it natively and in a headless browser.
   containers and need no second semantic state store. Credentials live outside
   SQLite.
 - **Browser owner mode:** IndexedDB holds the equivalent private state and
-  outbox. The PAT follows the threat-model lifecycle and never enters IndexedDB
-  or service-worker/cache state.
+  outbox. The PAT follows the threat-model lifecycle and never enters the
+  library IndexedDB or service-worker/cache state. ADR 0013 permits a separate,
+  opt-in local-only credential database, excluded from all protocol objects.
 - **Publisher:** reads only validated compatible updates/checkpoints, derives the
   private materialized state, then runs the separate fail-closed publication
   projection. It never publishes protocol files or treats the public repository

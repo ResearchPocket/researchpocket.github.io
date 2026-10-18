@@ -37,8 +37,8 @@ from existing Git history are outside the V2 guarantee.
 | TM-01 | Private synchronization data and the public source/Pages repository are separate. |
 | TM-02 | The browser owner credential is a fine-grained PAT limited to the one private data repository with `Contents: read/write`, expiring after at most 90 days. |
 | TM-03 | The owner PAT cannot write the protected source repository that serves the application JavaScript or any public publication repository. |
-| TM-04 | The browser keeps the PAT in JavaScript memory by default. Explicit tab-only retention may use `sessionStorage`; no longer-lived browser storage is allowed. |
-| TM-05 | IndexedDB may contain private CRDT state and a durable outbox, but never a credential. |
+| TM-04 | The browser keeps the PAT in JavaScript memory by default. Explicit per-library consent may save a validated PAT in a separate local-only IndexedDB credential database; legacy tab-only tokens are never silently persisted (ADR 0013). |
+| TM-05 | The library IndexedDB contains private CRDT state and a durable outbox, never credentials. A separate credential database is allowed only after explicit consent and is excluded from sync/export/publication. |
 | TM-06 | Owner mode loads no third-party runtime code, remote fonts, analytics, ads, error reporters, or tag managers. Reviewed webfonts may be bundled in the same-origin application artifact. |
 | TM-07 | Synchronization applies only validated immutable protocol objects. Git commits and branch order have no domain meaning. |
 | TM-08 | Publication is a separate allowlisted projection. Missing, invalid, or concurrent visibility resolves to private. |
@@ -56,8 +56,8 @@ from existing Git history are outside the V2 guarantee.
 | Public source and Pages repository | Public and attacker-readable. Its protected source builds the static application shell and allowlisted public projections. It never contains private updates or owner credentials. |
 | Pages application shell | Trusted only when built from reviewed, locked, first-party source. It may handle private state after owner authentication. |
 | Browser memory | Temporarily trusted for the owner PAT and decrypted-in-use private state. Browser extensions, developer tools, and injected scripts can observe it. |
-| `sessionStorage` | Optional, explicit tab-session PAT retention. It is convenience, not an XSS boundary, and is cleared on logout and authentication failure. |
-| IndexedDB | Private materialized state, applied-update receipts, and pending immutable updates. Never credentials. |
+| `sessionStorage` | Legacy explicit tab-session PAT retention. Never automatically promoted to persistent storage; cleared on forget and authentication failure. |
+| IndexedDB | Library databases hold private state, receipts, and pending immutable updates. Separate versioned credential databases may hold a PAT with explicit per-library consent, bound to repository/branch/library identity. Browser-profile access and same-origin script compromise can expose it. |
 | Private data repository | Complete immutable updates, checkpoints, and private policy. GitHub collaborators and repository administrators can read its history. |
 | GitHub REST API | Trusted transport/authentication boundary. Every returned protocol object is still hash- and schema-verified locally. |
 | Publisher workflow | Trusted, pinned workflow in the private repository. It reads private state and writes only an allowlisted projection using a separate credential. |
@@ -167,17 +167,33 @@ cannot prevent the URL from being saved.
    reactive state inspection tools, DOM attributes, URLs, or logs.
 3. The application validates the selected owner/repository and required
    Contents access through the GitHub API.
-4. By default, reload discards the PAT. If the owner explicitly enables
-   **Remember for this tab**, the token may be placed in `sessionStorage` under
-   one versioned key.
-5. Logout, `401`, confirmed revocation/expiration, repository mismatch, or an
-   integrity failure removes the in-memory and tab-session token immediately.
-   Pending edits remain in IndexedDB for later retry.
+4. By default, reload discards the PAT. Explicit **Remember token in this
+   browser** consent saves it only after successful validation and sync in the
+   profile's separate `-credentials-v1` IndexedDB database. Startup restores it
+   automatically only for the exact owner/repository/branch/library ID. The app
+   adds no retention deadline or passphrase; GitHub expiry still applies.
+   Existing tab-session tokens are not silently migrated.
+5. Turning remembering off removes the saved and legacy session copies while
+   keeping the current in-memory connection. **Forget token**, logout, `401`,
+   confirmed revocation/expiration, authorization or repository mismatch, and
+   integrity/upgrade failures remove active and saved copies. Cross-tab
+   invalidation carries no secret, and a durable revision rejects late saves
+   begun before forgetting. Pending edits remain in the library IndexedDB.
+6. Network outages and rate limits retain credentials. Blocked persistent
+   storage leaves the current connection in memory with a notice. Profile
+   deletion clears its credential. Forgetting locally does not revoke on GitHub.
+
+The consent notice states that anyone with access to the browser profile may
+use the saved token. This is an accepted convenience tradeoff: browser storage
+is not a vault, and first-party script compromise or device access can expose
+the token, including while the app is closed. No browser-managed encryption
+claim is made. [ADR 0013](./ADR_0013_REMEMBER_BROWSER_TOKEN.md) supersedes the
+previous blanket ban on persistent browser credentials.
 
 The PAT must never enter:
 
-- `localStorage`, IndexedDB, the Cache API, service-worker state, or filesystem
-  downloads;
+- `localStorage`, the library IndexedDB (as distinct from the opt-in credential
+  database), the Cache API, service-worker state, or filesystem downloads;
 - query strings, URL fragments, navigation state, referrers, bookmarks, or QR
   codes;
 - console logs, analytics, crash reports, telemetry, DOM text/attributes, or
@@ -386,6 +402,7 @@ Activating a new shell version removes old caches.
 | Service worker retains a token or API response | Never pass tokens to the worker; bypass Authorization/cross-origin traffic; cache shell allowlist only | Browser implementation defects remain possible. |
 | Git race loses or overwrites an edit | Immutable unique direct/pack paths, pull-before-push, serialized upload, hash equality for idempotency, retry unchanged exact envelope bytes | GitHub outage delays sync but does not discard local edits. |
 | Corrupt/replayed remote update changes state | Pack path/body SHA-256 and bounds, exact member-envelope validation, library identity, payload SHA-256, immutable device sequence/path, applied receipt, all-or-nothing pack transaction | A repository writer can delete history; clients must detect missing/inconsistent data. |
+| Saved PAT is read from the browser profile | Off-by-default per-library consent, visible saved state, exact repository/library binding, cross-tab forget, narrow expiring PAT | Same-origin scripts and anyone with access to the browser profile may use the saved token, including after tab/browser closure. |
 | Token appears in logs or URLs | Authorization header only; redacted errors; no analytics; no token interpolation; production console off | User-installed debugging tools may capture traffic. |
 | Untrusted page invokes native capture | Browser external-protocol confirmation; exact route/version; bounded append-only field allowlist; no read, edit, delete, sync, or publication action | Remembered site permission can permit unwanted save spam. |
 | Capture URI injects a command or selects private state | Direct argument handling without shell evaluation; reject unknown fields, paths, credentials, provider names, user information, fragments, and non-HTTP(S) targets | The open page, browser/OS diagnostics, or same-user processes may observe accepted URL/title/description/language and prompted non-sensitive tag data. |
@@ -422,8 +439,9 @@ deleting the old repository subject to GitHub's retention behavior.
 If credential exposure or a malicious build is suspected:
 
 1. revoke the PAT in GitHub immediately;
-2. close owner tabs and clear the site's `sessionStorage`, service workers, and
-   caches without deleting IndexedDB pending edits;
+2. forget saved tokens, close owner tabs, and clear the site's `sessionStorage`,
+   credential IndexedDB databases, service workers, and caches without deleting
+   the separate library IndexedDB databases containing pending edits;
 3. disable the Pages deployment or replace it with a known-good shell;
 4. audit repository collaborators, token access, immutable update paths, and
    publication history;
@@ -449,8 +467,9 @@ Native-capture, hosted-editor, and sync changes must demonstrate:
 - Firecrawl is direct REST rather than an SDK, remains explicit, bounds its
   response, and exposes neither the API key nor raw response bodies through
   SQLite, CRDT updates, output, logs, or generated artifacts;
-- token absence from localStorage, IndexedDB, Cache API, service-worker messages,
-  URLs, logs, source maps, and generated artifacts;
+- token absence from localStorage, library IndexedDB, Cache API, service-worker
+  messages, URLs, logs, source maps, and generated artifacts; credential IndexedDB
+  persistence requires explicit consent, binding checks, and tested forgetting;
 - a token scoped only to the private data repository with Contents read/write;
 - repository rules and deployment configuration confirming protected `main`,
   immutable `v*` tags, reviewed changes, and required release checks;

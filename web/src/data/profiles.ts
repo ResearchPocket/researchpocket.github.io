@@ -1,3 +1,4 @@
+import { forgetRememberedCredential } from "./credentials.ts";
 import { deleteDB, openDB, type DBSchema, type IDBPDatabase } from "idb";
 
 /**
@@ -23,6 +24,7 @@ export interface ProfileStorageNames {
   stateChannel: string;
   syncLock: string;
   sessionTokenKey: string;
+  credentialDatabase: string;
 }
 
 interface PersistedActiveProfile {
@@ -59,6 +61,7 @@ export function profileStorageNames(namespace: string): ProfileStorageNames {
     stateChannel: `${namespace}-state`,
     syncLock: `${namespace}-github-sync`,
     sessionTokenKey: `${namespace}-github-token`,
+    credentialDatabase: `${namespace}-credentials-v1`,
   };
 }
 
@@ -189,6 +192,12 @@ export async function deleteProfile(profileId: string): Promise<LibraryProfile> 
   const profile = profiles.find((candidate) => candidate.id === profileId);
   if (!profile) throw new Error("That library is no longer available.");
 
+  const names = profileStorageNames(profile.namespace);
+  await forgetRememberedCredential(names.credentialDatabase);
+  const channel = new BroadcastChannel(names.stateChannel);
+  channel.postMessage({ type: "forget-credential" });
+  channel.close();
+
   const database = await registryDatabase();
   await database.delete("profiles", profileId);
 
@@ -199,7 +208,6 @@ export async function deleteProfile(profileId: string): Promise<LibraryProfile> 
     await database.put("registry", { key: "active", profileId: next.id });
   }
 
-  const names = profileStorageNames(profile.namespace);
   try {
     sessionStorage.removeItem(names.sessionTokenKey);
   } catch {

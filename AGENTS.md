@@ -267,10 +267,15 @@ push race, and every 60 seconds while visible.
 
 Owner authentication uses a fine-grained, expiring PAT scoped only to the private
 data repository with `Contents: read/write`. Keep the token in JavaScript memory
-by default; explicit session-only storage may use `sessionStorage`. Never put the
-token in `localStorage`, IndexedDB, a URL, logs, analytics, generated output, or a
-service-worker cache. The token must not have write access to the protected
-source/Pages repository that serves the application JavaScript.
+by default. Explicit “Remember token in this browser” consent may persist a
+validated PAT in a separate, versioned, profile-and-repository-bound IndexedDB
+credential database, as defined by [ADR 0013](docs/v2/ADR_0013_REMEMBER_BROWSER_TOKEN.md).
+Never put the token in the library replica, `localStorage`, a URL, logs,
+analytics, generated output, or a service-worker cache. Forgetting or deleting a
+profile removes its saved token without losing queued edits; transient network
+failures do not remove it. Existing tab-only tokens must not be silently
+persisted. The token must not have write access to the protected source/Pages
+repository that serves the application JavaScript.
 
 Owner mode loads no third-party runtime scripts or analytics. Enforce a self-only
 content security policy and limit network connections to the required GitHub API.
