@@ -230,6 +230,8 @@ class BrowserSyncService {
         return;
       }
       if (event.data?.type === "forget-remembered-credential") {
+        this.#credentialEpoch += 1;
+        removeSessionToken(names.sessionTokenKey);
         this.patch({ credentialRemembered: false });
         return;
       }
