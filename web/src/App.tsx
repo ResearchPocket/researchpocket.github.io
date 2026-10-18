@@ -220,6 +220,8 @@ const EMPTY_LIBRARY_STATE: LibraryState = {
 const EMPTY_SYNC_STATE: BrowserSyncState = {
   configuration: null,
   credentialAvailable: false,
+  credentialRemembered: false,
+  credentialWarning: null,
   syncing: false,
   status: "Private sync is not connected",
   error: null,
@@ -2382,6 +2384,16 @@ function SyncPanel({
     }
   }
 
+  async function changeRememberedToken(remember: boolean) {
+    setFormError(null);
+    try {
+      if (remember) await browserSync.rememberActiveCredential();
+      else await browserSync.stopRememberingCredential();
+    } catch (error) {
+      setFormError(readError(error));
+    }
+  }
+
   const error = formError ?? state.error;
   const remote = state.configuration;
   const canSync = Boolean(remote && state.credentialAvailable);
@@ -2424,6 +2436,7 @@ function SyncPanel({
         ) : null}
       </div>
       {error ? <p className="sync-error" role="alert">{error}</p> : null}
+      {state.credentialWarning ? <p className="sync-help" role="status">{state.credentialWarning}</p> : null}
 
       <details className="sync-settings" open={!remote || !state.credentialAvailable}>
         <summary>{remote ? `${remote.owner}/${remote.repository}` : "Connect GitHub"}</summary>
@@ -2472,14 +2485,32 @@ function SyncPanel({
             </fieldset>
           </form>
         ) : (
-          <button
-            className="secondary-button"
-            disabled={state.syncing}
-            onClick={() => { setFormError(null); browserSync.forgetCredential(); }}
-            type="button"
-          >
-            Forget token
-          </button>
+          <>
+            <label className="check-field sync-session-choice">
+              <input
+                aria-describedby="saved-token-help"
+                checked={state.credentialRemembered}
+                disabled={state.syncing || (!state.credentialRemembered && !online)}
+                onChange={(event) => void changeRememberedToken(event.target.checked)}
+                type="checkbox"
+              />
+              <span>Remember token in this browser</span>
+            </label>
+            <p className="sync-help" id="saved-token-help">
+              {state.credentialRemembered
+                ? "Token saved in this browser. You can return without entering it again."
+                : "Token kept in memory for this page. Only remember it in a browser you trust—anyone with access to this browser profile may be able to use it."}
+            </p>
+            <button
+              className="secondary-button"
+              disabled={state.syncing}
+              onClick={() => { setFormError(null); void browserSync.forgetCredential(); }}
+              type="button"
+            >
+              Forget token
+            </button>
+            <p className="sync-help">Forgetting keeps your local library and queued edits. It does not revoke the token on GitHub.</p>
+          </>
         )}
       </details>
 
@@ -2586,12 +2617,16 @@ function TokenFields() {
       </label>
       <label className="check-field sync-session-choice">
         <input
-          id="remember-for-tab"
-          name="remember-for-tab"
+          aria-describedby="remember-token-help"
+          id="remember-in-browser"
+          name="remember-in-browser"
           type="checkbox"
         />
-        <span>Remember for this tab</span>
+        <span>Remember token in this browser</span>
       </label>
+      <p className="sync-help" id="remember-token-help">
+        Automatically reconnect this library when you return. Only enable this in a browser you trust—anyone with access to this browser profile may be able to use your token.
+      </p>
       <p className="sync-help" id="sync-token-help">
         Expiring token · private data repository only · Contents read/write.
       </p>
@@ -3965,7 +4000,7 @@ function readSyncCredential(form: HTMLFormElement) {
   }
   return {
     token,
-    rememberForTab: data.get("remember-for-tab") === "on",
+    rememberInBrowser: data.get("remember-in-browser") === "on",
   };
 }
 

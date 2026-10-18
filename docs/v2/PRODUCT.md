@@ -156,8 +156,10 @@ feeds; they do not need a ResearchPocket or GitHub account.
 
 The owner PAT must be fine-grained, limited to the private data repository, and
 granted only the permissions required to read and append synchronization data.
-It must not be embedded in generated files, URLs, logs, analytics, persistent
-browser storage, or service-worker caches. Owner mode must remain usable when
+It must not be embedded in generated files, URLs, logs, analytics, library data,
+or service-worker caches. Memory-only retention is the default; explicit
+**Remember token in this browser** consent permits a separate local-only
+credential store as defined by [ADR 0013](./ADR_0013_REMEMBER_BROWSER_TOKEN.md). Owner mode must remain usable when
 the token expires or is revoked: local pending changes stay queued until the
 owner supplies valid credentials. The complete trust boundary and token
 lifecycle are defined in the [privacy threat model](./THREAT_MODEL.md); the

@@ -65,12 +65,29 @@ IndexedDB database `researchpocket-v2`, version 2, contains only these stores:
 | `remoteObservations` | Protocol path, Git blob identity, observation time |
 | `syncConfig` | Non-secret owner, repository, branch, and sanitized success/error times |
 
-There is no credential, token, authorization-header, repository secret, or
-generic settings store. The fine-grained PAT remains in JavaScript memory by
-default; explicit tab-only retention uses `sessionStorage`, never IndexedDB or
-`localStorage`. Authentication, authorization, protocol-integrity, or
-upgrade-required failures immediately forget both token copies while preserving
-the durable outbox.
+The library database has no credential, token, authorization-header, repository
+secret, or generic settings store. The fine-grained PAT remains in private
+JavaScript memory by default. Explicit **Remember token in this browser** consent
+saves it after successful repository/library validation and sync in a separate
+`<profile namespace>-credentials-v1` IndexedDB database. It holds one versioned
+credential bound to the profile's owner, repository, branch, and library ID;
+startup restores it only when every binding matches. No application retention
+limit or additional unlock step is imposed. GitHub expiry/revocation still applies.
+
+Existing tab-only `sessionStorage` tokens remain usable in their tab, but are
+never silently persisted. New connections offer memory-only or persistent
+retention. Unchecking remembering removes the saved and legacy session copies
+while keeping active in-memory connections; **Forget token** also clears active
+copies across tabs. Profile deletion removes the saved token. A non-secret
+revision remains in the credential database to reject a late save after forget.
+Broadcast messages contain only invalidation commands, never credentials.
+
+Authentication, authorization, protocol-integrity, library mismatch, and
+upgrade-required failures forget active and saved token copies while preserving
+the durable outbox. Transport failures and rate limits retain saved credentials.
+Blocked credential storage leaves the connection usable in memory with a notice.
+The credential database never participates in snapshots, outbox transactions,
+exports, sync, or publication. See [ADR 0013](./ADR_0013_REMEMBER_BROWSER_TOKEN.md).
 
 Writes serialize across tabs with the Web Locks API. Browsers without Web Locks
 can read an existing library but fail closed before writing, because an in-tab
@@ -159,7 +176,7 @@ count rather than implying they are already backed up.
 The owner supplies `OWNER/REPOSITORY`, an optional branch, and an expiring
 fine-grained PAT restricted to that private repository with Contents read/write.
 Repository coordinates and sanitized timestamps persist; the PAT follows the
-memory/tab-only boundary above. The browser rejects public, archived, disabled,
+memory/opt-in persistent credential boundary above. The browser rejects public, archived, disabled,
 unavailable, read-only, mismatched-library, malformed, or unsupported remotes
 before uploading queued work.
 

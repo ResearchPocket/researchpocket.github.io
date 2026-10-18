@@ -183,7 +183,11 @@ unset RESEARCHPOCKET_GITHUB_TOKEN
 Native ResearchPocket does not save the GitHub PAT. Set
 `RESEARCHPOCKET_GITHUB_TOKEN` or `GH_TOKEN` before starting `research tui`, then
 press `s` to connect or sync. The browser app keeps its token in memory by
-default and can optionally remember it only for the current tab session.
+default. Enable **Remember token in this browser** when connecting to restore
+it automatically after closing tabs or restarting. Only enable this in a browser
+you trust; anyone with access to the browser profile may use the token. Disable
+remembering or choose **Forget token** in Sync settings to remove the saved copy
+without deleting your local library or queued edits.
 
 On a new device, initialize an empty library and connect it before adding new
 saves:

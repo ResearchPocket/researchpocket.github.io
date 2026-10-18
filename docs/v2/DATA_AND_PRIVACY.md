@@ -56,9 +56,21 @@ separate local credential file. They never belong in SQLite, link metadata,
 notes, synchronization updates, exports, or a public repository.
 
 The browser app keeps its fine-grained GitHub token in memory by default.
-Optional session storage lasts only for the current browser session. The token
-is never stored in localStorage, IndexedDB, a URL, generated output, analytics,
-or the service-worker cache.
+Enable **Remember token in this browser** to reconnect automatically after
+closing a tab or restarting the browser. This saves the token in a separate,
+local-only credential database for that library. Only enable it in a browser
+you trust: anyone with access to the browser profile may use the saved token.
+There is no additional app-imposed expiry; GitHub token expiry still applies.
+
+Turn remembering off to delete the saved copy while keeping this page connected,
+or choose **Forget token** to remove saved and active copies across open tabs.
+Neither action deletes your local library or queued edits, or revokes the token
+on GitHub. Deleting a local library also removes its saved token. Clearing site
+data removes the token and can also delete unsynced library changes.
+
+The token never enters the library replica, synchronization updates, exports,
+localStorage, URLs, generated output, analytics, or service-worker caches.
+Existing tab-only tokens are never automatically saved persistently.
 
 Use a fine-grained token limited to the one private data repository with
 Contents read/write access. Do not give that token access to unrelated
