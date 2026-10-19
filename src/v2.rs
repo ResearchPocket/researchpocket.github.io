@@ -451,6 +451,11 @@ async fn handle_enrich(
             let output = command_output("enrich_run", result)?;
             write_single(format, &output, human_enrich_run)
         }
+        EnrichCommands::Forget(forget) => {
+            let item = store.forget_captured_document(&forget.item_id).await?;
+            let output = command_output("enrich_forget", item)?;
+            write_single(format, &output, human_enrich_forget)
+        }
     }
 }
 
@@ -705,6 +710,7 @@ async fn attempt_enrichment(
                     research_store::EnrichmentCandidates {
                         title: candidates.title,
                         excerpt: candidates.excerpt,
+                        markdown: candidates.markdown,
                         language: candidates.language,
                     },
                 )
@@ -1170,6 +1176,10 @@ fn human_delete(value: &Value) {
 
 fn human_restore(value: &Value) {
     human_mutation("Restored", value);
+}
+
+fn human_enrich_forget(value: &Value) {
+    human_mutation("Dropped the captured page of", value);
 }
 
 fn human_enrich_status(value: &Value) {

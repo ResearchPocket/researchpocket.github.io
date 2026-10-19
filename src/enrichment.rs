@@ -105,6 +105,13 @@ pub struct EnrichmentStatus {
 pub struct EnrichmentCandidates {
     pub title: Option<String>,
     pub excerpt: Option<String>,
+    /// Whole-page Markdown, kept only as an item's captured document.
+    ///
+    /// It is deliberately not the excerpt: an excerpt is merged text inside the
+    /// CRDT, so every character it holds replicates to every device and stays
+    /// in every checkpoint, while a captured document is one immutable blob
+    /// fetched on demand.
+    pub markdown: Option<String>,
     pub language: Option<String>,
 }
 
@@ -385,11 +392,19 @@ async fn firecrawl_extract(
 fn firecrawl_candidates(payload: FirecrawlResponse) -> EnrichmentResult<EnrichmentCandidates> {
     let data = payload.data.ok_or(EnrichmentError::InvalidResponse)?;
     let metadata = data.metadata.unwrap_or_default();
-    let excerpt = bounded_markdown_candidate(data.markdown, MAX_FIRECRAWL_MARKDOWN_BYTES)?
-        .or_else(|| normalized_candidate(metadata.description, MAX_EXCERPT_BYTES));
+    let markdown = bounded_markdown_candidate(data.markdown, MAX_FIRECRAWL_MARKDOWN_BYTES)?;
+    // The page's own description is what an excerpt wants to be. Whole-page
+    // Markdown becomes the captured document instead, and only a bounded lead
+    // of it stands in when the page describes itself with nothing.
+    let excerpt = normalized_candidate(metadata.description, MAX_EXCERPT_BYTES).or_else(|| {
+        markdown
+            .as_deref()
+            .map(|markdown| markdown_lead(markdown, MAX_EXCERPT_BYTES))
+    });
     Ok(EnrichmentCandidates {
         title: normalized_candidate(metadata.title, MAX_TITLE_BYTES),
         excerpt,
+        markdown,
         language: normalized_candidate(metadata.language, MAX_LANGUAGE_BYTES),
     })
 }
@@ -513,6 +528,9 @@ fn extract_html_metadata(body: &[u8]) -> EnrichmentCandidates {
     EnrichmentCandidates {
         title,
         excerpt,
+        // The direct provider reads public HTML metadata and never retains a
+        // page body, so it has nothing to capture.
+        markdown: None,
         language,
     }
 }
@@ -546,6 +564,29 @@ fn normalized_candidate(value: Option<String>, maximum: usize) -> Option<String>
         return None;
     }
     Some(truncate_utf8(&normalized, maximum))
+}
+
+/// Bounds Markdown to an excerpt without cutting a line in half.
+///
+/// Collapsing the whitespace, as a meta description is collapsed, would leave
+/// unreadable Markdown, so the lead keeps its line structure and stops at the
+/// last paragraph or line break that fits.
+fn markdown_lead(markdown: &str, maximum: usize) -> String {
+    if markdown.len() <= maximum {
+        return markdown.to_owned();
+    }
+    let mut boundary = maximum;
+    while !markdown.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+    let head = &markdown[..boundary];
+    let lead = head
+        .rfind("\n\n")
+        .or_else(|| head.rfind('\n'))
+        .map_or(head, |cut| &head[..cut])
+        .trim_end();
+    // A first paragraph longer than the bound leaves nothing to cut back to.
+    if lead.is_empty() { head } else { lead }.to_owned()
 }
 
 fn truncate_utf8(value: &str, maximum: usize) -> String {
@@ -840,9 +881,10 @@ mod tests {
         .expect("valid Firecrawl response");
 
         assert_eq!(
-            candidates.excerpt.as_deref(),
+            candidates.markdown.as_deref(),
             Some("# CSS Stuff\n\nA catalog with **formatting**.\n\t- Grid\n\t- Color")
         );
+        assert_eq!(candidates.excerpt.as_deref(), Some("Short fallback"));
         assert_eq!(candidates.title.as_deref(), Some("CSS Stuff"));
         assert_eq!(candidates.language.as_deref(), Some("en"));
 
@@ -851,6 +893,40 @@ mod tests {
             bounded_markdown_candidate(Some(oversized), MAX_FIRECRAWL_MARKDOWN_BYTES),
             Err(EnrichmentError::ResponseTooLarge)
         ));
+    }
+
+    #[test]
+    fn a_page_without_a_description_excerpts_a_bounded_lead() {
+        let body = format!(
+            "# Heading\n\nThe lead paragraph.\n\n{}",
+            "Filler that belongs to the captured document alone. ".repeat(400)
+        );
+        let candidates = firecrawl_candidates(FirecrawlResponse {
+            success: true,
+            data: Some(FirecrawlData {
+                markdown: Some(body.clone()),
+                metadata: Some(FirecrawlMetadata {
+                    title: None,
+                    description: None,
+                    language: None,
+                }),
+            }),
+        })
+        .expect("valid Firecrawl response");
+
+        let excerpt = candidates.excerpt.expect("a lead excerpt");
+        assert!(excerpt.len() <= MAX_EXCERPT_BYTES);
+        assert!(excerpt.starts_with("# Heading\n\nThe lead paragraph."));
+        assert!(
+            !excerpt.ends_with(' '),
+            "the lead stops at a line break: {:?}",
+            &excerpt[excerpt.len() - 40..]
+        );
+        assert_eq!(
+            candidates.markdown.as_deref().map(str::len),
+            Some(body.trim_end().len()),
+            "the whole page still reaches the captured document"
+        );
     }
 
     #[test]

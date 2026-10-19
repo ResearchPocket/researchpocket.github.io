@@ -329,26 +329,29 @@ async fn apply_enrichment_on_connection(
             && current_job.expected_title_revision.as_deref()
                 == Some(current_item.title.winner.as_str())
     });
-    let fetched_context = candidate(candidates.excerpt).filter(|_| {
-        current_job.expected_excerpt_text.as_deref() == Some(current_item.excerpt.as_str())
-    });
+    // One guard covers both: a human edit landing mid-request means this parse
+    // describes an excerpt that no longer exists, so neither half applies.
+    let excerpt_unchanged =
+        current_job.expected_excerpt_text.as_deref() == Some(current_item.excerpt.as_str());
+    let fetched_excerpt = candidate(candidates.excerpt).filter(|_| excerpt_unchanged);
+    let fetched_markdown = candidate(candidates.markdown).filter(|_| excerpt_unchanged);
     let (excerpt, captured_document) = if current_job.job.provider
         == EnrichmentProvider::Firecrawl
     {
-        let artifact = fetched_context
+        let artifact = fetched_markdown
             .as_deref()
             .map(|markdown| {
                 create_captured_document(markdown, "firecrawl", expected_url, &now_rfc3339())
             })
             .transpose()?;
         let excerpt = if current_job.replace_excerpt {
-            fetched_context.clone()
+            fetched_excerpt
         } else {
             None
         };
         (excerpt, artifact)
     } else {
-        (fetched_context, None)
+        (fetched_excerpt, None)
     };
     if let Some(artifact) = &captured_document {
         persist_captured_document(connection, artifact).await?;

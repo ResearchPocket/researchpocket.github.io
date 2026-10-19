@@ -224,6 +224,15 @@ pub enum EnrichCommands {
 
     /// Enrich one save, or process the durable retry queue when no ID is supplied
     Run(EnrichRunArgs),
+
+    /// Drop one save's captured page, keeping the save, its excerpt, and its note
+    Forget(EnrichForgetArgs),
+}
+
+#[derive(Args)]
+pub struct EnrichForgetArgs {
+    /// UUID of the saved item whose captured page is dropped
+    pub item_id: String,
 }
 
 #[derive(Args)]

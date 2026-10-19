@@ -10,6 +10,7 @@ research add <URL>
 research enrich configure <direct|firecrawl>
 research enrich status
 research enrich run [<ITEM_ID>]
+research enrich forget <ITEM_ID>
 research enrich disable
 research capture install
 research capture status
@@ -104,7 +105,22 @@ authored values and are not replaced; `--excerpt ""` leaves the excerpt blank,
 which merged text cannot distinguish from unset, so enrichment may still fill
 it. Firecrawl stores its full Markdown separately as private captured content
 by default. It replaces the authored excerpt only when the owner explicitly
-passes `--replace-excerpt`.
+passes `--replace-excerpt`, and that replacement is the page's own bounded
+description, never the whole page: an excerpt is merged text inside the CRDT,
+so every character it holds replicates to every device and stays in every
+checkpoint. A page that describes itself with nothing contributes a bounded
+lead of its Markdown instead. The complete Markdown remains available as the
+item's captured document.
+
+Drop a captured page when its archive is no longer wanted:
+
+```sh
+research enrich forget <item-id>
+```
+
+The save, its excerpt, its note, and its tags remain. Content already uploaded
+stays in the immutable sync repository; what this removes is the item's
+reference to it, and the local Markdown once no other save points at that hash.
 
 ### Direct public-HTML provider
 
@@ -136,7 +152,9 @@ URL is sent to the configured Firecrawl service. ResearchPocket uses the narrow
 Markdown once under its SHA-256 identity in `sync/v2/content/sha256/`, while the
 item carries only the hash, byte length, media type, and provenance. List and
 bootstrap projections contain no Markdown bytes; the Reader fetches and
-validates them lazily. Markdown is preserved up to 4 MiB and the complete JSON
+validates them lazily, under a labelled **Captured page** section that names
+the provider, capture date, and size. The excerpt above it is always the
+authored one. Markdown is preserved up to 4 MiB and the complete JSON
 response is limited to 8 MiB. Larger results fail explicitly and remain
 retryable without affecting the already-saved URL. The request includes the
 complete page instead of restricting extraction to main content, disables
@@ -147,7 +165,7 @@ Passing an item ID and `--provider firecrawl` refreshes its captured document.
 The authored excerpt remains untouched.
 
 Pass `--replace-excerpt` when the fresh parse should also replace the authored
-excerpt:
+excerpt with the page's bounded description:
 
 ```sh
 research enrich run <item-id> --provider firecrawl --replace-excerpt

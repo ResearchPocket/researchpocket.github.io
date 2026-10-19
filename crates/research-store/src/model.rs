@@ -99,6 +99,8 @@ pub enum EnrichmentStatus {
 pub struct EnrichmentCandidates {
     pub title: Option<String>,
     pub excerpt: Option<String>,
+    /// Whole-page Markdown for the item's captured document, never its excerpt.
+    pub markdown: Option<String>,
     pub language: Option<String>,
 }
 
