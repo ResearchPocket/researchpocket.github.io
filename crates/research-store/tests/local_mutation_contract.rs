@@ -38,6 +38,7 @@ async fn firecrawl_reenrichment_replaces_excerpt_only_when_explicitly_requested(
             &item.state,
             EnrichmentCandidates {
                 excerpt: Some("Short metadata description".into()),
+                markdown: Some("# Complete page\n\nPreserved Markdown".into()),
                 ..EnrichmentCandidates::default()
             },
         )
@@ -57,7 +58,8 @@ async fn firecrawl_reenrichment_replaces_excerpt_only_when_explicitly_requested(
             .await
             .expect("read content")
             .as_deref(),
-        Some("Short metadata description")
+        Some("# Complete page\n\nPreserved Markdown"),
+        "the captured document takes the whole page, never the excerpt candidate"
     );
 
     let requeued = store
@@ -76,7 +78,8 @@ async fn firecrawl_reenrichment_replaces_excerpt_only_when_explicitly_requested(
             &item.url,
             &item.state,
             EnrichmentCandidates {
-                excerpt: Some("# Complete page\n\nPreserved Markdown".into()),
+                excerpt: Some("Short metadata description".into()),
+                markdown: Some("# Complete page\n\nSecond parse".into()),
                 ..EnrichmentCandidates::default()
             },
         )
@@ -96,7 +99,7 @@ async fn firecrawl_reenrichment_replaces_excerpt_only_when_explicitly_requested(
             .await
             .expect("read replacement")
             .as_deref(),
-        Some("# Complete page\n\nPreserved Markdown")
+        Some("# Complete page\n\nSecond parse")
     );
 
     store
@@ -138,7 +141,8 @@ async fn firecrawl_reenrichment_replaces_excerpt_only_when_explicitly_requested(
             &item.url,
             &item.state,
             EnrichmentCandidates {
-                excerpt: Some("Stale parsed page".into()),
+                excerpt: Some("Stale summary".into()),
+                markdown: Some("# Stale parsed page".into()),
                 ..EnrichmentCandidates::default()
             },
         )
@@ -178,7 +182,8 @@ async fn firecrawl_reenrichment_replaces_excerpt_only_when_explicitly_requested(
             &item.url,
             &item.state,
             EnrichmentCandidates {
-                excerpt: Some("# Fresh parse".into()),
+                excerpt: Some("Fresh summary".into()),
+                markdown: Some("# Fresh parse\n\nThe whole page again".into()),
                 ..EnrichmentCandidates::default()
             },
         )
@@ -186,7 +191,9 @@ async fn firecrawl_reenrichment_replaces_excerpt_only_when_explicitly_requested(
         .expect("replace unchanged authored excerpt explicitly");
     assert!(replacement.applied_excerpt);
     assert!(replacement.applied_captured_document);
-    assert_eq!(replacement.item.excerpt.as_deref(), Some("# Fresh parse"));
+    // Explicit replacement writes the bounded excerpt candidate. The whole page
+    // stays in the captured document instead of entering the CRDT.
+    assert_eq!(replacement.item.excerpt.as_deref(), Some("Fresh summary"));
     let fresh_reference = replacement
         .item
         .captured_document
@@ -198,8 +205,34 @@ async fn firecrawl_reenrichment_replaces_excerpt_only_when_explicitly_requested(
             .await
             .expect("read fresh parse")
             .as_deref(),
-        Some("# Fresh parse")
+        Some("# Fresh parse\n\nThe whole page again")
     );
+
+    let forgotten = store
+        .forget_captured_document(&item.id)
+        .await
+        .expect("drop the captured page");
+    assert!(forgotten.captured_document.is_none());
+    assert_eq!(
+        forgotten.excerpt.as_deref(),
+        Some("Fresh summary"),
+        "dropping the archive leaves the authored excerpt alone"
+    );
+    assert_eq!(
+        store
+            .captured_document_markdown(&fresh_reference.sha256)
+            .await
+            .expect("read dropped content"),
+        None,
+        "no item points at the Markdown, so it leaves local storage too"
+    );
+    assert!(matches!(
+        store
+            .forget_captured_document(&item.id)
+            .await
+            .expect_err("a save without a captured page has nothing to drop"),
+        StoreError::NoChanges
+    ));
 }
 
 #[tokio::test]
@@ -486,6 +519,7 @@ async fn enrichment_is_durable_bounded_and_never_overwrites_authored_values() {
         title: Some("Fetched title".into()),
         excerpt: Some("Fetched excerpt".into()),
         language: Some("en".into()),
+        ..EnrichmentCandidates::default()
     };
     assert!(matches!(
         store

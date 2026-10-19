@@ -213,7 +213,11 @@ impl V2Store {
         .await
     }
 
-    async fn commit_item_mutation<F>(&self, item_id: &str, mutate: F) -> StoreResult<StoredItem>
+    pub(crate) async fn commit_item_mutation<F>(
+        &self,
+        item_id: &str,
+        mutate: F,
+    ) -> StoreResult<StoredItem>
     where
         F: FnOnce(&Library, &CanonicalProjection, &str) -> StoreResult<()>,
     {

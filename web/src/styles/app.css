@@ -2936,6 +2936,44 @@ kbd {
   margin: 0;
 }
 
+.reader-capture {
+  border-top: 1px solid var(--color-border);
+  max-width: var(--measure);
+  padding-top: 1rem;
+  width: 100%;
+}
+
+.reader-capture-toggle {
+  align-items: baseline;
+  background: none;
+  border: 0;
+  color: var(--color-text-soft);
+  cursor: pointer;
+  display: flex;
+  gap: 0.5rem;
+  padding: 0;
+  text-align: left;
+  width: 100%;
+}
+
+.reader-capture-toggle strong {
+  color: var(--color-text);
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.reader-capture-toggle small {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.reader-capture-body {
+  border-left: 0.1875rem solid var(--color-border);
+  margin-top: 1rem;
+  padding-left: 0.875rem;
+}
+
 .reader-markdown {
   max-width: 100%;
   min-width: 0;

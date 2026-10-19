@@ -2979,22 +2979,36 @@ function ReaderView({
     null,
   );
   const [capturedContextLoading, setCapturedContextLoading] = useState(false);
+  const [captureOpen, setCaptureOpen] = useState(false);
   const imageCloseRef = useRef<HTMLButtonElement | null>(null);
   const label = item.title?.trim() || item.url;
-  const context = capturedContext ?? item.excerpt;
-  const hasContext = Boolean(context?.trim());
+  // The excerpt is what the owner authored and edited, so it is what the
+  // reader shows. A captured page is an archive of the source and gets its own
+  // labelled section: standing in for the excerpt would quietly undo every
+  // trim made to it, with no way to tell which of the two is on screen.
+  const authoredContext = item.excerpt?.trim() ? item.excerpt : null;
+  const capture = item.capturedDocument ?? null;
   const imagesAllowed = itemsWithImages.has(item.id);
 
   useEffect(() => {
     setExpandedImage(null);
   }, [item.id]);
 
+  // An item with no excerpt of its own has nothing else to read, so its
+  // archive opens on arrival. Otherwise the excerpt leads and the archive waits
+  // to be asked for.
+  useEffect(() => {
+    setCaptureOpen(Boolean(capture) && !authoredContext);
+  }, [authoredContext, capture?.sha256, item.id]);
+
   useEffect(() => {
     let cancelled = false;
     setCapturedContext(null);
     setCapturedContextError(null);
     const reference = item.capturedDocument;
-    if (!reference) {
+    // Fetched only once the section is open: the bytes live outside the
+    // library projection precisely so that opening a save never pulls them.
+    if (!reference || !captureOpen) {
       setCapturedContextLoading(false);
       return () => {
         cancelled = true;
@@ -3020,7 +3034,7 @@ function ReaderView({
     return () => {
       cancelled = true;
     };
-  }, [item.id, item.capturedDocument?.sha256]);
+  }, [captureOpen, item.id, item.capturedDocument?.sha256]);
 
   useEffect(() => {
     if (expandedImage) imageCloseRef.current?.focus();
@@ -3109,13 +3123,7 @@ function ReaderView({
           {item.tags.length > 0 ? <p className="reader-tags">{item.tags.map((tag) => <span key={tag}>#{tag}</span>)}</p> : null}
           {item.note?.trim() ? <aside className="reader-note"><strong>Your note</strong><p>{item.note}</p></aside> : null}
           <div className="reader-body">
-            {capturedContextLoading ? (
-              <p role="status">Loading captured page content…</p>
-            ) : null}
-            {capturedContextError ? (
-              <p className="sync-error" role="alert">{capturedContextError}</p>
-            ) : null}
-            {hasContext && context ? (
+            {authoredContext ? (
               <MarkdownDocument
                 imageBaseUrl={item.url}
                 imagesAllowed={imagesAllowed}
@@ -3123,11 +3131,57 @@ function ReaderView({
                 onOpenImage={(image, opener) =>
                   setExpandedImage({ image, opener })
                 }
-                source={context}
+                source={authoredContext}
               />
-            ) : capturedContextLoading ? null : (
+            ) : capture ? null : (
               <p>This save has no extracted preview yet. Open the original to read the full page, or add a private note to keep the context that matters.</p>
             )}
+            {capture ? (
+              <section className="reader-capture">
+                <button
+                  aria-controls="reader-capture-body"
+                  aria-expanded={captureOpen}
+                  className="reader-capture-toggle"
+                  id="reader-capture-toggle"
+                  onClick={() => setCaptureOpen((open) => !open)}
+                  type="button"
+                >
+                  <span aria-hidden="true">{captureOpen ? "▾" : "▸"}</span>
+                  <strong>Captured page</strong>
+                  <small>
+                    {capture.provenance.provider} ·{" "}
+                    {formatDate(capture.provenance.captured_at)} ·{" "}
+                    {formatBytes(capture.byte_length)}
+                  </small>
+                </button>
+                {captureOpen ? (
+                  <div
+                    aria-labelledby="reader-capture-toggle"
+                    className="reader-capture-body"
+                    id="reader-capture-body"
+                    role="region"
+                  >
+                    {capturedContextLoading ? (
+                      <p role="status">Loading captured page content…</p>
+                    ) : null}
+                    {capturedContextError ? (
+                      <p className="sync-error" role="alert">{capturedContextError}</p>
+                    ) : null}
+                    {capturedContext ? (
+                      <MarkdownDocument
+                        imageBaseUrl={item.url}
+                        imagesAllowed={imagesAllowed}
+                        onLoadImages={loadImagesForItem}
+                        onOpenImage={(image, opener) =>
+                          setExpandedImage({ image, opener })
+                        }
+                        source={capturedContext}
+                      />
+                    ) : null}
+                  </div>
+                ) : null}
+              </section>
+            ) : null}
             <p className="reader-source">ResearchPocket keeps the URL and your authored context locally. The original page remains at <a href={item.url} rel="noreferrer" target="_blank">{readHostname(item.url)}</a>.</p>
           </div>
         </div>
@@ -4091,6 +4145,13 @@ function formatDate(value: string) {
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: "medium",
   }).format(date);
+}
+
+function formatBytes(value: number) {
+  if (value < 1024) return `${value.toLocaleString()} B`;
+  const kilobytes = value / 1024;
+  if (kilobytes < 1024) return `${Math.round(kilobytes).toLocaleString()} KB`;
+  return `${(kilobytes / 1024).toFixed(1)} MB`;
 }
 
 function formatDateTime(value: string) {

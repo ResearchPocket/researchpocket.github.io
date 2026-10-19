@@ -2828,6 +2828,21 @@ fn render_detail(frame: &mut Frame<'_>, area: Rect, item: Option<&StoredItem>, s
                     },
                 ),
             ];
+            // Named here rather than rendered: the captured page is an archive
+            // held outside the library projection, and the excerpt below it is
+            // the authored context. Showing one in place of the other is what
+            // makes an owner think their edit was lost.
+            if let Some(captured) = &item.captured_document {
+                lines.push(detail_line(
+                    "Captured",
+                    format!(
+                        "{} · {} · {}",
+                        captured.provenance.provider,
+                        captured.provenance.captured_at,
+                        human_bytes(captured.byte_length),
+                    ),
+                ));
+            }
             if let Some(excerpt) = &item.excerpt {
                 lines.push(Line::default());
                 lines.push(heading("Excerpt"));
@@ -3536,6 +3551,17 @@ fn heading(text: &'static str) -> Line<'static> {
             .fg(Color::Cyan)
             .add_modifier(Modifier::BOLD),
     )
+}
+
+fn human_bytes(value: u64) -> String {
+    if value < 1024 {
+        return format!("{value} B");
+    }
+    let kilobytes = value / 1024;
+    if kilobytes < 1024 {
+        return format!("{kilobytes} KB");
+    }
+    format!("{}.{} MB", kilobytes / 1024, (kilobytes % 1024) * 10 / 1024)
 }
 
 fn detail_line<'a>(label: &'static str, value: impl Into<String>) -> Line<'a> {

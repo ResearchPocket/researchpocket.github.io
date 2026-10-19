@@ -3,7 +3,9 @@ use research_domain::{
 };
 use sqlx::{Row, SqliteConnection};
 
-use crate::{PendingCapturedDocument, StoreError, StoreResult, V2Store, store::now_rfc3339};
+use crate::{
+    PendingCapturedDocument, StoreError, StoreResult, StoredItem, V2Store, store::now_rfc3339,
+};
 
 impl V2Store {
     pub async fn pending_captured_documents(
@@ -100,6 +102,45 @@ impl V2Store {
                 Err(error)
             }
         }
+    }
+
+    /// Drops an item's captured page, keeping the save and its excerpt.
+    ///
+    /// The local Markdown goes only when no other item still points at that
+    /// hash. Content already uploaded stays in the repository, which is
+    /// immutable by construction; what this removes is the item's claim on it.
+    pub async fn forget_captured_document(&self, item_id: &str) -> StoreResult<StoredItem> {
+        let mutation_item_id = item_id.to_owned();
+        let item = self
+            .commit_item_mutation(item_id, move |library, projection, prefix| {
+                let current = projection
+                    .items
+                    .get(&mutation_item_id)
+                    .ok_or_else(|| StoreError::ItemNotFound(mutation_item_id.clone()))?;
+                if current
+                    .captured_document
+                    .as_ref()
+                    .is_none_or(|reference| reference.value.is_none())
+                {
+                    return Err(StoreError::NoChanges);
+                }
+                library.write_captured_document(
+                    &mutation_item_id,
+                    &format!("{prefix}/captured-document"),
+                    None,
+                )?;
+                Ok(())
+            })
+            .await?;
+        let mut connection = self.pool.acquire().await?;
+        sqlx::query(
+            "DELETE FROM captured_documents WHERE sha256 NOT IN \
+             (SELECT json_extract(captured_document_json, '$.sha256') FROM items \
+              WHERE captured_document_json IS NOT NULL)",
+        )
+        .execute(&mut *connection)
+        .await?;
+        Ok(item)
     }
 
     pub async fn captured_document_markdown(
