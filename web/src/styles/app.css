@@ -2263,7 +2263,7 @@ kbd {
   width: 2.5rem;
 }
 
-.rail-icon {
+.app-icon {
   fill: none;
   flex: 0 0 auto;
   height: 1.375rem;
@@ -2858,6 +2858,31 @@ kbd {
 .reader-toolbar .icon-button {
   background: transparent;
   border-color: transparent;
+  color: var(--color-text-soft);
+  flex: 0 0 auto;
+  height: 2.5rem;
+  min-height: 2.5rem;
+  width: 2.5rem;
+}
+
+.reader-toolbar .icon-button:is(:focus-visible, [aria-pressed="true"]) {
+  color: var(--color-accent-strong);
+}
+
+.reader-toolbar .icon-button[aria-pressed="true"] .app-icon {
+  fill: currentColor;
+}
+
+.reader-toolbar .icon-button.danger-button {
+  color: var(--color-danger);
+}
+
+@media (pointer: coarse) {
+  .reader-toolbar .icon-button {
+    height: var(--control-height);
+    min-height: var(--control-height);
+    width: var(--control-height);
+  }
 }
 
 /* The measure is the text column alone. The gutters sit outside it, so the cap
@@ -3448,7 +3473,7 @@ kbd {
     display: none;
   }
 
-  .rail-full .rail-icon {
+  .rail-full .app-icon {
     display: none;
   }
 
@@ -3688,13 +3713,6 @@ kbd {
     min-height: 2.75rem;
     padding: 0 0.5rem 0 1rem;
     position: static;
-  }
-
-  .reader-toolbar .icon-button {
-    flex: 0 0 auto;
-    height: 2.5rem;
-    min-height: 2.5rem;
-    width: 2.5rem;
   }
 
   .reader-toolbar .icon-button[aria-pressed="true"] {
