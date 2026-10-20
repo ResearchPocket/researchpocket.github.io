@@ -228,8 +228,8 @@ const EMPTY_SYNC_STATE: BrowserSyncState = {
   lastCycle: null,
 };
 
-function RailIcon({ name }: {
-  name: "saves" | "favorites" | "archive" | "zen" | "tags" | "sync" | "settings";
+function AppIcon({ name }: {
+  name: "saves" | "favorites" | "archive" | "zen" | "tags" | "sync" | "settings" | "back" | "edit" | "external";
 }) {
   const paths = {
     saves: <><path d="M5 3h14v18l-7-4-7 4z" /><path d="M9 7h6" /></>,
@@ -238,9 +238,12 @@ function RailIcon({ name }: {
     zen: <><path d="M5 3h10l4 4v14H5zM14 3v5h5M9 12h6M9 16h4" /></>,
     tags: <><path d="M3 3h8l10 10-8 8L3 11z" /><circle cx="7.5" cy="7.5" r="1" /></>,
     sync: <><path d="M20 10a8 8 0 0 0-14-4L3 9m0-6v6h6M4 14a8 8 0 0 0 14 4l3-3m0 6v-6h-6" /></>,
-    settings: <><path d="m9 3-1 3-3 1-2 3 2 2v3l3 2 1 4h6l1-4 3-2v-3l2-2-2-3-3-1-1-3z" /><circle cx="12" cy="12" r="3" /></>,
+    back: <path d="m10 5-7 7 7 7M3 12h18" />,
+    edit: <><path d="m16 3 5 5-12 12-6 1 1-6zM13 6l5 5" /></>,
+    external: <path d="M14 3h7v7M21 3 10 14M10 3H3v18h18v-7" />,
+    settings: <><path d="m9.7 4.5.6-2.4h3.4l.6 2.4 1.4.6 2-1.3 2.5 2.5-1.3 2 .6 1.4 2.4.6v3.4l-2.4.6-.6 1.4 1.3 2-2.5 2.5-2-1.3-1.4.6-.6 2.4h-3.4l-.6-2.4-1.4-.6-2 1.3-2.5-2.5 1.3-2-.6-1.4-2.4-.6v-3.4l2.4-.6.6-1.4-1.3-2 2.5-2.5 2 1.3z" /><circle cx="12" cy="12" r="3" /></>,
   };
-  return <svg aria-hidden="true" className="rail-icon" viewBox="0 0 24 24">{paths[name]}</svg>;
+  return <svg aria-hidden="true" className="app-icon" viewBox="0 0 24 24">{paths[name]}</svg>;
 }
 
 export function App() {
@@ -1185,7 +1188,7 @@ export function App() {
               title="All saves"
               type="button"
             >
-              <RailIcon name="saves" />
+              <AppIcon name="saves" />
               <span className="sr-only">All saves</span>
             </button>
             <button
@@ -1199,7 +1202,7 @@ export function App() {
               title="Favorites"
               type="button"
             >
-              <RailIcon name="favorites" />
+              <AppIcon name="favorites" />
               <span className="sr-only">Favorites</span>
             </button>
             <button
@@ -1213,7 +1216,7 @@ export function App() {
               title="Archive"
               type="button"
             >
-              <RailIcon name="archive" />
+              <AppIcon name="archive" />
               <span className="sr-only">Archive</span>
             </button>
 
@@ -1228,7 +1231,7 @@ export function App() {
               title="Zen documents"
               type="button"
             >
-              <RailIcon name="zen" />
+              <AppIcon name="zen" />
               <span className="sr-only">Zen documents</span>
             </button>
             {/* Tags are a list, and a list has nowhere to go in a 52px rail, so
@@ -1240,7 +1243,7 @@ export function App() {
               title="Tags"
               type="button"
             >
-              <RailIcon name="tags" />
+              <AppIcon name="tags" />
               <span className="sr-only">Tags — show sidebar</span>
             </button>
 
@@ -1253,7 +1256,7 @@ export function App() {
               title="Sync"
               type="button"
             >
-              <RailIcon name="sync" />
+              <AppIcon name="sync" />
               <span className="sr-only">Sync</span>
             </button>
             <button
@@ -1263,7 +1266,7 @@ export function App() {
               title="Settings"
               type="button"
             >
-              <RailIcon name="settings" />
+              <AppIcon name="settings" />
               <span className="sr-only">Settings</span>
             </button>
           </nav>
@@ -1280,7 +1283,7 @@ export function App() {
                 }}
                 type="button"
               >
-                <span className="rail-destination"><RailIcon name="saves" />All saves</span><small>{activeCount}</small>
+                <span className="rail-destination"><AppIcon name="saves" />All saves</span><small>{activeCount}</small>
               </button>
               <button
                 aria-current={view === "library" && favoriteOnly ? "page" : undefined}
@@ -1292,7 +1295,7 @@ export function App() {
                 }}
                 type="button"
               >
-                <span className="rail-destination"><RailIcon name="favorites" />Favorites</span>
+                <span className="rail-destination"><AppIcon name="favorites" />Favorites</span>
                 <small>{items.filter((item) => !item.deleted && item.favorite).length}</small>
               </button>
               <button
@@ -1305,7 +1308,7 @@ export function App() {
                 }}
                 type="button"
               >
-                <span className="rail-destination"><RailIcon name="archive" />Archive</span><small>{deletedCount}</small>
+                <span className="rail-destination"><AppIcon name="archive" />Archive</span><small>{deletedCount}</small>
               </button>
               {/* The strip is the phone's whole navigation, and the heading row
                   that carries the desktop's List/Graph control is not on it. */}
@@ -1341,7 +1344,7 @@ export function App() {
                 >
                   {/* The rail heading says ZEN above it; the chip strip drops
                       headings, so the chip has to name itself. */}
-                  <span className="rail-label-wide rail-destination"><RailIcon name="zen" />Documents</span>
+                  <span className="rail-label-wide rail-destination"><AppIcon name="zen" />Documents</span>
                   <span className="rail-label-narrow">Zen</span>
                   <small>{zenDocuments.length}</small>
                 </button>
@@ -1393,14 +1396,14 @@ export function App() {
                 onClick={() => navigateToView("sync")}
                 type="button"
               >
-                <span className="rail-destination"><RailIcon name="sync" />Sync</span><small>{libraryState.pendingCount} pending</small>
+                <span className="rail-destination"><AppIcon name="sync" />Sync</span><small>{libraryState.pendingCount} pending</small>
               </button>
               <button
                 aria-current={view === "settings" ? "page" : undefined}
                 onClick={() => navigateToView("settings")}
                 type="button"
               >
-                <span className="rail-destination"><RailIcon name="settings" />Settings</span>
+                <span className="rail-destination"><AppIcon name="settings" />Settings</span>
               </button>
             </nav>
           </div>
@@ -3071,7 +3074,7 @@ function ReaderView({
       <article className="reader-article">
         <header className="reader-toolbar">
           <button className="reader-back" onClick={onBack} type="button">
-            <span aria-hidden="true">←</span>
+            <AppIcon name="back" />
             <span>All saves</span>
           </button>
           <div className="reader-toolbar-actions">
@@ -3083,7 +3086,7 @@ function ReaderView({
               onClick={() => void onFavorite(item)}
               type="button"
             >
-              <span aria-hidden="true">★</span>
+              <AppIcon name="favorites" />
             </button>
             <button
               aria-haspopup="dialog"
@@ -3093,7 +3096,7 @@ function ReaderView({
               onClick={(event) => onEdit(item, event.currentTarget)}
               type="button"
             >
-              <span aria-hidden="true">✎</span>
+              <AppIcon name="edit" />
             </button>
             <a
               aria-label="Open original"
@@ -3102,7 +3105,7 @@ function ReaderView({
               rel="noreferrer"
               target="_blank"
             >
-              <span aria-hidden="true">↗</span>
+              <AppIcon name="external" />
             </a>
             <button
               aria-label="Archive"
@@ -3111,7 +3114,7 @@ function ReaderView({
               onClick={() => void onDelete(item).then(onBack)}
               type="button"
             >
-              <span aria-hidden="true">⌫</span>
+              <AppIcon name="archive" />
             </button>
           </div>
         </header>
