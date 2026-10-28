@@ -11,6 +11,8 @@ Verified:
   Enter inserts a stable Markdown link, and Escape dismisses the picker while
   keeping the document and its draft open.
 - Desktop suggestions appear at the caret; touch viewport uses a docked picker.
+- The document delete action uses the shared SVG archive icon with a Delete document
+  accessible label. First activation asks for confirmation; blurring cancels it.
 - At 390 × 844 with mobile/touch emulation, Insert link opens the search field;
   tapping a document or saved item inserts it at the preserved selection and
   returns focus to the textarea.
@@ -29,6 +31,8 @@ Screenshots:
 - [Desktop completion](./198-zen-desktop.png)
 - [Mobile Insert link](./198-zen-mobile.png)
 - [Linked from](./198-zen-backlinks.png)
+- [Editor icon on mobile](./198-zen-delete-mobile.png)
+- [Editor icon on desktop](./198-zen-delete-desktop.png)
 
 Automated verification, from `web/`:
 

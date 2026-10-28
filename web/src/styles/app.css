@@ -5529,13 +5529,17 @@ kbd {
 }
 
 .zen-delete {
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+  min-inline-size: 2.75rem;
   background: transparent;
   border: var(--rule) solid transparent;
   border-radius: var(--radius);
   color: var(--color-text-muted);
   cursor: pointer;
   font-size: var(--font-size-xs);
-  min-block-size: 1.875rem;
+  min-block-size: 2.75rem;
   padding-inline: 0.5rem;
 }
 
