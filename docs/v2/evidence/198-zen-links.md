@@ -7,6 +7,12 @@ with synthetic titles and example.com URLs. No owner data or token was used.
 
 Verified:
 
+- Clicking/editing the textarea dismisses the explicit picker without overwriting
+  draft text. Reopening it inserts using a fresh selection; stale text/offsets
+  are also rejected at acceptance.
+- GFM footnote backlinks and escaped pipe labels in table cells pass a focused
+  Markdown contract matching the reader's GFM syntax.
+
 - `[[` filters local document/title/URL metadata; ArrowDown changes selection,
   Enter inserts a stable Markdown link, and Escape dismisses the picker while
   keeping the document and its draft open.
@@ -46,7 +52,7 @@ bunx vite build
 bun run check:dist
 ```
 
-All 33 web tests passed, including the focused Markdown reference/escaping
+All 34 web tests passed, including the focused Markdown reference/escaping
 contracts. Native-to-WASM release compilation, design checks, production build,
 and artifact checks passed. Rust source and synchronization formats are unchanged.
 Vite emits its existing large-chunk advisory.

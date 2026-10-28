@@ -1,4 +1,6 @@
 import { fromMarkdown } from "mdast-util-from-markdown";
+import { gfmFromMarkdown } from "mdast-util-gfm";
+import { gfm } from "micromark-extension-gfm";
 type MarkdownNode = ReturnType<typeof fromMarkdown>["children"][number];
 
 export interface ZenLinkTarget {
@@ -25,7 +27,10 @@ export function parseZenLink(
 
 /** Actual Markdown links only: code, images and bare examples are not backlinks. */
 export function extractZenLinks(body: string): string[] {
-  const tree = fromMarkdown(body);
+  const tree = fromMarkdown(body, {
+    extensions: [gfm()],
+    mdastExtensions: [gfmFromMarkdown()],
+  });
   const definitions = new Map<string, string>();
   const links = new Set<string>();
   function visit(nodes: MarkdownNode[], resolve: boolean) {
@@ -68,7 +73,7 @@ export function insertZenLink(
 ) {
   const label = target.title
     .replace(/\s+/g, " ")
-    .replace(/[\\`*{}\[\]<>()!_]/g, "\\$&");
+    .replace(/[\\`*{}\[\]<>()!_|]/g, "\\$&");
   const text = `[${label}](research:${target.kind}/${target.id})`;
   return {
     body: body.slice(0, start) + text + body.slice(end),
