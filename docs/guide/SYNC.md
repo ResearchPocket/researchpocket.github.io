@@ -36,9 +36,10 @@ and token retention.
 
 ## Connect the CLI or TUI
 
-Set a token without putting it in a command-line argument:
+In **Bash**, set a token without putting it in a command-line argument. The
+hidden-input option `read -s` requires Bash and is not portable to `/bin/sh`:
 
-```sh
+```bash
 printf 'Fine-grained GitHub token: ' >&2
 IFS= read -r -s RESEARCHPOCKET_GITHUB_TOKEN
 printf '\n' >&2
@@ -49,7 +50,7 @@ research status
 unset RESEARCHPOCKET_GITHUB_TOKEN
 ```
 
-The example uses a POSIX-style shell. Native ResearchPocket accepts
+Native ResearchPocket accepts
 `RESEARCHPOCKET_GITHUB_TOKEN` or `GH_TOKEN` and does not persist the PAT. Set it
 before launching `research tui`; **s** connects or syncs from either workspace.
 
