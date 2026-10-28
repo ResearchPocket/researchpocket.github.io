@@ -2,6 +2,12 @@
 
 Status: public product explainer, offline owner editing, and private GitHub browser synchronization
 
+This is the implementation reference. For current user workflows, start with
+[Browser workspace](../guide/BROWSER.md), [Zen documents](../guide/ZEN.md),
+[Capture and reading](../guide/READING.md), or [Sync and recovery](../guide/SYNC.md).
+The current published release is 2.3.0; the Zen linking update at the end of this
+document describes additional current browser work.
+
 ## What works now
 
 The static Pages build in `web/` has four deliberately separate entries. The
@@ -27,7 +33,7 @@ before the owner makes a local mutation, allowing the pristine replica to adopt
 an existing remote library identity. The public landing page remains reachable
 from the owner workspace without clearing browser data.
 
-Every local action passes the current canonical snapshot into the WASM domain
+Every local item action passes the current canonical snapshot into the WASM domain
 boundary. One IndexedDB transaction then commits all of the following, or none
 of them:
 
@@ -52,7 +58,11 @@ branch-head races.
 
 ## Browser persistence
 
-IndexedDB database `researchpocket-v2`, version 2, contains only these stores:
+The local `researchpocket-profiles` registry selects an isolated library
+namespace. The first profile adopts the historical `researchpocket-v2` database
+without moving its data; additional profiles have distinct database, lock, and
+channel names. Each library database is currently version 5 and contains these
+stores:
 
 | Store | Contents |
 | --- | --- |
@@ -63,7 +73,20 @@ IndexedDB database `researchpocket-v2`, version 2, contains only these stores:
 | `outbox` | Pending local protocol paths, attempt count, sanitized error category, optional local-only change summary |
 | `deferred` | Exact remote envelopes still missing a causal predecessor |
 | `remoteObservations` | Protocol path, Git blob identity, observation time |
+| `checkpoints` | Validated immutable checkpoints and their coverage |
+| `selectedCheckpoint` | The checkpoint selected for the local replica |
+| `capturedDocuments` | Content-addressed captured Markdown cached separately from item excerpts |
 | `syncConfig` | Non-secret owner, repository, branch, and sanitized success/error times |
+| `zenDocuments` | Projected document metadata and task counts, without bodies |
+| `zenReplicas` | Per-document CRDT snapshots, read when a body is needed |
+| `aggregateBatches` | Exact accepted aggregate-scoped envelopes, separate from protocol-v1 item batches |
+| `aggregateOutbox` | Pending aggregate-scoped updates, including Zen changes |
+
+Zen document writes atomically commit their replica, projected metadata,
+aggregate envelope/outbox row, and next device sequence. Saves still use the
+protocol-v1 item snapshot and outbox; the item-aggregate migration remains
+deferred. Captured page bytes do not enter the item excerpt or Zen body unless
+the owner explicitly authors that text there.
 
 The library database has no credential, token, authorization-header, repository
 secret, or generic settings store. The fine-grained PAT remains in private
@@ -170,6 +193,12 @@ private sync has drained the outbox, another pristine browser or CLI device can
 restore the library from immutable repository genesis and operations. Unsynced
 changes remain only in the current browser, and the UI reports their pending
 count rather than implying they are already backed up.
+
+The app supports offline mutations after loading, but a known production
+bootstrap failure can prevent the domain worker from opening on a fresh offline
+reload even when the shell is cached. See
+[#199](https://github.com/ResearchPocket/researchpocket.github.io/issues/199).
+Previously committed data remains in IndexedDB; reconnecting allows reopening.
 
 ## Owner synchronization lifecycle
 

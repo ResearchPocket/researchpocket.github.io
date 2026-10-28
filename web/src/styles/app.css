@@ -4662,6 +4662,11 @@ kbd {
 }
 
 /* Public reference guide */
+.docs-body {
+  inset: 0;
+  position: fixed;
+}
+
 .docs-body,
 #docs-root,
 .docs-app {
@@ -4778,8 +4783,34 @@ kbd {
   padding: 1rem;
 }
 
+.docs-version {
+  border-bottom: var(--rule) solid var(--color-border);
+  color: var(--color-text);
+  display: grid;
+  gap: 0.375rem;
+  padding: 1rem;
+  text-decoration: none;
+}
+
+.docs-version span {
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+}
+
+.docs-version small,
+.docs-nav a small,
+.docs-page-meta {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.docs-version:hover small {
+  color: var(--color-accent-strong);
+}
+
 .docs-search label,
 .docs-nav h2,
+.docs-nav summary,
 .docs-outline h2 {
   color: var(--color-accent-strong);
   font-size: var(--font-size-xs);
@@ -4831,9 +4862,15 @@ kbd {
   padding-top: 0.5rem;
 }
 
-.docs-nav h2 {
+.docs-nav h2,
+.docs-nav summary {
   margin: 0;
   padding: 0.625rem 1rem 0.375rem;
+}
+
+.docs-nav summary {
+  cursor: pointer;
+  min-height: 2.75rem;
 }
 
 .docs-nav a {
@@ -4879,6 +4916,19 @@ kbd {
   margin: 0 auto;
   max-width: 58rem;
   padding: 1.75rem clamp(1.5rem, 5vw, 4rem) 4rem;
+}
+
+.docs-page-meta {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  justify-content: space-between;
+  margin-bottom: 1.5rem;
+}
+
+.docs-page-meta a {
+  color: var(--color-text-muted);
 }
 
 .docs-markdown {

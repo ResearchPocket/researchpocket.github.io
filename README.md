@@ -11,7 +11,13 @@ connection. GitHub sync and page enrichment are optional.
 
 [Open the browser app](https://researchpocket.github.io/app/) |
 [Download the CLI](https://github.com/ResearchPocket/researchpocket.github.io/releases) |
-[Read the reference](https://researchpocket.github.io/docs/)
+[Read the documentation](https://researchpocket.github.io/docs/)
+
+The current release is **2.3.0**. Alongside saved URLs, Research Zen holds
+bounded Markdown documents, task lists, and references to your saves. The browser
+offers Library list/graph views and optional remembered sync tokens; the native
+CLI and TUI manage both saves and documents. See the
+[documentation home](docs/guide/INDEX.md) for current features and planned work.
 
 ## Save your first link
 
@@ -65,7 +71,7 @@ accept one, install [Rust](https://www.rust-lang.org/tools/install) and build th
 matching release tag from source instead of weakening system-wide security:
 
 ```sh
-git clone --branch v2.1.1 --depth 1 \
+git clone --branch v2.3.0 --depth 1 \
   https://github.com/ResearchPocket/researchpocket.github.io.git
 cd researchpocket.github.io
 cargo build --locked --release
@@ -108,6 +114,27 @@ Press `?` inside the TUI for its shortcuts. `a` adds a link, `/` searches, `E`
 fills missing metadata and can refresh a provider-owned excerpt, `Ctrl+E`
 confirms replacement of any current excerpt, and `s` connects or runs private
 sync.
+
+## Write with your sources in Zen
+
+Open **Zen** in the browser to create a Markdown document, keep a task list,
+or collect your thinking around saved sources. A document can reference a save
+with `[label](research:item/<item-uuid>)`; the rendered reference follows its
+current title. Bodies are limited to 256 KiB and remain private.
+
+```sh
+research zen add --title "Reading plan" --body-file ./reading-plan.md
+research zen list
+research zen show "$DOC_ID"
+```
+
+In `research tui`, **Tab** switches between saves and documents. Open a document
+with **Enter**, toggle a task on the cursor line with **Space**, or edit its body
+in your editor with **Ctrl+G**. Documents synchronize alongside saves.
+
+The [Zen guide](docs/guide/ZEN.md) covers browser save timing, todos, references,
+and recovery. [Documentation and references](docs/guide/REFERENCES.md) shows how
+to build a reading plan from technical documentation, papers, and examples.
 
 ## Save the page you are reading
 
@@ -252,8 +279,15 @@ error. Credentials and raw synchronization updates are not included.
 
 ## Read more
 
+- [Documentation home and current feature status](docs/guide/INDEX.md)
+- [Getting started](docs/guide/GETTING_STARTED.md)
+- [Zen documents and task lists](docs/guide/ZEN.md)
+- [Documentation and references](docs/guide/REFERENCES.md)
+- [Capture, enrichment, and reading](docs/guide/READING.md)
+- [Browser workspace](docs/guide/BROWSER.md)
+- [Sync and recovery](docs/guide/SYNC.md)
 - [Complete CLI and TUI reference](docs/v2/CLI.md)
-- [Hosted browser application](docs/v2/WEB.md)
+- [Technical reference and architecture decisions](docs/guide/TECHNICAL.md)
 - [Migration guide](docs/v2/MIGRATION.md)
 - [Privacy threat model](docs/v2/THREAT_MODEL.md)
 - [Synchronization protocol](docs/v2/SYNC_PROTOCOL.md)

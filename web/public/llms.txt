@@ -1,18 +1,45 @@
 # ResearchPocket
 
-ResearchPocket is a human-first, local-first library for useful URLs. The public
-site explains the product, while the hosted owner application stores its private
-replica in the visitor's browser. It contains no bundled public library data and
-requires an owner-provided, repository-scoped credential before private sync.
+ResearchPocket 2.3.0 is a local-first personal library for useful HTTP(S) URLs
+and bounded private Zen documents. The static public site explains the product;
+the owner app stores its replica in the visitor's browser. No private library
+or token is bundled in the public shell.
 
-Available now: offline capture and curation, import from the previous SQLite
-library format, CLI, TUI, native browser capture through a URL-scheme handler,
-private GitHub synchronization, remote recovery, and hosted owner editing.
-Selective public collections, the loopback web server, checkpoints, and
-background scheduling remain planned work.
+Available now: offline URL capture and curation; CLI and TUI; V1 SQLite import;
+native bookmarklet capture; optional direct/Firecrawl enrichment; separately
+stored captured Markdown; private GitHub sync, checkpoints, and restore;
+browser library profiles; Zen Markdown, todos, and saved-item mentions;
+a derived library graph; TUI documents; opt-in remembered browser tokens.
 
-- [Project source and documentation](https://github.com/ResearchPocket/researchpocket.github.io)
-- [Public welcome](https://researchpocket.github.io/)
+Planned: selective public collections/publication, the loopback web server,
+broader import/export formats, background-service installation, and the
+item-aggregate migration. Zen documents already use their own sync aggregate;
+saves still use protocol v1. Contracts and ADRs may include target behavior.
+
+Current browser updates beyond the published 2.3.0 release add Zen link
+completion on [[, an Insert link picker, research:zen/<uuid> document links,
+internal saved-item navigation, and on-demand Linked from backlinks. These
+are local presentation and Markdown features, not a persistent relationship
+index. Native completion and item-note completion are not included.
+
+## User guides
+
+- [Documentation home and feature status](https://researchpocket.github.io/docs/)
+- [Getting started](https://researchpocket.github.io/docs/?page=getting-started)
+- [Browser workspace](https://researchpocket.github.io/docs/?page=hosted-owner)
+- [Save and organize sources](https://researchpocket.github.io/docs/?page=library)
+- [Zen documents, tasks, and item mentions](https://researchpocket.github.io/docs/?page=zen)
+- [Documentation and references](https://researchpocket.github.io/docs/?page=references)
+- [Capture and reading](https://researchpocket.github.io/docs/?page=reading)
+- [Sync and recovery](https://researchpocket.github.io/docs/?page=sync)
+
+## Reference
+
+- [CLI and TUI](https://researchpocket.github.io/docs/?page=cli)
+- [Data, sync, and privacy](https://researchpocket.github.io/docs/?page=data-and-privacy)
+- [Migration from V1](https://researchpocket.github.io/docs/?page=migration)
+- [Technical contracts and architecture decisions](https://researchpocket.github.io/docs/?page=technical)
+- [ResearchPocket 2.3.0 release notes](https://researchpocket.github.io/docs/?page=release)
+- [Project source](https://github.com/ResearchPocket/researchpocket.github.io)
 - [Product overview](https://researchpocket.github.io/overview/)
-- [Complete reference guide](https://researchpocket.github.io/docs/)
 - [Hosted owner app](https://researchpocket.github.io/app/)

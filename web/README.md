@@ -68,3 +68,24 @@ application at `/app/`. The build also emits noindex compatibility redirects
 for the former `/ResearchPocket/` paths. Those redirects preserve the query and
 hash, unregister the retired service-worker scopes, and leave origin-scoped
 IndexedDB data untouched.
+
+## Documentation site
+
+`/docs/` opens a documentation home rather than rendering the repository README.
+Task-oriented user guides live in `../docs/guide/`; command, privacy, protocol,
+architecture, and decision references remain in `../docs/v2/`. Versioned release
+notes live in `../docs/releases/`.
+
+`src/docs/catalog.ts` explicitly imports the reviewed Markdown sources and owns
+their titles, descriptions, stable page IDs, reading order, and sidebar groups.
+User guides come first; technical references, ADRs, and earlier releases use
+expandable groups. Search includes the entire catalog, opening matching groups
+and showing page descriptions. Relative links between catalog sources resolve
+inside the reader, including section anchors; other repository paths open source
+on GitHub. The docs reader does not open the private library or sync service.
+
+When adding a page, register it in the catalog and update `public/sitemap.xml`.
+Keep `public/llms.txt`, docs entry metadata, the documented release version, and
+the latest-release entry current. Explain current browser additions separately
+from published native releases. Verify internal links, section outlines, search,
+history, and mobile navigation against the production build.
