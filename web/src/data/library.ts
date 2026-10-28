@@ -1,3 +1,4 @@
+import { extractZenLinks } from "./zenLinks.ts";
 import {
   openBrowserDatabase,
   type BrowserDatabase,
@@ -1290,6 +1291,20 @@ class LibraryRepository {
     return sources;
   }
 
+  /** Ephemeral reverse lookup, only requested while a target is open. */
+  async zenBacklinks(target: string, signal?: AbortSignal): Promise<string[]> {
+    const documents = await this.listZenDocuments();
+    const sources: string[] = [];
+    for (const document of documents) {
+      signal?.throwIfAborted();
+      if (target === `zen:${document.documentId}`) continue;
+      const view = await this.zenDocument(document.documentId);
+      signal?.throwIfAborted();
+      if (view.lifecycle.state !== "deleted" && extractZenLinks(view.body).includes(target)) sources.push(document.documentId);
+    }
+    return sources;
+  }
+
   /** Reads one document body. The other call that loads body bytes. */
   async zenDocument(documentId: string): Promise<ZenDocumentView> {
     const database = await this.database();
@@ -2501,6 +2516,10 @@ class LibraryWorkspace {
 
   async listZenMentions(): Promise<GraphMentionSource[]> {
     return (await this.instance()).listZenMentions();
+  }
+
+  async zenBacklinks(target: string, signal?: AbortSignal): Promise<string[]> {
+    return (await this.instance()).zenBacklinks(target, signal);
   }
 
   async createZenDocument(input: {

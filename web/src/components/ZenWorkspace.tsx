@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { ZenLinkInput } from "./ZenLinkInput.tsx";
+import { ZenBacklinks } from "./ZenBacklinks.tsx";
+import { parseZenLink, type ZenLinkTarget } from "../data/zenLinks.ts";
 
 import type { PersistedZenDocument } from "../data/db";
 import type { ZenDocumentView } from "../data/library.ts";
@@ -19,6 +22,8 @@ interface ZenWorkspaceProps {
   documents: PersistedZenDocument[];
   open: { documentId: string; view: ZenDocumentView } | null;
   busy: boolean;
+  linkTargets: ZenLinkTarget[];
+  onOpenItem(itemId: string): void;
   /** Resolves `research:item/<uuid>` mentions against the local library. */
   resolveMention(itemId: string): ZenMentionTarget | null;
   onCreate(title: string): void;
@@ -82,7 +87,7 @@ function ZenIndex({ documents, busy, onCreate, onOpen, onLeave }: ZenWorkspacePr
 
   useEffect(() => {
     function handleEscape(event: KeyboardEvent) {
-      if (event.key !== "Escape") return;
+      if (event.key !== "Escape" || event.defaultPrevented) return;
       // Scoped to focus inside Zen so this never fights the command palette.
       if (!section.current?.contains(event.target as Node)) return;
       onLeave();
@@ -214,6 +219,10 @@ function ZenEditor({
   open,
   busy,
   resolveMention,
+  documents,
+  linkTargets,
+  onOpen,
+  onOpenItem,
   onClose,
   onDelete,
   onSaveTitle,
@@ -234,7 +243,7 @@ function ZenEditor({
 
   useEffect(() => {
     function handleEscape(event: KeyboardEvent) {
-      if (event.key !== "Escape") return;
+      if (event.key !== "Escape" || event.defaultPrevented) return;
       if (!section.current?.contains(event.target as Node)) return;
       onClose();
     }
@@ -289,7 +298,7 @@ function ZenEditor({
           <button
             aria-pressed={mode === "view"}
             onClick={() => {
-              if (draft !== open.view.body) onSaveBody(open.documentId, draft);
+              section.current?.querySelector("textarea")?.blur();
               setMode("view");
             }}
             type="button"
@@ -347,19 +356,22 @@ function ZenEditor({
               body={open.view.body}
               onToggleTodo={toggleTodo}
               resolveMention={resolveMention}
+              documents={documents}
+              onOpen={onOpen}
+              onOpenItem={onOpenItem}
             />
           ) : (
             <>
-              <textarea
-                aria-label="Document body"
-                className="zen-body-input"
+              <ZenLinkInput
+                targets={linkTargets.filter(
+                  (target) => target.kind !== "zen" || target.id !== open.documentId,
+                )}
                 onBlur={() => {
                   if (!overBound && draft !== open.view.body) {
                     onSaveBody(open.documentId, draft);
                   }
                 }}
-                onChange={(event) => setDraft(event.target.value)}
-                spellCheck={false}
+                onChange={setDraft}
                 value={draft}
               />
               {overBound && (
@@ -370,6 +382,11 @@ function ZenEditor({
               )}
             </>
           )}
+          <ZenBacklinks
+            target={`zen:${open.documentId}`}
+            documents={documents}
+            onOpen={onOpen}
+          />
         </div>
       </div>
 
@@ -393,15 +410,20 @@ function ZenEditor({
 /**
  * Renders a zen body with the same Markdown stack the Reader uses.
  *
- * Only two behaviours are zen-specific, so only those are overridden: GFM task
- * checkboxes stay live (a toggle is a character splice, not an edit mode), and
- * `research:item/<uuid>` links resolve against the local library at view time.
+ * GFM task checkboxes stay live, and research references resolve against the
+ * local library at view time.
  */
 function ZenBody({
   body,
   onToggleTodo,
   resolveMention,
+  documents,
+  onOpen,
+  onOpenItem,
 }: {
+  documents: PersistedZenDocument[];
+  onOpen(documentId: string): void;
+  onOpenItem(itemId: string): void;
   body: string;
   onToggleTodo(sourceLine: number): void;
   resolveMention(itemId: string): ZenMentionTarget | null;
@@ -431,14 +453,34 @@ function ZenBody({
             );
           },
           a: ({ children, href }) => {
-            if (!href?.startsWith(MENTION_PREFIX)) {
+            const target = href ? parseZenLink(href) : null;
+            if (!target) {
               return (
-                <a href={href} rel="noreferrer" target="_blank">
-                  {children}
+                <a href={href} rel="noreferrer" target="_blank">{children}</a>
+              );
+            }
+            if (target.kind === "zen") {
+              const document = documents.find((doc) => doc.documentId === target.id);
+              if (!document || document.deleted) {
+                return (
+                  <span className="zen-mention-unresolved">
+                    {children} · document unavailable
+                  </span>
+                );
+              }
+              return (
+                <a
+                  href={`#document=${target.id}`}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    onOpen(target.id);
+                  }}
+                >
+                  {document.title?.trim() || "Untitled document"}
                 </a>
               );
             }
-            const itemId = href.slice(MENTION_PREFIX.length);
+            const itemId = target.id;
             const item = resolveMention(itemId);
             if (!item) {
               return (
@@ -455,7 +497,13 @@ function ZenBody({
             }
             return (
               <span>
-                <a href={item.url} rel="noreferrer" target="_blank">
+                <a
+                  href={`#item=${itemId}`}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    onOpenItem(itemId);
+                  }}
+                >
                   {item.title ?? children}
                 </a>
                 <span className="zen-mention-host"> · {hostname(item.url)}</span>
@@ -467,16 +515,13 @@ function ZenBody({
         skipHtml
         // The default transform drops unknown schemes, which would erase every
         // mention before it could be resolved.
-        urlTransform={(url) => (url.startsWith(MENTION_PREFIX) ? url : defaultUrlTransform(url))}
+        urlTransform={(url) => (parseZenLink(url) ? url : defaultUrlTransform(url))}
       >
         {body}
       </ReactMarkdown>
     </div>
   );
 }
-
-const MENTION_PREFIX = "research:item/";
-
 /** Minute-resolution clock — the surface shows no seconds, so none are read. */
 function useClock(): Date {
   const [now, setNow] = useState(() => new Date());

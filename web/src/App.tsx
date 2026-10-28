@@ -13,6 +13,7 @@ import {
   MarkdownDocument,
   type MarkdownImage,
 } from "./components/MarkdownDocument.tsx";
+import { ZenBacklinks } from "./components/ZenBacklinks.tsx";
 import { LibraryGraph } from "./components/LibraryGraph.tsx";
 import {
   ZenWorkspace,
@@ -330,11 +331,17 @@ export function App() {
   // only, so this stays cheap no matter how large the documents are.
   useEffect(() => {
     if (!libraryState.initialized) return;
+    let active = true;
     void libraryRepository
       .listZenDocuments()
-      .then(setZenDocuments)
-      .catch(() => setZenDocuments([]));
-  }, [view, libraryState.initialized]);
+      .then((next) => {
+        if (active) setZenDocuments((previous) =>
+          JSON.stringify(previous) === JSON.stringify(next) ? previous : next,
+        );
+      })
+      .catch(() => { if (active) setZenDocuments([]); });
+    return () => { active = false; };
+  }, [view, libraryState]);
 
   useEffect(() => {
     try {
@@ -765,7 +772,7 @@ export function App() {
     await runZen(async () => {
       await libraryRepository.setZenBody(documentId, body);
       await refreshZenDocuments();
-      await loadZenDocument(documentId);
+      if (openZenId.current === documentId) await loadZenDocument(documentId);
     });
   }
 
@@ -773,7 +780,7 @@ export function App() {
     await runZen(async () => {
       await libraryRepository.setZenTitle(documentId, title);
       await refreshZenDocuments();
-      await loadZenDocument(documentId);
+      if (openZenId.current === documentId) await loadZenDocument(documentId);
     });
   }
 
@@ -1420,6 +1427,12 @@ export function App() {
             onDelete={deleteItem}
             onEdit={openEditor}
             onFavorite={toggleFavorite}
+            documents={zenDocuments}
+            onOpenDocument={(documentId) => {
+              setReaderItem(null);
+              navigateToView("zen");
+              void openZenDocument(documentId);
+            }}
           />
         ) : null}
 
@@ -1465,6 +1478,20 @@ export function App() {
           onSaveTitle={(documentId, title) => void saveZenTitle(documentId, title)}
           open={openZen}
           resolveMention={resolveZenMention}
+          linkTargets={[
+            ...zenDocuments.filter((doc) => !doc.deleted).map((doc) => ({
+              kind: "zen" as const, id: doc.documentId,
+              title: doc.title?.trim() || "Untitled document", detail: "Zen",
+            })),
+            ...items.filter((item) => !item.deleted).map((item) => ({
+              kind: "item" as const, id: item.id,
+              title: item.title?.trim() || item.url, detail: item.url,
+            })),
+          ]}
+          onOpenItem={(itemId) => {
+            const item = items.find((entry) => entry.id === itemId && !entry.deleted);
+            if (item) openReader(item);
+          }}
         />
 
           <section
@@ -2962,8 +2989,12 @@ function ReaderView({
   onDelete,
   onEdit,
   onFavorite,
+  documents,
+  onOpenDocument,
 }: {
   busy: boolean;
+  documents: PersistedZenDocument[];
+  onOpenDocument(documentId: string): void;
   item: LibraryItemView;
   onBack: () => void;
   onDelete: (item: LibraryItemView) => Promise<void>;
@@ -3125,6 +3156,7 @@ function ReaderView({
           <h1 id="reader-title">{label}</h1>
           {item.tags.length > 0 ? <p className="reader-tags">{item.tags.map((tag) => <span key={tag}>#{tag}</span>)}</p> : null}
           {item.note?.trim() ? <aside className="reader-note"><strong>Your note</strong><p>{item.note}</p></aside> : null}
+          <ZenBacklinks target={`item:${item.id}`} documents={documents} onOpen={onOpenDocument} />
           <div className="reader-body">
             {authoredContext ? (
               <MarkdownDocument
