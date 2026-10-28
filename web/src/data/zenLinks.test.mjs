@@ -51,3 +51,13 @@ test("completion replaces only the selected trigger and keeps hostile titles as 
   assert.equal(linkCompletion("[[line\nbreak", 12), null);
   assert.equal(linkCompletion("[[selected", 5, 8), null);
 });
+
+test("GFM table and footnote references use the same link semantics as the reader", () => {
+  const target = { kind: "zen", id, title: "Rust | WASM", detail: "Zen" };
+  const row = "| [[ |";
+  const inserted = insertZenLink(row, 2, 4, target).body;
+  assert.ok(inserted.includes("Rust \\| WASM"));
+  const table = `| Reading |\n| --- |\n${inserted}`;
+  assert.deepEqual(extractZenLinks(table), [`zen:${id}`]);
+  assert.deepEqual(extractZenLinks(`Details[^n].\n\n[^n]: [target](research:zen/${other})`), [`zen:${other}`]);
+});

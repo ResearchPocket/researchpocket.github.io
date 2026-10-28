@@ -31,6 +31,9 @@ export function ZenLinkInput({
     maxHeight: 360,
   });
   const composing = useRef(false);
+  const insertion = useRef<{ body: string; start: number; end: number } | null>(
+    null,
+  );
   const query = range?.query.trim().toLowerCase() ?? "";
   const matches = targets
     .filter((target) =>
@@ -117,7 +120,11 @@ export function ZenLinkInput({
   }, [range !== null]);
 
   function updateRange(element: HTMLTextAreaElement) {
-    if (explicit || composing.current) return;
+    if (explicit) {
+      close();
+      return;
+    }
+    if (composing.current) return;
     setRange(
       linkCompletion(
         element.value,
@@ -133,6 +140,17 @@ export function ZenLinkInput({
   }
   function choose(target: ZenLinkTarget) {
     if (!range) return;
+    const saved = insertion.current;
+    if (
+      explicit &&
+      (!saved ||
+        saved.body !== value ||
+        saved.start !== input.current?.selectionStart ||
+        saved.end !== input.current?.selectionEnd)
+    ) {
+      close();
+      return;
+    }
     const next = insertZenLink(value, range.start, range.end, target);
     onChange(next.body);
     close();
@@ -170,6 +188,11 @@ export function ZenLinkInput({
           onPointerDown={(event) => event.preventDefault()}
           onClick={() => {
             const element = input.current!;
+            insertion.current = {
+              body: value,
+              start: element.selectionStart,
+              end: element.selectionEnd,
+            };
             setRange({
               start: element.selectionStart,
               end: element.selectionEnd,
@@ -202,6 +225,9 @@ export function ZenLinkInput({
           updateRange(event.target);
         }}
         onClick={(event) => updateRange(event.currentTarget)}
+        onSelect={() => {
+          if (explicit && document.activeElement === input.current) close();
+        }}
         onCompositionStart={() => {
           composing.current = true;
           close();
