@@ -15,4 +15,3 @@ export function AppIcon({ name }: {
   };
   return <svg aria-hidden="true" className="app-icon" viewBox="0 0 24 24">{paths[name]}</svg>;
 }
-
