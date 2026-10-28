@@ -83,6 +83,8 @@ artifact. A read-only view may derive relationships from bodies already in
 memory, provided it stores nothing and the derivation is discarded with the
 view ([ADR 0012](./ADR_0012_DERIVED_LIBRARY_GRAPH.md)). New `research:`
 reference kinds require an ADR; the namespace is append-only.
+[ADR 0014](./ADR_0014_ZEN_LINK_COMPLETION.md) adds Zen document references,
+local completion, and on-demand derived backlinks.
 
 ### Todos and lists
 

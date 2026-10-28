@@ -230,3 +230,18 @@ repository and therefore cannot modify the application JavaScript it executes.
 The complete credential and publication boundary remains in
 [THREAT_MODEL.md](./THREAT_MODEL.md), and immutable replay behavior remains in
 [SYNC_PROTOCOL.md](./SYNC_PROTOCOL.md).
+
+## Zen links and backlinks
+
+In a Zen document's edit mode, type `[[` and a title or URL to find an existing
+document or saved item. Use Up/Down and Enter to insert a link; Escape dismisses
+suggestions without closing the document. On touch screens, use **Insert link**,
+search, and tap a result. The selection becomes ordinary Markdown containing the
+target UUID. Renaming a target changes its displayed title without breaking links.
+
+Document links open in Zen; saved-item links open the local Reader. Each target
+has a **Linked from** list of live Zen documents referencing it. Backlinks are
+derived locally when a target is open, work offline, and are never stored as an
+index or sent to GitHub. Missing or deleted document targets remain visibly
+unavailable. Saved-item private notes are outside this first completion surface.
+See [ADR 0014](./ADR_0014_ZEN_LINK_COMPLETION.md).

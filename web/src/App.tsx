@@ -13,6 +13,8 @@ import {
   MarkdownDocument,
   type MarkdownImage,
 } from "./components/MarkdownDocument.tsx";
+import { AppIcon } from "./components/AppIcon.tsx";
+import { ZenBacklinks } from "./components/ZenBacklinks.tsx";
 import { LibraryGraph } from "./components/LibraryGraph.tsx";
 import {
   ZenWorkspace,
@@ -228,23 +230,6 @@ const EMPTY_SYNC_STATE: BrowserSyncState = {
   lastCycle: null,
 };
 
-function AppIcon({ name }: {
-  name: "saves" | "favorites" | "archive" | "zen" | "tags" | "sync" | "settings" | "back" | "edit" | "external";
-}) {
-  const paths = {
-    saves: <><path d="M5 3h14v18l-7-4-7 4z" /><path d="M9 7h6" /></>,
-    favorites: <path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9z" />,
-    archive: <><path d="M3 4h18v5H3zM5 9v12h14V9M9 13h6" /></>,
-    zen: <><path d="M5 3h10l4 4v14H5zM14 3v5h5M9 12h6M9 16h4" /></>,
-    tags: <><path d="M3 3h8l10 10-8 8L3 11z" /><circle cx="7.5" cy="7.5" r="1" /></>,
-    sync: <><path d="M20 10a8 8 0 0 0-14-4L3 9m0-6v6h6M4 14a8 8 0 0 0 14 4l3-3m0 6v-6h-6" /></>,
-    back: <path d="m10 5-7 7 7 7M3 12h18" />,
-    edit: <><path d="m16 3 5 5-12 12-6 1 1-6zM13 6l5 5" /></>,
-    external: <path d="M14 3h7v7M21 3 10 14M10 3H3v18h18v-7" />,
-    settings: <><path d="m9.7 4.5.6-2.4h3.4l.6 2.4 1.4.6 2-1.3 2.5 2.5-1.3 2 .6 1.4 2.4.6v3.4l-2.4.6-.6 1.4 1.3 2-2.5 2.5-2-1.3-1.4.6-.6 2.4h-3.4l-.6-2.4-1.4-.6-2 1.3-2.5-2.5 1.3-2-.6-1.4-2.4-.6v-3.4l2.4-.6.6-1.4-1.3-2 2.5-2.5 2 1.3z" /><circle cx="12" cy="12" r="3" /></>,
-  };
-  return <svg aria-hidden="true" className="app-icon" viewBox="0 0 24 24">{paths[name]}</svg>;
-}
 
 export function App() {
   const [libraryState, setLibraryState] =
@@ -330,11 +315,17 @@ export function App() {
   // only, so this stays cheap no matter how large the documents are.
   useEffect(() => {
     if (!libraryState.initialized) return;
+    let active = true;
     void libraryRepository
       .listZenDocuments()
-      .then(setZenDocuments)
-      .catch(() => setZenDocuments([]));
-  }, [view, libraryState.initialized]);
+      .then((next) => {
+        if (active) setZenDocuments((previous) =>
+          JSON.stringify(previous) === JSON.stringify(next) ? previous : next,
+        );
+      })
+      .catch(() => { if (active) setZenDocuments([]); });
+    return () => { active = false; };
+  }, [view, libraryState]);
 
   useEffect(() => {
     try {
@@ -765,7 +756,7 @@ export function App() {
     await runZen(async () => {
       await libraryRepository.setZenBody(documentId, body);
       await refreshZenDocuments();
-      await loadZenDocument(documentId);
+      if (openZenId.current === documentId) await loadZenDocument(documentId);
     });
   }
 
@@ -773,7 +764,7 @@ export function App() {
     await runZen(async () => {
       await libraryRepository.setZenTitle(documentId, title);
       await refreshZenDocuments();
-      await loadZenDocument(documentId);
+      if (openZenId.current === documentId) await loadZenDocument(documentId);
     });
   }
 
@@ -1420,6 +1411,12 @@ export function App() {
             onDelete={deleteItem}
             onEdit={openEditor}
             onFavorite={toggleFavorite}
+            documents={zenDocuments}
+            onOpenDocument={(documentId) => {
+              setReaderItem(null);
+              navigateToView("zen");
+              void openZenDocument(documentId);
+            }}
           />
         ) : null}
 
@@ -1465,6 +1462,20 @@ export function App() {
           onSaveTitle={(documentId, title) => void saveZenTitle(documentId, title)}
           open={openZen}
           resolveMention={resolveZenMention}
+          linkTargets={[
+            ...zenDocuments.filter((doc) => !doc.deleted).map((doc) => ({
+              kind: "zen" as const, id: doc.documentId,
+              title: doc.title?.trim() || "Untitled document", detail: "Zen",
+            })),
+            ...items.filter((item) => !item.deleted).map((item) => ({
+              kind: "item" as const, id: item.id,
+              title: item.title?.trim() || item.url, detail: item.url,
+            })),
+          ]}
+          onOpenItem={(itemId) => {
+            const item = items.find((entry) => entry.id === itemId && !entry.deleted);
+            if (item) openReader(item);
+          }}
         />
 
           <section
@@ -2962,8 +2973,12 @@ function ReaderView({
   onDelete,
   onEdit,
   onFavorite,
+  documents,
+  onOpenDocument,
 }: {
   busy: boolean;
+  documents: PersistedZenDocument[];
+  onOpenDocument(documentId: string): void;
   item: LibraryItemView;
   onBack: () => void;
   onDelete: (item: LibraryItemView) => Promise<void>;
@@ -3125,6 +3140,7 @@ function ReaderView({
           <h1 id="reader-title">{label}</h1>
           {item.tags.length > 0 ? <p className="reader-tags">{item.tags.map((tag) => <span key={tag}>#{tag}</span>)}</p> : null}
           {item.note?.trim() ? <aside className="reader-note"><strong>Your note</strong><p>{item.note}</p></aside> : null}
+          <ZenBacklinks target={`item:${item.id}`} documents={documents} onOpen={onOpenDocument} />
           <div className="reader-body">
             {authoredContext ? (
               <MarkdownDocument
