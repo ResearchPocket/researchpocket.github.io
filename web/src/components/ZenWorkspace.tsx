@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { AppIcon } from "./AppIcon.tsx";
 import { ZenLinkInput } from "./ZenLinkInput.tsx";
 import { ZenBacklinks } from "./ZenBacklinks.tsx";
 import { parseZenLink, type ZenLinkTarget } from "../data/zenLinks.ts";
@@ -309,6 +310,8 @@ function ZenEditor({
         {/* Deleting belongs to the open document rather than a row in a list:
             it is the one place the thing being destroyed is fully visible. */}
         <button
+          aria-label={confirmingDelete ? "Confirm delete document" : "Delete document"}
+          title={confirmingDelete ? "Confirm delete document" : "Delete document"}
           className="zen-delete"
           disabled={busy}
           onBlur={() => setConfirmingDelete(false)}
@@ -318,7 +321,7 @@ function ZenEditor({
           }}
           type="button"
         >
-          {confirmingDelete ? "delete?" : "⌫"}
+          {confirmingDelete ? "delete?" : <AppIcon name="archive" />}
         </button>
       </div>
 
