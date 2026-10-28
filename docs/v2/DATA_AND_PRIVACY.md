@@ -1,8 +1,8 @@
 # Your data, sync, and privacy
 
 ResearchPocket is local first. Saving, editing, searching, deleting, and
-restoring links does not require a ResearchPocket account or an always-running
-server.
+restoring links and Zen documents does not require a ResearchPocket account or
+an always-running server. This guide describes the 2.3.0 release.
 
 ## Where the library lives
 
@@ -51,8 +51,9 @@ research --format ndjson sync run --every 60
 
 ## Credentials
 
-Native GitHub credentials belong in the operating-system credential store or a
-separate local credential file. They never belong in SQLite, link metadata,
+The native CLI reads its GitHub PAT from `RESEARCHPOCKET_GITHUB_TOKEN` or
+`GH_TOKEN` and does not persist it. Use a local secret manager to supply the
+environment when needed. Credentials never belong in SQLite, link metadata,
 notes, synchronization updates, exports, or a public repository.
 
 The browser app keeps its fine-grained GitHub token in memory by default.
@@ -109,8 +110,11 @@ directory, connect it to the existing private repository, and synchronize.
 
 ## Public sharing
 
-ResearchPocket 2.0.1 does not publish selected collections. The hosted browser
-app is a private owner surface, not a public library.
+ResearchPocket 2.3.0 does not publish selected collections. The hosted browser
+app is a private owner surface. Zen titles, bodies, and document IDs are private
+and excluded from publication. Saved-item mentions do not grant access to a
+library. [Documentation and references](../guide/REFERENCES.md) explains their
+scope.
 
 Never place a private database, token, synchronization update, operation pack,
 credential file, or unredacted export in a public repository or issue.

@@ -21,6 +21,12 @@ research restore <ITEM_ID>
 research import v1 <SOURCE_DB>
 research list
 research search <QUERY>
+research zen list
+research zen add [--title <TITLE>]
+research zen show <DOC_ID>
+research zen edit <DOC_ID>
+research zen delete <DOC_ID>
+research zen restore <DOC_ID>
 research tui
 research sync connect <OWNER/NAME>
 research sync run
@@ -31,6 +37,10 @@ Private GitHub synchronization, optional foreground periodic sync, and GitHub
 Pages owner editing are implemented. Background-service installation and V2
 publication are not implemented in this slice. Git is never used to resolve
 application changes.
+
+This reference describes 2.3.0. For a workflow introduction, start with
+[Getting started](../guide/GETTING_STARTED.md), [Zen documents](../guide/ZEN.md),
+or [Documentation and references](../guide/REFERENCES.md).
 
 ## Global options
 

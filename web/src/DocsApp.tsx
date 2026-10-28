@@ -12,6 +12,7 @@ import type { Components } from "react-markdown";
 import { HighlightedCodeBlock } from "./components/HighlightedCodeBlock.tsx";
 import { MarkdownDocument } from "./components/MarkdownDocument.tsx";
 import {
+  DOCS_VERSION,
   type ReferenceDocument,
   referenceDocumentById,
   referenceDocumentBySourcePath,
@@ -67,6 +68,22 @@ export function DocsApp() {
   );
   const previousDocument = referenceDocuments[selectedIndex - 1];
   const nextDocument = referenceDocuments[selectedIndex + 1];
+  const selectedSection = referenceSections.find(
+    (section) => section.id === selectedDocument.section,
+  );
+
+  useEffect(() => {
+    const mobile = window.matchMedia("(max-width: 48rem)");
+    function closeDesktopNavigation() {
+      if (!mobile.matches) setNavigationOpen(false);
+    }
+    mobile.addEventListener("change", closeDesktopNavigation);
+    return () => mobile.removeEventListener("change", closeDesktopNavigation);
+  }, []);
+
+  useEffect(() => {
+    if (navigationOpen) searchRef.current?.focus();
+  }, [navigationOpen]);
 
   useEffect(() => {
     function restoreLocation() {
@@ -177,7 +194,7 @@ export function DocsApp() {
   return (
     <div className="docs-app">
       <a className="skip-link" href="#docs-content">
-        Skip to guide
+        Skip to documentation
       </a>
 
       <header className="docs-header">
@@ -203,7 +220,7 @@ export function DocsApp() {
             ref={menuButtonRef}
             type="button"
           >
-            Guide
+            Docs
           </button>
         </nav>
       </header>
@@ -214,6 +231,14 @@ export function DocsApp() {
           data-open={navigationOpen ? "true" : "false"}
           id="docs-navigation"
         >
+          <a
+            className="docs-version"
+            href={documentHref("release")}
+            onClick={(event) => handleDocumentClick(event, "release")}
+          >
+            <span>ResearchPocket {DOCS_VERSION}</span>
+            <small>Release notes ↗</small>
+          </a>
           <div className="docs-search">
             <label htmlFor="docs-search">Search docs</label>
             <div>
@@ -221,40 +246,51 @@ export function DocsApp() {
                 autoComplete="off"
                 id="docs-search"
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search the guide"
+                placeholder="Find a guide or reference"
                 ref={searchRef}
                 type="search"
                 value={query}
               />
               <kbd>/</kbd>
             </div>
-            <p>{matchingDocuments.length} of {referenceDocuments.length} pages</p>
+            <p role="status">{matchingDocuments.length} of {referenceDocuments.length} pages</p>
           </div>
 
-          <nav aria-label="Guide pages" className="docs-nav">
+          <nav aria-label="Documentation pages" className="docs-nav">
             {referenceSections.map((section) => {
               const sectionDocuments = matchingDocuments.filter(
                 (document) => document.section === section.id,
               );
               if (sectionDocuments.length === 0) return null;
+              const links = sectionDocuments.map((document) => (
+                <a
+                  aria-current={document.id === selectedDocument.id ? "page" : undefined}
+                  href={documentHref(document.id)}
+                  key={document.id}
+                  onClick={(event) => handleDocumentClick(event, document.id)}
+                >
+                  <span>{document.title}</span>
+                  {normalizedQuery ? <small>{document.description}</small> : null}
+                </a>
+              ));
               return (
                 <section aria-labelledby={`docs-section-${section.id}`} key={section.id}>
-                  <h2 id={`docs-section-${section.id}`}>{section.label}</h2>
-                  {sectionDocuments.map((document) => (
-                    <a
-                      aria-current={document.id === selectedDocument.id ? "page" : undefined}
-                      href={documentHref(document.id)}
-                      key={document.id}
-                      onClick={(event) => handleDocumentClick(event, document.id)}
-                    >
-                      <span>{document.title}</span>
-                    </a>
-                  ))}
+                  {section.collapsible ? (
+                    <details open={Boolean(normalizedQuery) || selectedDocument.section === section.id}>
+                      <summary id={`docs-section-${section.id}`}>{section.label}</summary>
+                      {links}
+                    </details>
+                  ) : (
+                    <>
+                      <h2 id={`docs-section-${section.id}`}>{section.label}</h2>
+                      {links}
+                    </>
+                  )}
                 </section>
               );
             })}
             {matchingDocuments.length === 0 ? (
-              <p className="docs-search-empty">No reference pages match that search.</p>
+              <p className="docs-search-empty">No pages match “{deferredQuery.trim()}”. Try “Zen”, “capture”, or “token”.</p>
             ) : null}
           </nav>
 
@@ -268,13 +304,19 @@ export function DocsApp() {
           tabIndex={-1}
         >
           <article className="docs-article">
+            <div className="docs-page-meta">
+              <span>{selectedSection?.label} / {DOCS_VERSION}</span>
+              <a href={`${SOURCE_ROOT}${selectedDocument.sourcePath}`} rel="noreferrer" target="_blank">
+                View source ↗
+              </a>
+            </div>
             <MarkdownDocument
               className="reader-markdown docs-markdown"
               components={markdownComponents}
               source={selectedDocument.source}
             />
 
-            <nav aria-label="Adjacent reference pages" className="docs-pagination">
+            <nav aria-label="Adjacent documentation pages" className="docs-pagination">
               {previousDocument ? (
                 <a
                   href={documentHref(previousDocument.id)}
