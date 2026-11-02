@@ -6860,6 +6860,24 @@ kbd {
   min-width: 0;
 }
 
+/* With room beside the page, the title button hangs in the margin so the
+   title stays flush with the body and clear of the toolbar's Assist. A narrow
+   window has no margin, so the button follows the title there instead. */
+.zen-canvas {
+  container-type: inline-size;
+}
+
+@container (min-width: 52rem) {
+  .zen-title-row {
+    position: relative;
+  }
+
+  .app-shell .zen-title-assist {
+    inset-inline-end: calc(100% + var(--space-1));
+    position: absolute;
+  }
+}
+
 .zen-title-suggestion {
   margin: var(--space-3) 0 0;
 }
