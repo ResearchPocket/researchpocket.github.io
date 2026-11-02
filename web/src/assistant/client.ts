@@ -55,10 +55,7 @@ function languageModel({ preset, baseURL, apiKey, model }: Connection): Language
   const key = apiKey ?? "";
   switch (preset.api) {
     case "openai":
-      // The Responses API takes max_output_tokens for every model family, where
-      // Chat Completions needs max_tokens or max_completion_tokens depending on
-      // whether the SDK recognises the model as a reasoning model.
-      return createOpenAI({ apiKey: key, baseURL, fetch: privateFetch }).responses(model);
+      return createOpenAI({ apiKey: key, baseURL, fetch: privateFetch }).chat(model);
     case "anthropic":
       return createAnthropic({
         apiKey: key,
@@ -80,11 +77,17 @@ function languageModel({ preset, baseURL, apiKey, model }: Connection): Language
 }
 
 /**
- * OpenAI's Responses API keeps responses server-side unless told not to; a
- * saved page and its summary have no reason to outlive the request there.
- * Options are keyed by provider, so other adapters ignore this.
+ * OpenAI rejects the legacy max_tokens on newer models, and the SDK only
+ * switches to max_completion_tokens for model IDs it recognises. Every current
+ * OpenAI chat model accepts max_completion_tokens, so OpenAI always gets that;
+ * other providers keep the SDK's standard limit. `store: false` keeps OpenAI
+ * from retaining the completion. Options are keyed by provider.
  */
-const providerOptions = { openai: { store: false } };
+function outputLimit(connection: Connection, tokens: number) {
+  return connection.preset.api === "openai"
+    ? { providerOptions: { openai: { maxCompletionTokens: tokens, store: false } } }
+    : { maxOutputTokens: tokens };
+}
 
 function signalFor(signal: AbortSignal | undefined) {
   const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
@@ -159,7 +162,7 @@ export function describeFailure(error: unknown, connection: Pick<Connection, "pr
     return new AssistantError(
       "network",
       connection.preset.id === "openai"
-        ? "Could not reach OpenAI. Check your connection and the key; OpenAI hides invalid-key errors from browsers."
+        ? "Could not reach OpenAI, or OpenAI refused without telling the browser why. It does this for an invalid key and some account errors: check the key, that your project can use this model, and your connection."
         : `Could not reach ${label}. Check your connection.`,
     );
   }
@@ -176,9 +179,8 @@ export async function testConnection(connection: Connection, signal?: AbortSigna
       prompt: "Reply with the single word OK.",
       // Reasoning models may spend a small budget before answering; any
       // accepted completion, even an empty one, proves the path works.
-      maxOutputTokens: 256,
+      ...outputLimit(connection, 256),
       maxRetries: 0,
-      providerOptions,
       abortSignal: signalFor(signal),
     });
     return { milliseconds: Math.round(performance.now() - started), reply: result.text.trim().slice(0, 40) };
@@ -193,9 +195,8 @@ export async function complete(connection: Connection, request: AssistantRequest
       model: languageModel(connection),
       system: request.system,
       prompt: request.prompt,
-      maxOutputTokens: 1_200,
+      ...outputLimit(connection, 1_200),
       maxRetries: 1,
-      providerOptions,
       abortSignal: signalFor(signal),
     });
     return result.text;
@@ -216,9 +217,8 @@ export async function stream(
       model: languageModel(connection),
       system: request.system,
       prompt: request.prompt,
-      maxOutputTokens: 1_200,
+      ...outputLimit(connection, 1_200),
       maxRetries: 1,
-      providerOptions,
       abortSignal: signalFor(signal),
     });
     for await (const part of result.stream) {

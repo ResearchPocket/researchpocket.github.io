@@ -104,32 +104,24 @@ test("both wire formats complete privately, and failures are classified for the 
   assert.equal(seen[0].init.credentials, "omit");
   assert.equal(seen[0].init.referrerPolicy, "no-referrer");
 
-  // OpenAI rejects max_tokens on newer models, and Responses stores by default.
-  const openai = { preset: findPreset("openai"), baseURL: findPreset("openai").baseURL, apiKey: "test-key", model: "gpt-new" };
+  // OpenAI rejects the legacy max_tokens on newer models it does not list.
+  const openai = { preset: findPreset("openai"), baseURL: findPreset("openai").baseURL, apiKey: "test-key", model: "gpt-unlisted" };
   let openaiRequest;
   await withFetch(async (url, init) => {
     openaiRequest = { url: String(url), body: JSON.parse(init.body) };
     return Response.json({
-      id: "resp_1",
-      object: "response",
-      created_at: 0,
-      status: "completed",
-      model: "gpt-new",
-      output: [{
-        type: "message",
-        id: "msg_1",
-        role: "assistant",
-        status: "completed",
-        content: [{ type: "output_text", text: "OK", annotations: [] }],
-      }],
-      usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+      id: "1",
+      object: "chat.completion",
+      created: 0,
+      model: "gpt-unlisted",
+      choices: [{ index: 0, message: { role: "assistant", content: "OK" }, finish_reason: "stop" }],
     });
   }, async () => {
     assert.equal(await complete(openai, request), "OK");
   });
-  assert.equal(openaiRequest.url, "https://api.openai.com/v1/responses");
+  assert.equal(openaiRequest.url, "https://api.openai.com/v1/chat/completions");
+  assert.equal(openaiRequest.body.max_completion_tokens, 1_200);
   assert.equal(openaiRequest.body.store, false);
-  assert.equal(openaiRequest.body.max_output_tokens, 1_200);
   assert.equal("max_tokens" in openaiRequest.body, false);
 
   const anthropic = { preset: findPreset("anthropic"), baseURL: findPreset("anthropic").baseURL, apiKey: "test-key", model: "m" };
