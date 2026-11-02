@@ -519,8 +519,9 @@ export function App() {
         }
       }
 
+      // Firefox on macOS reserves Cmd+Shift+P, so Ctrl+Shift+P keeps working there.
       const commandPaletteModifier = isMacPlatform()
-        ? event.metaKey && !event.ctrlKey
+        ? event.metaKey !== event.ctrlKey
         : event.ctrlKey && !event.metaKey;
       if (
         commandPaletteModifier &&
@@ -534,6 +535,7 @@ export function App() {
       }
 
       if (event.key === "Escape") {
+        if (event.defaultPrevented) return;
         setCommandOpen(false);
         if (isTyping) {
           // The focused field is the topmost layer: leave it first, so a second
