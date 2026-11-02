@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import "fake-indexeddb/auto";
 
-import { complete, stream } from "./client.ts";
+import { complete, listModels, stream } from "./client.ts";
 import { findPreset } from "./presets.ts";
 import {
   CONTEXT_CHARACTER_LIMIT,
@@ -123,6 +123,40 @@ test("both wire formats complete privately, and failures are classified for the 
   assert.equal(openaiRequest.body.max_completion_tokens, 1_200);
   assert.equal(openaiRequest.body.store, false);
   assert.equal("max_tokens" in openaiRequest.body, false);
+
+  // A Responses-only model is retried there once OpenAI says so, then remembered.
+  const newest = { ...openai, model: "gpt-responses-only" };
+  const calls = [];
+  const responsesBody = {
+    id: "resp_1",
+    object: "response",
+    created_at: 0,
+    status: "completed",
+    model: "gpt-responses-only",
+    output: [{ type: "message", id: "msg_1", role: "assistant", status: "completed", content: [{ type: "output_text", text: "OK", annotations: [] }] }],
+    usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+  };
+  await withFetch(async (url, init) => {
+    calls.push({ url: String(url), body: JSON.parse(init.body) });
+    return String(url).endsWith("/chat/completions")
+      ? Response.json({ error: { message: "This model is only supported in v1/responses and not in v1/chat/completions.", type: "invalid_request_error" } }, { status: 404 })
+      : Response.json(responsesBody);
+  }, async () => {
+    assert.equal(await complete(newest, request), "OK");
+    assert.equal(await complete(newest, request), "OK");
+  });
+  assert.deepEqual(calls.map(({ url }) => url.replace("https://api.openai.com/v1/", "")), ["chat/completions", "responses", "responses"]);
+  assert.equal(calls[1].body.store, false);
+  assert.equal(calls[1].body.max_output_tokens, 1_200);
+
+  await withFetch(async () => Response.json({ data: [
+    { id: "gpt-old", created: 1_600_000_000 },
+    { id: "text-embedding-3-large", created: 1_800_000_000 },
+    { id: "gpt-newest", created: 1_790_000_000 },
+  ] }), async () => {
+    const models = await listModels({ preset: openai.preset, baseURL: openai.baseURL, apiKey: "test-key" });
+    assert.deepEqual(models.map(({ id }) => id), ["gpt-newest", "gpt-old"]);
+  });
 
   const anthropic = { preset: findPreset("anthropic"), baseURL: findPreset("anthropic").baseURL, apiKey: "test-key", model: "m" };
   const events = [

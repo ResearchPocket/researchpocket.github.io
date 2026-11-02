@@ -51,11 +51,18 @@ const privateFetch: typeof fetch = (input, init) =>
     referrerPolicy: "no-referrer",
   });
 
-function languageModel({ preset, baseURL, apiKey, model }: Connection): LanguageModel {
+type OpenAIEndpoint = "chat" | "responses";
+
+function languageModel(
+  { preset, baseURL, apiKey, model }: Connection,
+  endpoint: OpenAIEndpoint = "chat",
+): LanguageModel {
   const key = apiKey ?? "";
   switch (preset.api) {
-    case "openai":
-      return createOpenAI({ apiKey: key, baseURL, fetch: privateFetch }).chat(model);
+    case "openai": {
+      const openai = createOpenAI({ apiKey: key, baseURL, fetch: privateFetch });
+      return endpoint === "responses" ? openai.responses(model) : openai.chat(model);
+    }
     case "anthropic":
       return createAnthropic({
         apiKey: key,
@@ -77,16 +84,48 @@ function languageModel({ preset, baseURL, apiKey, model }: Connection): Language
 }
 
 /**
- * OpenAI rejects the legacy max_tokens on newer models, and the SDK only
- * switches to max_completion_tokens for model IDs it recognises. Every current
- * OpenAI chat model accepts max_completion_tokens, so OpenAI always gets that;
- * other providers keep the SDK's standard limit. `store: false` keeps OpenAI
- * from retaining the completion. Options are keyed by provider.
+ * OpenAI rejects the legacy max_tokens on newer chat models, and the SDK only
+ * switches to max_completion_tokens for model IDs it recognises, so OpenAI
+ * chat always gets max_completion_tokens. The Responses API takes
+ * max_output_tokens for every model. `store: false` keeps OpenAI from
+ * retaining the output either way. Options are keyed by provider.
  */
-function outputLimit(connection: Connection, tokens: number) {
-  return connection.preset.api === "openai"
-    ? { providerOptions: { openai: { maxCompletionTokens: tokens, store: false } } }
-    : { maxOutputTokens: tokens };
+function outputLimit(connection: Connection, tokens: number, endpoint: OpenAIEndpoint) {
+  if (connection.preset.api !== "openai") return { maxOutputTokens: tokens };
+  return endpoint === "responses"
+    ? { maxOutputTokens: tokens, providerOptions: { openai: { store: false } } }
+    : { providerOptions: { openai: { maxCompletionTokens: tokens, store: false } } };
+}
+
+/** OpenAI models seen to require the Responses API, for this page's lifetime. */
+const responsesOnly = new Set<string>();
+
+function requiresResponses(error: unknown) {
+  const cause = RetryError.isInstance(error) ? error.lastError : error;
+  if (!APICallError.isInstance(cause)) return false;
+  const text = `${cause.message} ${cause.responseBody ?? ""}`;
+  return /v1\/responses|responses api|not a chat model|not supported in the v1\/chat\/completions/iu.test(text);
+}
+
+/**
+ * Chat Completions is the default because every provider and older OpenAI
+ * model accepts it. Some newer OpenAI models exist only on the Responses API;
+ * OpenAI says so in a readable error, and the request is retried there.
+ */
+async function withEndpoint<T>(
+  connection: Connection,
+  run: (model: LanguageModel, endpoint: OpenAIEndpoint) => Promise<T>,
+): Promise<T> {
+  const key = `${connection.baseURL} ${connection.model}`;
+  if (connection.preset.api !== "openai" || !responsesOnly.has(key)) {
+    try {
+      return await run(languageModel(connection, "chat"), "chat");
+    } catch (error) {
+      if (connection.preset.api !== "openai" || !requiresResponses(error)) throw error;
+      responsesOnly.add(key);
+    }
+  }
+  return run(languageModel(connection, "responses"), "responses");
 }
 
 function signalFor(signal: AbortSignal | undefined) {
@@ -174,15 +213,16 @@ export function describeFailure(error: unknown, connection: Pick<Connection, "pr
 export async function testConnection(connection: Connection, signal?: AbortSignal) {
   const started = performance.now();
   try {
-    const result = await generateText({
-      model: languageModel(connection),
-      prompt: "Reply with the single word OK.",
-      // Reasoning models may spend a small budget before answering; any
-      // accepted completion, even an empty one, proves the path works.
-      ...outputLimit(connection, 256),
-      maxRetries: 0,
-      abortSignal: signalFor(signal),
-    });
+    const result = await withEndpoint(connection, (model, endpoint) =>
+      generateText({
+        model,
+        prompt: "Reply with the single word OK.",
+        // Reasoning models may spend a small budget before answering; any
+        // accepted completion, even an empty one, proves the path works.
+        ...outputLimit(connection, 256, endpoint),
+        maxRetries: 0,
+        abortSignal: signalFor(signal),
+      }));
     return { milliseconds: Math.round(performance.now() - started), reply: result.text.trim().slice(0, 40) };
   } catch (error) {
     throw describeFailure(error, connection);
@@ -191,14 +231,15 @@ export async function testConnection(connection: Connection, signal?: AbortSigna
 
 export async function complete(connection: Connection, request: AssistantRequest, signal?: AbortSignal) {
   try {
-    const result = await generateText({
-      model: languageModel(connection),
-      system: request.system,
-      prompt: request.prompt,
-      ...outputLimit(connection, 1_200),
-      maxRetries: 1,
-      abortSignal: signalFor(signal),
-    });
+    const result = await withEndpoint(connection, (model, endpoint) =>
+      generateText({
+        model,
+        system: request.system,
+        prompt: request.prompt,
+        ...outputLimit(connection, 1_200, endpoint),
+        maxRetries: 1,
+        abortSignal: signalFor(signal),
+      }));
     return result.text;
   } catch (error) {
     throw describeFailure(error, connection);
@@ -211,34 +252,55 @@ export async function stream(
   onText: (text: string) => void,
   signal?: AbortSignal,
 ) {
-  let text = "";
   try {
-    const result = streamText({
-      model: languageModel(connection),
-      system: request.system,
-      prompt: request.prompt,
-      ...outputLimit(connection, 1_200),
-      maxRetries: 1,
-      abortSignal: signalFor(signal),
-    });
-    for await (const part of result.stream) {
-      if (part.type === "text-delta") {
-        text += part.text;
-        onText(text);
-      } else if (part.type === "error") {
-        throw part.error;
+    return await withEndpoint(connection, async (model, endpoint) => {
+      let text = "";
+      const result = streamText({
+        model,
+        system: request.system,
+        prompt: request.prompt,
+        ...outputLimit(connection, 1_200, endpoint),
+        maxRetries: 1,
+        abortSignal: signalFor(signal),
+      });
+      for await (const part of result.stream) {
+        if (part.type === "text-delta") {
+          text += part.text;
+          onText(text);
+        } else if (part.type === "error") {
+          throw part.error;
+        }
       }
-    }
-    return text;
+      return text;
+    });
   } catch (error) {
     throw describeFailure(error, connection);
   }
 }
 
-const NON_CHAT_MODEL = /embed|whisper|tts|dall-e|moderation|davinci|babbage|transcribe|audio|realtime|image|search|rerank|guard|computer-use/iu;
+export interface ModelOption {
+  id: string;
+  label: string;
+  /** Milliseconds since the epoch, when the provider reports it. */
+  created: number | null;
+}
 
-/** Lists models when the provider exposes them; the owner can still type one. */
-export async function listModels(connection: Omit<Connection, "model">, signal?: AbortSignal): Promise<string[]> {
+const NON_CHAT_MODEL = /embed|whisper|tts|dall-e|moderation|davinci|babbage|transcribe|audio|realtime|image|search|rerank|guard|computer-use|sora|veo|imagen|lyria/iu;
+
+function timestamp(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value < 1e12 ? value * 1000 : value;
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  return null;
+}
+
+/**
+ * Lists chat models newest first when the provider exposes creation dates,
+ * so new releases are at the top; the owner can still type any model ID.
+ */
+export async function listModels(connection: Omit<Connection, "model">, signal?: AbortSignal): Promise<ModelOption[]> {
   const { preset, baseURL, apiKey } = connection;
   const headers: Record<string, string> = {};
   let url = `${baseURL}/models`;
@@ -274,18 +336,31 @@ export async function listModels(connection: Omit<Connection, "model">, signal?:
   }
 
   const body = (await response.json()) as {
-    data?: { id?: unknown }[];
-    models?: { name?: unknown; supportedGenerationMethods?: unknown }[];
+    data?: { id?: unknown; created?: unknown; created_at?: unknown; display_name?: unknown; name?: unknown }[];
+    models?: { name?: unknown; displayName?: unknown; supportedGenerationMethods?: unknown }[];
   };
-  const ids =
+  const options: ModelOption[] =
     preset.api === "google"
       ? (body.models ?? [])
           .filter((model) =>
             Array.isArray(model.supportedGenerationMethods) &&
             model.supportedGenerationMethods.includes("generateContent"))
-          .map((model) => String(model.name ?? "").replace(/^models\//u, ""))
-      : (body.data ?? []).map((model) => String(model.id ?? ""));
-  return [...new Set(ids.filter((id) => id && !NON_CHAT_MODEL.test(id)))].sort((left, right) =>
-    left.localeCompare(right),
+          .map((model) => {
+            const id = String(model.name ?? "").replace(/^models\//u, "");
+            return { id, label: typeof model.displayName === "string" ? model.displayName : id, created: null };
+          })
+      : (body.data ?? []).map((model) => {
+          const id = String(model.id ?? "");
+          const name = typeof model.display_name === "string" ? model.display_name : typeof model.name === "string" ? model.name : null;
+          return { id, label: name && name !== id ? name : id, created: timestamp(model.created ?? model.created_at) };
+        });
+
+  const unique = new Map<string, ModelOption>();
+  for (const option of options) {
+    if (option.id && !NON_CHAT_MODEL.test(option.id) && !unique.has(option.id)) unique.set(option.id, option);
+  }
+  return [...unique.values()].sort((left, right) =>
+    (right.created ?? 0) - (left.created ?? 0) ||
+    right.id.localeCompare(left.id, undefined, { numeric: true }),
   );
 }

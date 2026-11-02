@@ -6,7 +6,15 @@ import {
   isLocalPreset,
   normalizeLocalBaseUrl,
 } from "../assistant/presets.ts";
+import type { ModelOption } from "../assistant/client.ts";
 import { assistantSession, loadAssistantClient } from "../assistant/session.ts";
+
+const CUSTOM_MODEL = "__custom-model__";
+
+function modelLabel(option: ModelOption) {
+  const name = option.label !== option.id ? `${option.label} — ${option.id}` : option.id;
+  return option.created ? `${name} · ${new Date(option.created).toISOString().slice(0, 10)}` : name;
+}
 
 const HOSTED = PROVIDER_PRESETS.filter((preset) => !isLocalPreset(preset));
 const LOCAL = PROVIDER_PRESETS.filter(isLocalPreset);
@@ -179,7 +187,8 @@ function AssistantForm({ onCancel, onSaved }: { onCancel: (() => void) | null; o
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState(snapshot.settings?.model ?? "");
   const [remember, setRemember] = useState(snapshot.keyRemembered);
-  const [models, setModels] = useState<string[]>([]);
+  const [models, setModels] = useState<ModelOption[]>([]);
+  const [customModel, setCustomModel] = useState(false);
   const [check, setCheck] = useState<Check>({ state: "idle" });
   const preset = findPreset(provider);
   const local = preset ? isLocalPreset(preset) : false;
@@ -188,6 +197,7 @@ function AssistantForm({ onCancel, onSaved }: { onCancel: (() => void) | null; o
 
   useEffect(() => {
     setModels([]);
+    setCustomModel(false);
     setCheck({ state: "idle" });
   }, [provider, localBaseUrl]);
 
@@ -212,12 +222,17 @@ function AssistantForm({ onCancel, onSaved }: { onCancel: (() => void) | null; o
       const connection = draftConnection();
       setCheck({ state: "working", message: `Loading models from ${preset!.label}…` });
       const client = await loadAssistantClient();
-      const ids = await client.listModels(connection);
-      setModels(ids);
-      if (!model.trim() && ids[0]) setModel(ids[0]);
+      const options = await client.listModels(connection);
+      setModels(options);
+      const current = model.trim();
+      const known = options.some((option) => option.id === current);
+      // Newest first: an empty field takes the latest release; a typed ID the
+      // list does not contain stays as a custom model.
+      if (!current && options[0]) setModel(options[0].id);
+      setCustomModel(Boolean(current) && !known);
       setCheck(
-        ids.length > 0
-          ? { state: "ok", message: `${ids.length} models available. Pick one below.` }
+        options.length > 0
+          ? { state: "ok", message: `${options.length} models available, newest first.` }
           : { state: "error", message: "The provider listed no chat models. Type a model ID instead.", canSaveAnyway: false },
       );
     } catch (cause) {
@@ -303,6 +318,9 @@ function AssistantForm({ onCancel, onSaved }: { onCancel: (() => void) | null; o
             <input
               autoCapitalize="none"
               autoComplete="off"
+              onBlur={() => {
+                if (apiKey.trim() && models.length === 0) void loadModels();
+              }}
               onChange={(event) => setApiKey(event.target.value)}
               placeholder={heldKey ? "Using the key already entered in this tab" : undefined}
               required={preset.keyRequired && !heldKey}
@@ -316,26 +334,62 @@ function AssistantForm({ onCancel, onSaved }: { onCancel: (() => void) | null; o
         {preset ? (
           <div className="field">
             <label className="field-caption" htmlFor={`${id}-model`}>
-              Model <small>pick from the list or type an ID</small>
+              Model{" "}
+              <small>
+                {models.length > 0 && !customModel
+                  ? "newest first"
+                  : "load the provider’s list, or type a model ID"}
+              </small>
             </label>
             <div className="assistant-model-row">
-              <input
-                autoCapitalize="none"
-                autoComplete="off"
-                id={`${id}-model`}
-                list={`${id}-models`}
-                onChange={(event) => setModel(event.target.value)}
-                required
-                spellCheck={false}
-                value={model}
-              />
-              <button className="secondary-button" onClick={() => void loadModels()} type="button">
-                Load models
-              </button>
+              {models.length > 0 && !customModel ? (
+                <select
+                  id={`${id}-model`}
+                  onChange={(event) => {
+                    if (event.target.value === CUSTOM_MODEL) {
+                      setCustomModel(true);
+                      setModel("");
+                    } else {
+                      setModel(event.target.value);
+                    }
+                  }}
+                  required
+                  value={model}
+                >
+                  {models.map((option) => (
+                    <option key={option.id} value={option.id}>{modelLabel(option)}</option>
+                  ))}
+                  <option value={CUSTOM_MODEL}>Type a model ID…</option>
+                </select>
+              ) : (
+                <input
+                  autoCapitalize="none"
+                  autoComplete="off"
+                  id={`${id}-model`}
+                  onChange={(event) => setModel(event.target.value)}
+                  placeholder={customModel ? "Exact model ID" : undefined}
+                  required
+                  spellCheck={false}
+                  value={model}
+                />
+              )}
+              {customModel && models.length > 0 ? (
+                <button
+                  className="secondary-button"
+                  onClick={() => {
+                    setCustomModel(false);
+                    setModel(models[0]?.id ?? "");
+                  }}
+                  type="button"
+                >
+                  Choose from list
+                </button>
+              ) : (
+                <button className="secondary-button" onClick={() => void loadModels()} type="button">
+                  {models.length > 0 ? "Reload" : "Load models"}
+                </button>
+              )}
             </div>
-            <datalist id={`${id}-models`}>
-              {models.map((option) => <option key={option} value={option} />)}
-            </datalist>
           </div>
         ) : null}
 

@@ -47,12 +47,20 @@ ResearchPocket uses the Apache-2.0 [AI SDK](https://ai-sdk.dev) packages:
 - `@ai-sdk/openai`, `@ai-sdk/anthropic`, and `@ai-sdk/google`;
 - `@ai-sdk/openai-compatible` for every other provider and for local servers.
 
-OpenAI is called through Chat Completions with `max_completion_tokens` and
-`store: false`. Newer models reject the legacy `max_tokens`, and the SDK
-switches parameters only for model IDs it recognizes. The Responses API was
-tried first. Its SDK requests add reasoning parameters that some models and
-accounts reject, and OpenAI omits CORS headers on such errors, so the browser
-reports only an opaque network failure.
+OpenAI is called through Chat Completions by default, with
+`max_completion_tokens` and `store: false`. Newer models reject the legacy
+`max_tokens`, and the SDK switches parameters only for model IDs it recognizes.
+Some newer OpenAI models exist only on the Responses API, and OpenAI says so in
+a readable error. The request is then retried once on Responses, with
+`max_output_tokens` and `store: false`. That choice is remembered for the
+model for the life of the page.
+
+Chat Completions stays the default because OpenAI omits CORS headers on some
+errors, such as an invalid key. The browser then sees only an opaque network
+failure, and the Chat Completions path is the one verified with real keys.
+
+Model lists are shown newest first when the provider reports creation dates,
+with an option to type any model ID.
 
 The SDK is bundled into a separate same-origin chunk and loaded only when the
 owner first configures or uses the assistant, so TM-06's ban on remote runtime

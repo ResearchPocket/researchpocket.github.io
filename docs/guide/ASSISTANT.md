@@ -15,7 +15,9 @@ accept it.
    - **Running on this computer:** Ollama, LM Studio, or any other
      OpenAI-compatible server on `http://localhost` or `http://127.0.0.1`.
 3. Paste your API key. Local servers usually need none.
-4. Choose **Load models** and pick a model, or type a model ID.
+4. Pick a model. The list loads when you leave the key field, or when you choose
+   **Load models**, and shows the provider's newest releases first. Choose
+   **Type a model ID…** to use a model that isn't listed.
 5. Choose **Test and save**. ResearchPocket sends one tiny request to check the
    key, the model, and the connection, and saves the setup only if it works.
 
