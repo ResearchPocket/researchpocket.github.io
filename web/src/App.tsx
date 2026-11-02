@@ -3460,7 +3460,16 @@ function ReaderView({
               />
             </div>
           ) : null}
-          {item.note?.trim() ? <aside className="reader-note"><strong>Your note</strong><p>{item.note}</p></aside> : null}
+          {item.note?.trim() ? (
+            <aside className="reader-note">
+              <strong>Your note</strong>
+              <MarkdownDocument
+                className="reader-markdown reader-note-body"
+                imagesAllowed={false}
+                source={item.note}
+              />
+            </aside>
+          ) : null}
           <ZenBacklinks target={`item:${item.id}`} documents={documents} onOpen={onOpenDocument} />
           <div className="reader-body">
             {authoredContext ? (

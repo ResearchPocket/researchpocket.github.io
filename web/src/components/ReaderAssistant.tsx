@@ -46,6 +46,7 @@ export function ReaderAssistant({
   const [includeNote, setIncludeNote] = useState(false);
   const [captured, setCaptured] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [open, setOpen] = useState(false);
   const hasNote = Boolean(item.note?.trim());
   const note = includeNote && hasNote;
 
@@ -56,6 +57,7 @@ export function ReaderAssistant({
       if (!cancelled) setCaptured(text);
     }, () => undefined);
     task.reset();
+    setOpen(false);
     return () => {
       cancelled = true;
     };
@@ -104,10 +106,42 @@ export function ReaderAssistant({
     if (state.kind === "done" && (await onAppendToNote(state.text))) task.reset();
   }
 
+  // Collapsed to one quiet toggle until asked for; a running or finished
+  // request keeps the panel open so its result is never hidden.
+  const expanded = open || state.kind !== "idle";
+
+  if (!expanded) {
+    return (
+      <button
+        aria-expanded={false}
+        className="assistant-toggle"
+        onClick={() => setOpen(true)}
+        type="button"
+      >
+        <AppIcon name="assistant" />
+        Assistant
+      </button>
+    );
+  }
+
   return (
-    <section aria-labelledby="reader-assistant-heading" className="assistant-block">
+    <section aria-labelledby="reader-assistant-heading" className="assistant-block assistant-block-reader">
       <header className="assistant-header">
-        <h2 id="reader-assistant-heading"><AppIcon name="assistant" />Assistant</h2>
+        <h2 id="reader-assistant-heading">
+          <button
+            aria-expanded
+            className="assistant-toggle"
+            onClick={() => {
+              task.reset();
+              setOpen(false);
+            }}
+            title="Hide assistant"
+            type="button"
+          >
+            <AppIcon name="assistant" />
+            Assistant
+          </button>
+        </h2>
         <span className="assistant-model">{preset.label} · {snapshot.settings?.model}</span>
         {snapshot.status === "ready" ? (
           <div className="assistant-actions">

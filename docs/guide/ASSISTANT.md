@@ -45,9 +45,10 @@ what it could not reach.
 
 ## Suggest tags
 
-Open a save. Once a provider is set up, the Reader shows an **Assistant** panel
-under the title and tags, with its actions on the first line and what they send
-on the second. Choose **Suggest tags**. Suggestions that match tags already in your library are
+Open a save. Once a provider is set up, the Reader shows a small **Assistant**
+toggle under the title and tags. Choose it to open the panel, with its actions
+on the first line and what they send on the second; choose it again to close
+the panel and discard any unaccepted result. Choose **Suggest tags**. Suggestions that match tags already in your library are
 selected for you and keep your spelling. New tags are marked **new** and start
 unselected. Toggle the ones you want and choose **Add tags**. The change is an
 ordinary edit, so **Undo** reverses it.
@@ -56,7 +57,8 @@ ordinary edit, so **Undo** reverses it.
 
 Choose **Summarize** to stream a short draft: one line with the gist, then the
 key points. **Stop** ends it early. **Add to note** appends the draft to your
-private note, where you can edit it like anything else you wrote. **Copy**
+private note, where you can edit it like anything else you wrote. The Reader
+shows notes as formatted Markdown, with images left unloaded. **Copy**
 copies it, and **Discard** throws it away.
 
 ## Use the assistant in Zen documents
