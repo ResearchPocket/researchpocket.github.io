@@ -17,7 +17,7 @@ visual language or styling toolchain.
 | Domain | Rust compiled to WASM | Validation, mutation, merge, and projection semantics |
 | Browser persistence | IndexedDB through `idb` | Private local replica and durable outbox |
 | Styling | Native CSS with custom-property tokens | No runtime styling dependency |
-| Package workflow | npm with committed `package-lock.json` | `npm ci` is the reproducible install |
+| Package workflow | Bun with committed `bun.lock` | `bun install --frozen-lockfile` is the reproducible install; Node.js runs build scripts and tests |
 | Hosting | GitHub Pages through pinned Actions | Credential-free static shell only |
 
 Tailwind is not part of V2. The owner application has a small, stable set of
@@ -84,7 +84,7 @@ names rather than palette names so light, dark, and increased-contrast modes do
 not require component overrides. Border radius, control height, spacing, type,
 measure, and layout widths follow the same rule.
 
-The dependency-free `npm run check:design` gate enforces the file order, required
+The dependency-free `bun run check:design` gate enforces the file order, required
 tokens, bundled font sources, color boundary, tokenized radius, and the
 prohibition on gradients, shadows, filters, transitions, and animations.
 
@@ -226,6 +226,27 @@ without becoming unreadable. Results mount in explicit 100-row batches, offscree
 records use CSS rendering containment, and search follows a deferred query so
 large libraries do not block input.
 
+### Assistant
+
+Assistant setup is one Settings group: provider select grouped into hosted and
+local, a password key field with the provider's key-page link, a model field
+with a **Load models** list, the remember-key choice with its trust warning, a
+ruled disclosure naming the destination, and one **Test and save** primary
+action. A configured assistant collapses to a fact list with change, forget,
+and turn-off actions.
+
+Every assistant surface uses one block: the Reader note's tint and accent edge,
+with no internal rules. A header line carries the label, the model, and
+compact actions, followed by one line saying what is sent. Results sit in the
+same block. In the Reader, a configured assistant is always this inline block
+between the title and the note. In Zen, document tools live in the toolbar as
+compact icon buttons (**Assist** menu, **Insert link**); a ✦ button ends the
+title row, and proposals pin above the footer. Suggestions are toggle chips
+(`aria-pressed`) with a text **new** marker; drafts render inert. Each result
+has one primary accept action and a quiet dismiss action. The first request to
+a provider shows a confirmation in the result area naming the destination. With no provider
+configured, the Reader shows no assistant control.
+
 ### Dialogs
 
 Use the native `dialog` element for focused editing. It is a compact dialog on
@@ -251,11 +272,11 @@ The canonical clean-room workflow is:
 
 ```sh
 cd web
-npm ci
-npm run verify
+bun install --frozen-lockfile
+bun run verify
 ```
 
-`npm run verify` runs browser persistence/sync contracts and then the production
+`bun run verify` runs browser persistence/sync contracts and then the production
 build. The build compiles Rust/WASM, type-checks TypeScript, checks the design
 system, emits the public website and owner app, and checks the final artifact.
 GitHub Pages invokes the same command; it does not contain a second build recipe.

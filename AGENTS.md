@@ -31,7 +31,11 @@ and integration with other tools.
 
 Do not expand V2 into:
 
-- an AI memory, personal profile, RAG service, or autonomous organizer;
+- an AI memory, personal profile, RAG service, or autonomous organizer.
+  Owner-invoked bring-your-own-key assistance in the owner app is allowed only
+  as defined by [ADR 0015](docs/v2/ADR_0015_BYOK_AI_ASSISTANCE.md): explicit
+  requests, disclosed payloads, proposals that change the library only through
+  an ordinary owner edit, keys that never sync, and no protocol change;
 - a multi-user collaboration or real-time team product;
 - a general notes/wiki application; standalone authored prose is limited to the
   bounded zen documents of [ADR 0011](docs/v2/ADR_0011_ZEN_DOCUMENTS.md);
@@ -278,7 +282,9 @@ persisted. The token must not have write access to the protected source/Pages
 repository that serves the application JavaScript.
 
 Owner mode loads no third-party runtime scripts or analytics. Enforce a self-only
-content security policy and limit network connections to the required GitHub API.
+content security policy and limit network connections to the required GitHub API
+plus the reviewed assistant provider origins and loopback sources listed in
+`web/src/assistant/providers.json` (ADR 0015); `check:dist` enforces the list.
 Native secrets belong in the OS credential store or a local ignored credential
 file, never SQLite, protocol updates, exports, or publication artifacts.
 

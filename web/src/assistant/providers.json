@@ -1,0 +1,114 @@
+{
+  "$comment": "Reviewed assistant destinations. scripts/check-dist.mjs requires the owner app's connect-src to equal 'self', https://api.github.com, every hosted origin below, and the loopback sources. Add a provider only after its CORS behaviour from https://researchpocket.github.io is verified and recorded in docs/v2/ADR_0015_BYOK_AI_ASSISTANCE.md.",
+  "loopbackSources": ["http://localhost:*", "http://127.0.0.1:*"],
+  "providers": [
+    {
+      "id": "openai",
+      "label": "OpenAI",
+      "api": "openai",
+      "origin": "https://api.openai.com",
+      "baseURL": "https://api.openai.com/v1",
+      "keyUrl": "https://platform.openai.com/api-keys",
+      "keyRequired": true
+    },
+    {
+      "id": "anthropic",
+      "label": "Anthropic",
+      "api": "anthropic",
+      "origin": "https://api.anthropic.com",
+      "baseURL": "https://api.anthropic.com/v1",
+      "keyUrl": "https://console.anthropic.com/settings/keys",
+      "keyRequired": true
+    },
+    {
+      "id": "google",
+      "label": "Google Gemini",
+      "api": "google",
+      "origin": "https://generativelanguage.googleapis.com",
+      "baseURL": "https://generativelanguage.googleapis.com/v1beta",
+      "keyUrl": "https://aistudio.google.com/apikey",
+      "keyRequired": true
+    },
+    {
+      "id": "openrouter",
+      "label": "OpenRouter",
+      "api": "openai-compatible",
+      "origin": "https://openrouter.ai",
+      "baseURL": "https://openrouter.ai/api/v1",
+      "keyUrl": "https://openrouter.ai/settings/keys",
+      "keyRequired": true
+    },
+    {
+      "id": "groq",
+      "label": "Groq",
+      "api": "openai-compatible",
+      "origin": "https://api.groq.com",
+      "baseURL": "https://api.groq.com/openai/v1",
+      "keyUrl": "https://console.groq.com/keys",
+      "keyRequired": true
+    },
+    {
+      "id": "mistral",
+      "label": "Mistral",
+      "api": "openai-compatible",
+      "origin": "https://api.mistral.ai",
+      "baseURL": "https://api.mistral.ai/v1",
+      "keyUrl": "https://console.mistral.ai/api-keys",
+      "keyRequired": true
+    },
+    {
+      "id": "deepseek",
+      "label": "DeepSeek",
+      "api": "openai-compatible",
+      "origin": "https://api.deepseek.com",
+      "baseURL": "https://api.deepseek.com",
+      "keyUrl": "https://platform.deepseek.com/api_keys",
+      "keyRequired": true
+    },
+    {
+      "id": "xai",
+      "label": "xAI",
+      "api": "openai-compatible",
+      "origin": "https://api.x.ai",
+      "baseURL": "https://api.x.ai/v1",
+      "keyUrl": "https://console.x.ai",
+      "keyRequired": true
+    },
+    {
+      "id": "together",
+      "label": "Together AI",
+      "api": "openai-compatible",
+      "origin": "https://api.together.xyz",
+      "baseURL": "https://api.together.xyz/v1",
+      "keyUrl": "https://api.together.ai/settings/api-keys",
+      "keyRequired": true
+    },
+    {
+      "id": "ollama",
+      "label": "Ollama",
+      "api": "openai-compatible",
+      "origin": null,
+      "baseURL": "http://localhost:11434/v1",
+      "keyUrl": null,
+      "keyRequired": false
+    },
+    {
+      "id": "lmstudio",
+      "label": "LM Studio",
+      "api": "openai-compatible",
+      "origin": null,
+      "baseURL": "http://localhost:1234/v1",
+      "keyUrl": null,
+      "keyRequired": false
+    },
+    {
+      "id": "local",
+      "label": "Other local server",
+      "api": "openai-compatible",
+      "origin": null,
+      "baseURL": "http://localhost:4000/v1",
+      "keyUrl": null,
+      "keyRequired": false
+    }
+  ]
+}

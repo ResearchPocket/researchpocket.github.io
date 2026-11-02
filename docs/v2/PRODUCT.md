@@ -110,6 +110,16 @@ feeds; they do not need a ResearchPocket or GitHub account.
 - Keep concurrently saved copies of the same URL visible for review rather
   than silently deleting one person's intent.
 
+### Assistance
+
+- Connect a model provider with the owner's own key (or a model server on
+  loopback) in the hosted owner app, and ask for tag suggestions or a draft
+  summary of one open save. Every request is an explicit owner action, its
+  payload is disclosed before sending, and its output is a proposal: accepted
+  tags and summary text become ordinary owner edits, and nothing else is stored
+  or synchronized. The boundary is recorded in
+  [ADR 0015](./ADR_0015_BYOK_AI_ASSISTANCE.md).
+
 ### Remote use and synchronization
 
 - Restore a complete V2 library on a new device from its private GitHub data
@@ -201,7 +211,9 @@ V2 is successful when all of the following are true:
   a transport question rather than a collaboration one; see the signaling relay
   recorded in the [roadmap](./ROADMAP.md).
 - AI memory, personal profiling, RAG, autonomous organization, or canonical
-  machine-generated tags and summaries.
+  machine-generated tags and summaries. Owner-invoked bring-your-own-key
+  suggestions that change the library only through an explicit accept are
+  permitted by [ADR 0015](./ADR_0015_BYOK_AI_ASSISTANCE.md).
 - Full webpage archival, PDFs, attachments, highlights, or a general-purpose
   wiki. Bounded zen documents ([ADR 0011](./ADR_0011_ZEN_DOCUMENTS.md)) are the
   only standalone authored prose: Markdown with item mentions, lists, and

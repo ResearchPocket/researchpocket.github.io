@@ -8,6 +8,7 @@
     "moduleDetection": "force",
     "moduleResolution": "Bundler",
     "noEmit": true,
+    "resolveJsonModule": true,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedIndexedAccess": true,
     "noUnusedLocals": true,

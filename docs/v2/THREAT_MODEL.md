@@ -39,13 +39,14 @@ from existing Git history are outside the V2 guarantee.
 | TM-03 | The owner PAT cannot write the protected source repository that serves the application JavaScript or any public publication repository. |
 | TM-04 | The browser keeps the PAT in JavaScript memory by default. Explicit per-library consent may save a validated PAT in a separate local-only IndexedDB credential database; legacy tab-only tokens are never silently persisted (ADR 0013). |
 | TM-05 | The library IndexedDB contains private CRDT state and a durable outbox, never credentials. A separate credential database is allowed only after explicit consent and is excluded from sync/export/publication. |
-| TM-06 | Owner mode loads no third-party runtime code, remote fonts, analytics, ads, error reporters, or tag managers. Reviewed webfonts may be bundled in the same-origin application artifact. |
+| TM-06 | Owner mode loads no third-party runtime code, remote fonts, analytics, ads, error reporters, or tag managers. Reviewed webfonts and locked package dependencies, including the lazily loaded assistant SDK chunk, may be bundled in the same-origin application artifact. |
 | TM-07 | Synchronization applies only validated immutable protocol objects. Git commits and branch order have no domain meaning. |
 | TM-08 | Publication is a separate allowlisted projection. Missing, invalid, or concurrent visibility resolves to private. |
 | TM-09 | A service worker may cache only the public application shell. It never caches GitHub API traffic, credentials, private state, or publication previews. |
 | TM-10 | Deletion creates a tombstone. Historical erasure requires repository replacement or an explicit history rewrite. |
 | TM-11 | Native bookmarklet capture uses a per-user `researchpocket://capture` handler with a versioned, append-only field allowlist. The URI never selects a filesystem path, carries a credential, executes a command, or starts synchronization. |
 | TM-12 | The owner application has exclusive use of the `https://researchpocket.github.io` origin. The former `/ResearchPocket/` paths may contain only compatibility redirects built from the same protected source; no unrelated active Pages project may share the origin. |
+| TM-14 | Optional owner-app assistance (ADR 0015) contacts only reviewed provider origins or loopback listed in a checked-in registry that `check:dist` enforces against the owner CSP. Every request is owner-initiated with a disclosed, bounded payload; the note is excluded unless included per request; output is untrusted and changes the library only through an explicit accept. Provider keys follow the TM-04 memory/opt-in lifecycle in the credential database and never enter library, sync, export, or publication data. |
 | TM-13 | Optional native enrichment starts only after the item and local retry job commit. Direct fetches are public-network-only and SSRF bounded; Firecrawl is explicit, provider-neutral capture URIs carry no key, and bounded cleaned Markdown may fill only a still-missing excerpt. |
 
 ## Trust boundaries
@@ -202,6 +203,28 @@ The PAT must never enter:
   Git commit messages; or
 - the clipboard except for the owner's original copy/paste action.
 
+## Browser assistant key lifecycle
+
+Assistant provider keys (ADR 0015) follow the same boundary as the PAT, with
+these differences:
+
+1. The key is entered in **Settings → Assistant** and held in module-private
+   memory. It is used only in the provider's authentication header, through the
+   AI SDK adapter's `fetch`, with credentials, cookies, referrer, and HTTP
+   caching omitted.
+2. **Test and save** sends one short completion before the configuration is
+   stored. With explicit **Remember key in this browser** consent the key is
+   saved in the profile's `-credentials-v1` database under a separate
+   `assistant` record, bound to the provider and its address; a mismatch
+   discards it.
+3. **Forget key** and **Turn off assistant** remove it across tabs with a
+   secret-free broadcast and a revision that rejects late saves. Profile
+   deletion removes the record. Forgetting does not revoke the key with the
+   provider.
+4. Keys never enter the library IndexedDB, outbox, protocol objects, exports,
+   logs, URLs, service-worker caches, or publication artifacts. Provider error
+   text shown to the owner is shortened and scrubbed of key-shaped strings.
+
 ## Data flows
 
 ### Anonymous reader
@@ -340,15 +363,20 @@ script-src 'self';
 style-src 'self';
 img-src 'self' https:;
 font-src 'self';
-connect-src https://api.github.com;
+connect-src 'self' https://api.github.com <reviewed assistant origins> http://localhost:* http://127.0.0.1:*;
 worker-src 'self';
 frame-src 'none';
 object-src 'none';
 base-uri 'none';
 form-action 'none';
-manifest-src 'self';
-upgrade-insecure-requests
+manifest-src 'self'
 ```
+
+The assistant origins come from `web/src/assistant/providers.json` and
+`check:dist` requires the built owner CSP to match them exactly; public entries
+keep `connect-src 'self' https://api.github.com` and `upgrade-insecure-requests`.
+The owner policy omits `upgrade-insecure-requests` because every allowed source
+is already `'self'` or explicit HTTPS except loopback model servers.
 
 No inline/evaluated script, remote module, CDN script, remotely hosted font, or
 runtime package download is permitted. The `https:` image exception applies only
@@ -412,6 +440,9 @@ Activating a new shell version removes old caches.
 | Firecrawl key leaks into library or diagnostics | Environment or separate key file with owner-only Unix mode or a restricted Windows data-directory ACL; authorization header only; no raw response/error persistence; status reports only availability/source; disable removes stored key | Same-user processes, a broadly accessible custom data directory, and a compromised device can expose process environment or local files. |
 | Enrichment overwrites an authored value | Record exact missing-field revisions at queue time and recheck revision plus value inside the apply transaction; give enrichment revisions a reserved lower sort priority than app-generated human revisions; explicit clears/empty strings count as authored; never enrich URL or notes | Fetched metadata can still be inaccurate when no human value exists. |
 | Concurrent CLIs duplicate an enrichment request | Transactionally claim a short-lived per-job lease before network access; require the matching lease token to apply or fail an attempt; reclaim only after expiry | A process paused beyond the lease can overlap a recovery attempt, but bounded request time makes this exceptional. |
+| A wider `connect-src` gives injected script more exfiltration targets | Only reviewed API origins, no wildcard HTTPS, registry enforced by `check:dist`; the existing no-inline/no-eval/no-third-party-runtime controls still prevent injection | A script compromise could send private data to an allowed provider using an attacker's key; this is a narrower but real widening of TM-06's boundary. |
+| A saved page manipulates the assistant through prompt injection | Page content is framed as untrusted data; output is rendered inert, tags are parsed, bounded, and validated, no tools are exposed, and nothing is applied without an explicit accept | A manipulated suggestion can still be misleading; the owner reviews it before accepting. |
+| Assistant sends more than the owner expects | Per-feature declared payloads with a field preview, first-use destination confirmation, note excluded by default, 24,000-character context cap, no background or fallback requests | The chosen provider receives and may retain whatever the owner sends under its own policy. |
 | Clickjacking tricks PAT entry | Header CSP with `frame-ancestors 'none'` where supported; document weaker Pages meta-CSP boundary | Standard Pages meta CSP cannot enforce `frame-ancestors`. |
 | Delete is mistaken for secure erase | UI calls it delete/tombstone and documents history retention; provide repository replacement procedure | GitHub and local backups may retain earlier bytes. |
 

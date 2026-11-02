@@ -7,6 +7,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -14,6 +15,10 @@ import {
   type MarkdownImage,
 } from "./components/MarkdownDocument.tsx";
 import { AppIcon } from "./components/AppIcon.tsx";
+import { AssistantSettings } from "./components/AssistantSettings.tsx";
+import { ReaderAssistant } from "./components/ReaderAssistant.tsx";
+import { noteWithSummary } from "./assistant/prompts.ts";
+import { assistantSession } from "./assistant/session.ts";
 import { ZenBacklinks } from "./components/ZenBacklinks.tsx";
 import { LibraryGraph } from "./components/LibraryGraph.tsx";
 import {
@@ -644,6 +649,20 @@ export function App() {
     [items, knownTags],
   );
 
+  // Busiest first, so a bounded vocabulary keeps the tags the owner relies on.
+  const tagVocabulary = useMemo(
+    () =>
+      [...tagCounts]
+        .sort((left, right) => right.count - left.count || left.tag.localeCompare(right.tag))
+        .map(({ tag }) => tag),
+    [tagCounts],
+  );
+  const activeNamespace = profiles.find((profile) => profile.id === activeProfileId)?.namespace ?? null;
+
+  useEffect(() => {
+    if (activeNamespace) void assistantSession.open(activeNamespace);
+  }, [activeNamespace]);
+
   // The rail shows the busiest tags plus anything already filtered on; the
   // rest stay behind the manage action so the rail cannot grow unbounded.
   const railTags = useMemo(() => {
@@ -773,8 +792,14 @@ export function App() {
     const nextUrl = `${window.location.pathname}${window.location.search}${hashForView(nextView)}`;
     const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
     if (nextUrl !== currentUrl) {
-      window.history.pushState(window.history.state, "", nextUrl);
+      // The new entry is a view, not an open document, so it must not carry
+      // the marker that lets closing a document unwind history.
+      const { researchPocketZen: _document, ...state } = window.history.state ?? {};
+      window.history.pushState(state, "", nextUrl);
     }
+    // Every destination (the brand, the sync chip, the command palette) leaves
+    // an open document; otherwise the workspace keeps Zen's rail-less shell.
+    setOpenZen(null);
     setReaderItem(null);
     setView(nextView);
   }
@@ -908,7 +933,7 @@ export function App() {
   function resolveZenMention(itemId: string): ZenMentionTarget | null {
     const item = items.find((candidate) => candidate.id === itemId);
     if (!item) return null;
-    return { title: item.title ?? null, url: item.url, deleted: item.deleted };
+    return { title: item.title ?? null, url: item.url, deleted: item.deleted, excerpt: item.excerpt ?? null };
   }
 
   async function refreshProfiles() {
@@ -1032,6 +1057,44 @@ export function App() {
       closeEditor();
     }
     return saved;
+  }
+
+  /** Accepted suggestions are ordinary owner edits: one undoable mutation. */
+  async function addSuggestedTags(item: LibraryItemView, tags: string[]) {
+    let undo: UndoableChange | null = null;
+    const message = `Added ${pluralize(tags.length, "tag")}.`;
+    const saved = await runAction("Add suggested tags", message, () =>
+      libraryRepository.edit(item.id, {
+        tags: [...item.tags, ...tags.filter((tag) => !item.tags.includes(tag))],
+        expectedNote: item.note ?? null,
+      }).then((change) => {
+        undo = change;
+      }),
+    );
+    if (saved) offerUndo(undo, message);
+    return saved;
+  }
+
+  async function appendToNote(item: LibraryItemView, text: string) {
+    let undo: UndoableChange | null = null;
+    const saved = await runAction("Add summary to note", "Summary added to your note.", () =>
+      libraryRepository.edit(item.id, {
+        note: noteWithSummary(item.note ?? null, text),
+        expectedNote: item.note ?? null,
+      }).then((change) => {
+        undo = change;
+      }),
+    );
+    if (saved) offerUndo(undo, "Summary added to your note.");
+    return saved;
+  }
+
+  function openAssistantSettings() {
+    setReaderItem(null);
+    navigateToView("settings");
+    window.requestAnimationFrame(() =>
+      document.querySelector("#assistant-settings")?.scrollIntoView({ block: "start" }),
+    );
   }
 
   function offerUndo(change: UndoableChange | null, message: string) {
@@ -1557,6 +1620,10 @@ export function App() {
             onDelete={deleteItem}
             onEdit={openEditor}
             onFavorite={toggleFavorite}
+            onAddSuggestedTags={addSuggestedTags}
+            onAppendToNote={appendToNote}
+            onOpenAssistantSettings={openAssistantSettings}
+            tagVocabulary={tagVocabulary}
             documents={zenDocuments}
             onOpenDocument={(documentId) => {
               setReaderItem(null);
@@ -1608,6 +1675,7 @@ export function App() {
           onSaveTitle={(documentId, title) => void saveZenTitle(documentId, title)}
           open={openZen}
           resolveMention={resolveZenMention}
+          onOpenAssistantSettings={openAssistantSettings}
           linkTargets={[
             ...zenDocuments.filter((doc) => !doc.deleted).map((doc) => ({
               kind: "zen" as const, id: doc.documentId,
@@ -2452,6 +2520,8 @@ function SettingsPanel({
         </div>
       </div>
 
+      <AssistantSettings />
+
       <div className="settings-group">
         <div>
           <h3>Keyboard</h3>
@@ -3192,17 +3262,25 @@ function KeyboardShortcutsDialog({ onClose }: { onClose: () => void }) {
 function ReaderView({
   busy,
   item,
+  onAddSuggestedTags,
+  onAppendToNote,
   onBack,
   onDelete,
   onEdit,
   onFavorite,
+  onOpenAssistantSettings,
   documents,
   onOpenDocument,
+  tagVocabulary,
 }: {
   busy: boolean;
   documents: PersistedZenDocument[];
   onOpenDocument(documentId: string): void;
   item: LibraryItemView;
+  onAddSuggestedTags: (item: LibraryItemView, tags: string[]) => Promise<boolean>;
+  onAppendToNote: (item: LibraryItemView, text: string) => Promise<boolean>;
+  onOpenAssistantSettings: () => void;
+  tagVocabulary: string[];
   onBack: () => void;
   onDelete: (item: LibraryItemView) => Promise<void>;
   onEdit: (item: LibraryItemView, opener: HTMLButtonElement) => void;
@@ -3221,6 +3299,8 @@ function ReaderView({
   );
   const [capturedContextLoading, setCapturedContextLoading] = useState(false);
   const [captureOpen, setCaptureOpen] = useState(false);
+  const assistant = useSyncExternalStore(assistantSession.subscribe, assistantSession.getSnapshot);
+  const assistantAvailable = assistant.status === "ready" || assistant.status === "locked";
   const imageCloseRef = useRef<HTMLButtonElement | null>(null);
   const label = item.title?.trim() || item.url;
   // The excerpt is what the owner authored and edited, so it is what the
@@ -3362,6 +3442,24 @@ function ReaderView({
           </div>
           <h1 id="reader-title">{label}</h1>
           {item.tags.length > 0 ? <p className="reader-tags">{item.tags.map((tag) => <span key={tag}>#{tag}</span>)}</p> : null}
+          {/* Shown on every save once a provider is configured; nothing is sent
+              until one of its actions is chosen. */}
+          {assistantAvailable ? (
+            <div id="reader-assistant">
+              <ReaderAssistant
+                busy={busy}
+                item={item}
+                loadCaptured={() =>
+                  item.capturedDocument
+                    ? browserSync.loadCapturedDocument(item.capturedDocument)
+                    : Promise.resolve(null)}
+                onAddTags={(tags) => onAddSuggestedTags(item, tags)}
+                onAppendToNote={(text) => onAppendToNote(item, text)}
+                onOpenSettings={onOpenAssistantSettings}
+                vocabulary={tagVocabulary}
+              />
+            </div>
+          ) : null}
           {item.note?.trim() ? <aside className="reader-note"><strong>Your note</strong><p>{item.note}</p></aside> : null}
           <ZenBacklinks target={`item:${item.id}`} documents={documents} onOpen={onOpenDocument} />
           <div className="reader-body">

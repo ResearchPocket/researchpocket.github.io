@@ -1,4 +1,4 @@
-import { forgetRememberedCredential } from "./credentials.ts";
+import { forgetAssistant, forgetRememberedCredential } from "./credentials.ts";
 import { deleteDB, openDB, type DBSchema, type IDBPDatabase } from "idb";
 
 /**
@@ -194,6 +194,7 @@ export async function deleteProfile(profileId: string): Promise<LibraryProfile> 
 
   const names = profileStorageNames(profile.namespace);
   await forgetRememberedCredential(names.credentialDatabase);
+  await forgetAssistant(names.credentialDatabase, true);
   const channel = new BroadcastChannel(names.stateChannel);
   channel.postMessage({ type: "forget-credential" });
   channel.close();

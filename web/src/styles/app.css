@@ -2003,6 +2003,10 @@ footer {
     .reader-toolbar button,
     .reader-markdown-image-consent button,
     .item-menu-list button,
+    .assistant-tag,
+    .assistant-action,
+    .zen-tool-button,
+    .zen-assist-menu button,
     .masthead-back
   ):active:not(:disabled):not([aria-disabled="true"]):not([aria-busy="true"]) {
   background: var(--color-control-pressed);
@@ -5769,6 +5773,17 @@ kbd {
     min-block-size: 60vh;
   }
 
+  /* The page scrolls here, so a proposal would otherwise land below a long
+     body; it stays on screen just above the sticky footer instead. */
+  .zen-proposal {
+    background: var(--color-surface);
+    bottom: 2.25rem;
+    max-height: 50vh;
+    position: sticky;
+    width: 100%;
+    z-index: 9;
+  }
+
   .zen-toolbar {
     gap: 0.5rem;
     padding: 0 1rem;
@@ -6374,19 +6389,12 @@ kbd {
 }
 
 /* Link completion stays above the visual viewport's software keyboard. */
-.zen-link-tools,
 .zen-link-picker-heading {
   align-items: center;
   display: flex;
   gap: var(--space-3);
 }
 
-.zen-link-tools {
-  flex-wrap: wrap;
-  margin-top: var(--space-3);
-}
-
-.zen-link-tools button,
 .zen-link-picker button {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
@@ -6397,7 +6405,6 @@ kbd {
   padding: 0 var(--space-3);
 }
 
-.zen-link-tools span,
 .zen-link-picker small,
 .zen-backlinks p {
   color: var(--color-text-muted);
@@ -6465,4 +6472,436 @@ kbd {
   display: flex;
   min-height: 44px;
   overflow-wrap: anywhere;
+}
+
+/* Assistant: settings and the Reader panel. Proposals sit on the same plane as
+   the save they describe, marked by a rule rather than a raised card. */
+
+.assistant-settings,
+.assistant-form,
+.assistant-inputs {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.assistant-inputs {
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.assistant-buttons {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.assistant-status .status-dot-warning {
+  background: var(--color-danger);
+}
+
+.assistant-facts {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+}
+
+.assistant-facts > div {
+  align-items: baseline;
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: 6rem minmax(0, 1fr);
+}
+
+.assistant-facts dt {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.assistant-facts dd {
+  font-size: var(--font-size-sm);
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.assistant-model-row {
+  display: grid;
+  gap: var(--space-2);
+  grid-template-columns: minmax(0, 1fr) max-content;
+}
+
+.assistant-field-help,
+.assistant-disclosure {
+  color: var(--color-text-soft);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-body);
+  margin: 0;
+}
+
+
+
+.assistant-block {
+  background: var(--color-reader-note);
+  border-left: 0.1875rem solid var(--color-accent);
+  display: grid;
+  gap: var(--space-3);
+  margin: 1.25rem 0;
+  max-width: var(--measure);
+  padding: var(--space-3) var(--space-4);
+}
+
+.assistant-header {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+}
+
+.assistant-header h2 {
+  align-items: center;
+  color: var(--color-accent-strong);
+  display: inline-flex;
+  font-size: var(--font-size-xs);
+  gap: var(--space-2);
+  letter-spacing: 0.08em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.assistant-block .app-icon {
+  height: 1rem;
+  width: 1rem;
+}
+
+.assistant-model {
+  color: var(--color-text-muted);
+  flex: 1 1 8rem;
+  font-size: var(--font-size-xs);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assistant-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.app-shell .assistant-action {
+  background: transparent;
+  border: var(--rule) solid var(--color-border-strong);
+  border-radius: var(--radius);
+  color: var(--color-text);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  min-height: 1.875rem;
+  padding: 0 var(--space-3);
+}
+
+.app-shell .assistant-action-primary {
+  background: var(--color-inverse-surface);
+  border-color: var(--color-inverse-surface);
+  color: var(--color-inverse);
+}
+
+.app-shell .assistant-action-quiet {
+  border-color: transparent;
+  color: var(--color-text-muted);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .app-shell .assistant-action:hover:not(:disabled) {
+    border-color: var(--color-accent);
+  }
+
+  .app-shell .assistant-action-quiet:hover:not(:disabled) {
+    color: var(--color-text);
+  }
+}
+
+.assistant-note,
+.assistant-row p,
+.assistant-tags legend {
+  color: var(--color-text-soft);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-body);
+  margin: 0;
+}
+
+.assistant-inline-check {
+  align-items: center;
+  display: inline-flex;
+  gap: var(--space-1);
+  margin-left: var(--space-3);
+  white-space: nowrap;
+}
+
+.assistant-inline-check input {
+  accent-color: var(--color-accent);
+  block-size: 0.875rem;
+  inline-size: 0.875rem;
+  margin: 0;
+  min-block-size: 0;
+  min-inline-size: 0;
+}
+
+.app-shell .assistant-link {
+  background: none;
+  border: 0;
+  color: var(--color-accent-strong);
+  cursor: pointer;
+  font: inherit;
+  min-height: 0;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.assistant-row {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.assistant-working {
+  align-items: center;
+  color: var(--color-text-soft);
+  display: flex;
+  font-size: var(--font-size-xs);
+  gap: var(--space-3);
+}
+
+.assistant-row .assistant-error {
+  color: var(--color-danger);
+}
+
+.assistant-consent strong,
+.assistant-title-row strong {
+  color: var(--color-text);
+}
+
+.assistant-tags {
+  border: 0;
+  margin: 0;
+  min-width: 0;
+  padding: 0;
+}
+
+.assistant-tags legend {
+  float: left;
+  font-weight: 700;
+  margin-bottom: var(--space-2);
+  width: 100%;
+}
+
+.assistant-tags legend small {
+  font-weight: 500;
+}
+
+.assistant-tag-list {
+  clear: both;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.app-shell .assistant-tag {
+  align-items: center;
+  background: transparent;
+  border: var(--rule) solid var(--color-border-strong);
+  border-radius: var(--radius);
+  color: var(--color-text-soft);
+  display: inline-flex;
+  gap: var(--space-2);
+  min-height: 1.875rem;
+  padding: 0 var(--space-3);
+}
+
+.app-shell .assistant-tag[aria-pressed="true"] {
+  background: var(--color-accent-soft);
+  border-color: var(--color-accent);
+  color: var(--color-accent-strong);
+}
+
+.assistant-tag small {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+}
+
+.assistant-draft {
+  color: var(--color-text-reader);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-body);
+  min-width: 0;
+}
+
+.assistant-draft > :first-child {
+  margin-top: 0;
+}
+
+.assistant-draft > :last-child {
+  margin-bottom: 0;
+}
+
+.assistant-title-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  justify-content: space-between;
+}
+
+.assistant-title-row small {
+  color: var(--color-text-muted);
+  margin-right: var(--space-2);
+}
+
+/* Zen: compact tools in the toolbar, one menu, proposals above the footer. */
+
+.app-shell .zen-tool-button {
+  align-items: center;
+  background: transparent;
+  border: var(--rule) solid transparent;
+  border-radius: var(--radius);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 0.375rem;
+  min-height: 30px;
+  min-width: 30px;
+  justify-content: center;
+  padding: 0 0.5rem;
+}
+
+.zen-tool-button .app-icon {
+  height: 1rem;
+  width: 1rem;
+}
+
+.app-shell .zen-tool-button[aria-expanded="true"],
+.app-shell .zen-tool-button:focus-visible {
+  border-color: var(--color-border);
+  color: var(--color-accent);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .app-shell .zen-tool-button:hover:not(:disabled) {
+    border-color: var(--color-border);
+    color: var(--color-text);
+  }
+}
+
+.zen-assist {
+  position: relative;
+}
+
+.zen-assist-menu {
+  background: var(--color-surface);
+  border: var(--rule) solid var(--color-border);
+  border-radius: var(--radius);
+  display: grid;
+  max-width: min(22rem, calc(100vw - 2rem));
+  min-width: 17rem;
+  padding: var(--space-1);
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.25rem);
+  z-index: 20;
+}
+
+.app-shell .zen-assist-menu button {
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius);
+  color: var(--color-text);
+  cursor: pointer;
+  display: grid;
+  gap: 0.125rem;
+  min-height: 0;
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+}
+
+.zen-assist-menu button span {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.zen-assist-menu button small {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.app-shell .zen-assist-menu button:is(:hover, :focus-visible):not(:disabled) {
+  background: var(--color-surface-raised);
+}
+
+.app-shell .zen-assist-menu button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.zen-title-row {
+  align-items: center;
+  display: flex;
+  gap: var(--space-2);
+}
+
+.zen-title-row .zen-title-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* With room beside the page, the title button hangs in the margin so the
+   title stays flush with the body and clear of the toolbar's Assist. A narrow
+   window has no margin, so the button follows the title there instead. */
+.zen-canvas {
+  container-type: inline-size;
+}
+
+@container (min-width: 52rem) {
+  .zen-title-row {
+    position: relative;
+  }
+
+  .app-shell .zen-title-assist {
+    inset-inline-end: calc(100% + var(--space-1));
+    position: absolute;
+  }
+}
+
+.zen-title-suggestion {
+  margin: var(--space-3) 0 0;
+}
+
+.zen-proposal {
+  margin: 0 auto var(--space-3);
+  max-height: 45vh;
+  overflow: auto;
+  width: min(760px, calc(100% - 2rem));
+}
+
+@media (max-width: 48rem) {
+  .zen-tool-label {
+    display: none;
+  }
+}
+
+@media (max-width: 40rem) {
+  .assistant-model-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .assistant-facts > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
 }

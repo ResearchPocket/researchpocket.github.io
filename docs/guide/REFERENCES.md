@@ -76,7 +76,7 @@ formatting or footnote manager.
 ## Connect documents and return to their sources
 
 In the current browser update, type `[[` in a Zen body to find an existing save
-or document, or choose **Insert link** on a phone. The picker inserts the UUID
+or document, or choose the toolbar's link icon (**Insert link**) on a phone. The picker inserts the UUID
 link without requiring you to copy an ID. Use a document link to connect a
 reading plan to your synthesis, and saved-item links for the original sources.
 

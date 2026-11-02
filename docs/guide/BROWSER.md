@@ -30,23 +30,17 @@ In Zen's **Open or create a document…** field, typing filters titles, arrow ke
 select a row, Enter opens it, and **Ctrl+Enter** or **Cmd+Enter** creates a new
 document. The [Zen guide](ZEN.md) covers editing and save timing.
 
-The current browser update also offers `[[` completion and a touch-friendly
-**Insert link** action in Zen bodies. Follow document links within Zen or saved
+The current browser update also offers `[[` completion and an **Insert link**
+button (the link icon in the Zen toolbar while editing). Follow document links within Zen or saved
 links in the Reader, and use **Linked from** to return to referencing documents.
 These additions are beyond the published 2.3.0 browser. See
 [Zen links and backlinks](ZEN.md#insert-links-and-follow-backlinks).
 
 ## Work offline
 
-Once the app has loaded, saves and accepted edits can continue offline. They
-commit to local storage and queue updates before synchronization. Offline work
-does not require a token.
-
-A known [offline-reload issue (#199)](https://github.com/ResearchPocket/researchpocket.github.io/issues/199)
-can prevent a fresh offline load from opening the domain worker even when the
-static shell is cached. Keep the working app open while offline; reopening may
-require a connection until that issue is fixed. This does not discard already
-committed local changes.
+After one successful online load has installed the app, you can reopen it
+offline. Saves and accepted edits commit to local storage and queue updates
+before synchronization. Offline work does not require a token.
 
 The pending-change count means work is durable on this device and still needs
 to upload. It is not a remote-backup confirmation. Captured pages you have not

@@ -136,6 +136,17 @@ The [Zen guide](docs/guide/ZEN.md) covers browser save timing, todos, references
 and recovery. [Documentation and references](docs/guide/REFERENCES.md) shows how
 to build a reading plan from technical documentation, papers, and examples.
 
+## Ask your own model for tags and summaries
+
+In the browser workspace, **Settings → Assistant** connects a model provider
+with your own key (OpenAI, Anthropic, Gemini, OpenRouter, Groq, Mistral,
+DeepSeek, xAI, or Together AI) or a model server on your computer such as
+Ollama. Open a save and use the Reader's **Assistant** panel to suggest tags
+or draft a summary. Nothing is sent until you ask, the Reader shows exactly
+what a request includes, and only the tags or summary text you accept become
+part of your library. Keys stay in your browser and never sync. See the
+[Assistant guide](docs/guide/ASSISTANT.md).
+
 ## Save the page you are reading
 
 The included bookmarklet sends the current page to the installed CLI. It does
@@ -285,6 +296,7 @@ error. Credentials and raw synchronization updates are not included.
 - [Documentation and references](docs/guide/REFERENCES.md)
 - [Capture, enrichment, and reading](docs/guide/READING.md)
 - [Browser workspace](docs/guide/BROWSER.md)
+- [Assistant: tag suggestions and summaries with your own key](docs/guide/ASSISTANT.md)
 - [Sync and recovery](docs/guide/SYNC.md)
 - [Complete CLI and TUI reference](docs/v2/CLI.md)
 - [Technical reference and architecture decisions](docs/guide/TECHNICAL.md)
@@ -310,9 +322,9 @@ For the website and browser app:
 
 ```sh
 cd web
-npm ci
-npm run verify
-npm run dev
+bun install --frozen-lockfile
+bun run verify
+bun run dev
 ```
 
 Tests focus on persistence, convergence, migration, privacy, and deployment

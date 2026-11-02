@@ -84,7 +84,8 @@ they do not add a native CLI or TUI completion picker.
 2. Type `[[` followed by part of a document title, saved-item title, or URL.
 3. Use Up/Down and Enter to choose an existing result. Escape dismisses the
    suggestions without closing the document.
-4. On a phone, choose **Insert link**, search, and tap the result instead.
+4. On a phone, choose the link icon (**Insert link**) in the toolbar, search,
+   and tap the result instead.
 5. Switch to **view** and follow the link to open the document or saved item's
    local Reader.
 

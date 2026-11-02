@@ -89,7 +89,9 @@ deferred. Captured page bytes do not enter the item excerpt or Zen body unless
 the owner explicitly authors that text there.
 
 The library database has no credential, token, authorization-header, repository
-secret, or generic settings store. The fine-grained PAT remains in private
+secret, or generic settings store. Assistant settings and an opted-in provider
+key live under a separate `assistant` record in the credential database
+described below. The fine-grained PAT remains in private
 JavaScript memory by default. Explicit **Remember token in this browser** consent
 saves it after successful repository/library validation and sync in a separate
 `<profile namespace>-credentials-v1` IndexedDB database. It holds one versioned
@@ -148,8 +150,12 @@ styles and never loads a CDN, script, font, or service. Malformed expressions
 remain visible as source text instead of crashing the Reader. Code spans and
 fenced code blocks retain literal dollar signs and TeX.
 
-The document CSP allows only same-origin application resources and future
-connections to `https://api.github.com`. The service worker handles only GETs
+The public documents' CSP allows only same-origin resources and connections to
+`https://api.github.com`. The owner app additionally allows the reviewed
+assistant provider origins and loopback model servers listed in
+`src/assistant/providers.json`, and omits `upgrade-insecure-requests` so loopback
+HTTP is not rewritten; `check:dist` fails if either policy drifts from that
+registry. The service worker handles only GETs
 from pages controlled beneath `/app/` for same-origin shell resources and WASM.
 It explicitly bypasses all GitHub API
 traffic, cross-origin traffic, and non-GET requests, so it cannot cache a token,
@@ -194,11 +200,15 @@ restore the library from immutable repository genesis and operations. Unsynced
 changes remain only in the current browser, and the UI reports their pending
 count rather than implying they are already backed up.
 
-The app supports offline mutations after loading, but a known production
-bootstrap failure can prevent the domain worker from opening on a fresh offline
-reload even when the shell is cached. See
-[#199](https://github.com/ResearchPocket/researchpocket.github.io/issues/199).
-Previously committed data remains in IndexedDB; reconnecting allows reopening.
+Installation precaches the owner entry's static graph, its fonts and favicon,
+the domain worker, and the WASM module that worker loads (read from the cached
+worker script, because the worker bundle is outside the entry manifest). Fonts
+and same-origin images are served from that cache, so an installed app reloads
+and opens its domain worker offline. `bun run build` ends with
+`check:offline`, which runs the built service worker against `dist/`, installs
+it, cuts the network, and requires the navigation, app script, worker, WASM,
+font, and favicon to come from the cache. Lazily loaded chunks such as the
+assistant SDK are cached on first use.
 
 ## Owner synchronization lifecycle
 
@@ -236,13 +246,13 @@ reopens the form against the merged text instead of overwriting it.
 
 ## Build and Pages deployment
 
-The locked build requires Node.js 22.12 or newer, Rust 1.97, the
+The locked build requires Node.js 22.12 or newer, Bun 1.3.13, Rust 1.97, the
 `wasm32-unknown-unknown` target, and `wasm-bindgen-cli` 0.2.126:
 
 ```sh
 cd web
-npm ci
-npm run build
+bun install --frozen-lockfile
+bun run build
 ```
 
 The build compiles `research-domain` to WASM, generates the local JavaScript
@@ -264,8 +274,8 @@ The complete credential and publication boundary remains in
 
 In a Zen document's edit mode, type `[[` and a title or URL to find an existing
 document or saved item. Use Up/Down and Enter to insert a link; Escape dismisses
-suggestions without closing the document. On touch screens, use **Insert link**,
-search, and tap a result. The selection becomes ordinary Markdown containing the
+suggestions without closing the document. On touch screens, use the toolbar's
+link icon (**Insert link**), search, and tap a result. The selection becomes ordinary Markdown containing the
 target UUID. Renaming a target changes its displayed title without breaking links.
 
 Document links open in Zen; saved-item links open the local Reader. Each target
@@ -274,3 +284,27 @@ derived locally when a target is open, work offline, and are never stored as an
 index or sent to GitHub. Missing or deleted document targets remain visibly
 unavailable. Saved-item private notes are outside this first completion surface.
 See [ADR 0014](./ADR_0014_ZEN_LINK_COMPLETION.md).
+
+## Assistant
+
+**Settings → Assistant** connects a model provider with the owner's own key:
+OpenAI, Anthropic, Google Gemini, OpenRouter, Groq, Mistral, DeepSeek, xAI,
+Together AI, or a server on loopback (Ollama, LM Studio, or any
+OpenAI-compatible gateway). **Test and save** sends one short completion before
+storing the configuration; **Load models** lists the provider's chat models.
+The AI SDK adapters in `src/assistant/client.ts` are a separate chunk that
+downloads only on first use and is runtime-cached for offline reuse; the
+service worker does not precache it.
+
+With a provider configured, the Reader shows an inline **Assistant** panel under
+the title and tags. It offers **Suggest tags** and **Summarize**, previews the fields each
+request sends, and asks once per provider before the first request. Tag
+suggestions appear as toggles—existing tags preselected, new ones marked—and
+**Add tags** applies the selection as one undoable item edit. A summary streams
+into an inert draft; **Add to note** appends it through the note mutation, which
+keeps stale-note protection and character-level merging. Nothing is stored
+until the owner accepts it.
+
+Prompts, payload bounds, and output parsing live in `src/assistant/prompts.ts`.
+Settings and an opted-in key are stored per library in the credential database
+and never sync. See [ADR 0015](./ADR_0015_BYOK_AI_ASSISTANCE.md).

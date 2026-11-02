@@ -1,5 +1,5 @@
 export function AppIcon({ name }: {
-  name: "saves" | "favorites" | "archive" | "zen" | "tags" | "sync" | "settings" | "back" | "edit" | "external";
+  name: "saves" | "favorites" | "archive" | "zen" | "tags" | "sync" | "settings" | "back" | "edit" | "external" | "assistant" | "link";
 }) {
   const paths = {
     saves: <><path d="M5 3h14v18l-7-4-7 4z" /><path d="M9 7h6" /></>,
@@ -10,6 +10,8 @@ export function AppIcon({ name }: {
     sync: <><path d="M20 10a8 8 0 0 0-14-4L3 9m0-6v6h6M4 14a8 8 0 0 0 14 4l3-3m0 6v-6h-6" /></>,
     back: <path d="m10 5-7 7 7 7M3 12h18" />,
     edit: <><path d="m16 3 5 5-12 12-6 1 1-6zM13 6l5 5" /></>,
+    assistant: <><path d="m11 3 1.9 5.1L18 10l-5.1 1.9L11 17l-1.9-5.1L4 10l5.1-1.9z" /><path d="m18.5 14 .8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z" /></>,
+    link: <><path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1.2 1.2" /><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1.2-1.2" /></>,
     external: <path d="M14 3h7v7M21 3 10 14M10 3H3v18h18v-7" />,
     settings: <><path d="m9.7 4.5.6-2.4h3.4l.6 2.4 1.4.6 2-1.3 2.5 2.5-1.3 2 .6 1.4 2.4.6v3.4l-2.4.6-.6 1.4 1.3 2-2.5 2.5-2-1.3-1.4.6-.6 2.4h-3.4l-.6-2.4-1.4-.6-2 1.3-2.5-2.5 1.3-2-.6-1.4-2.4-.6v-3.4l2.4-.6.6-1.4-1.3-2 2.5-2.5 2 1.3z" /><circle cx="12" cy="12" r="3" /></>,
   };

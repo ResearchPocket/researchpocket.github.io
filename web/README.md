@@ -26,23 +26,19 @@ cargo install wasm-bindgen-cli --version 0.2.126 --locked
 ```
 
 ```sh
-npm ci
-npm run verify
-npm run dev
+bun install --frozen-lockfile
+bun run verify
+bun run dev
 ```
 
-`npm` and `package-lock.json` define the canonical reproducible toolchain.
-`npm run verify` runs the browser data contracts, strict type checking, the
-design-system policy, the Rust/WASM build, the Vite production build, and the
-deployable-artifact checks used by GitHub Pages.
+Bun and the committed `bun.lock` define the canonical reproducible install;
+Node.js runs the build scripts and the `node:test` contracts. `bun run verify`
+runs the browser data contracts, strict type checking, the design-system policy,
+the Rust/WASM build, the Vite production build, and the deployable-artifact
+checks used by GitHub Pages. `bun audit` checks the locked dependencies, as CI
+does.
 
-After the locked `npm ci` install, Bun can also run the development script:
-
-```sh
-bun dev
-```
-
-Both commands start the public welcome at `http://localhost:5173/`, product
+`bun run dev` starts the public welcome at `http://localhost:5173/`, product
 overview at `http://localhost:5173/overview/`, Markdown reference at
 `http://localhost:5173/docs/`, and owner application at
 `http://localhost:5173/app/`. The development server
@@ -51,12 +47,12 @@ CSS and hot reload work without allowing arbitrary inline content. Restart the
 server after changing its configuration. Production builds do not contain this
 development nonce.
 
-`npm test` runs two focused contracts: a complete local commit and non-secret
+`bun run test` runs focused contracts: a complete local commit and non-secret
 sync configuration survive reopen while an interrupted replacement exposes none
 of its writes; the GitHub adapter keeps credentials in headers and sends exact
 immutable bytes without a replacement SHA.
 
-`npm run build` first compiles `research-domain` for
+`bun run build` first compiles `research-domain` for
 `wasm32-unknown-unknown`, runs the matching `wasm-bindgen` CLI, type-checks the
 app, checks the canonical design-system rules, creates the script-free public
 pages, Markdown-backed reference, and relative-path owner app in `dist/`, and
