@@ -489,23 +489,6 @@ function ZenEditor({
               Markdown, and hiding it behind edit mode was the only reason it
               could not be changed while reading. */}
           <div className="zen-title-row">
-          <input
-            aria-label="Document title"
-            className="zen-title-input"
-            disabled={busy}
-            onBlur={() => {
-              // Every save is an operation other devices have to fetch, so a
-              // blur that changed nothing must not write one.
-              const next = title.trim() || null;
-              if (next !== (open.view.title.value ?? null)) {
-                onSaveTitle(open.documentId, next);
-              }
-            }}
-            onChange={(event) => setTitle(event.target.value)}
-            placeholder="Untitled document"
-            type="text"
-            value={title}
-          />
           {assistantStatus === "ready" ? (
             <button
               aria-label={title.trim() ? "Suggest another title" : "Suggest a title"}
@@ -524,6 +507,23 @@ function ZenEditor({
               <AppIcon name="assistant" />
             </button>
           ) : null}
+          <input
+            aria-label="Document title"
+            className="zen-title-input"
+            disabled={busy}
+            onBlur={() => {
+              // Every save is an operation other devices have to fetch, so a
+              // blur that changed nothing must not write one.
+              const next = title.trim() || null;
+              if (next !== (open.view.title.value ?? null)) {
+                onSaveTitle(open.documentId, next);
+              }
+            }}
+            onChange={(event) => setTitle(event.target.value)}
+            placeholder="Untitled document"
+            type="text"
+            value={title}
+          />
           </div>
           {titleAssist.state.kind !== "idle" ? (
             <div className="assistant-block zen-title-suggestion">

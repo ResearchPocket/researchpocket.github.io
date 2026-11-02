@@ -63,7 +63,7 @@ copies it, and **Discard** throws it away.
 
 Open a document. With a provider set up, two controls appear.
 
-**Title.** The ✦ button at the end of the title suggests a title from the
+**Title.** The ✦ button before the title suggests a title from the
 document's text, or a different one if it already has a title. Choose **Use**
 to keep it, **Another** for a new suggestion, or **Dismiss**.
 
