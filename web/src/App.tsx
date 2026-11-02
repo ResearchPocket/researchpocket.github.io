@@ -792,8 +792,14 @@ export function App() {
     const nextUrl = `${window.location.pathname}${window.location.search}${hashForView(nextView)}`;
     const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
     if (nextUrl !== currentUrl) {
-      window.history.pushState(window.history.state, "", nextUrl);
+      // The new entry is a view, not an open document, so it must not carry
+      // the marker that lets closing a document unwind history.
+      const { researchPocketZen: _document, ...state } = window.history.state ?? {};
+      window.history.pushState(state, "", nextUrl);
     }
+    // Every destination (the brand, the sync chip, the command palette) leaves
+    // an open document; otherwise the workspace keeps Zen's rail-less shell.
+    setOpenZen(null);
     setReaderItem(null);
     setView(nextView);
   }

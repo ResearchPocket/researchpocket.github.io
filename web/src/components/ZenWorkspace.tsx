@@ -257,6 +257,21 @@ function ZenEditor({
   const overBound = byteLength > MAX_BODY_BYTES;
   const section = useRef<HTMLElement>(null);
   const bodyInput = useRef<ZenLinkInputHandle>(null);
+  // The body saves on blur, but a document can close with focus still in it
+  // (Escape, the brand, a menu that keeps the selection), so leaving flushes too.
+  const latest = useRef({ draft, sent: open.view.body, overBound, onSaveBody });
+  latest.current.draft = draft;
+  latest.current.overBound = overBound;
+  latest.current.onSaveBody = onSaveBody;
+  useEffect(() => () => {
+    const { draft: last, sent, overBound: tooLarge, onSaveBody: save } = latest.current;
+    if (!tooLarge && last !== sent) save(open.documentId, last);
+  }, []);
+
+  function saveBody(next: string) {
+    latest.current.sent = next;
+    onSaveBody(open.documentId, next);
+  }
   const assist = useAssistantTask();
   const titleAssist = useAssistantTask();
   const assistantStatus = assist.snapshot.status;
@@ -334,7 +349,7 @@ function ZenEditor({
       return;
     }
     setDraft(next);
-    onSaveBody(open.documentId, next);
+    saveBody(next);
     pending.current = null;
     setApplyError(null);
     assist.reset();
@@ -384,7 +399,7 @@ function ZenEditor({
     lines[lineIndex] = toggled;
     const next = lines.join("\n");
     setDraft(next);
-    onSaveBody(open.documentId, next);
+    saveBody(next);
   }
 
   return (
@@ -571,7 +586,7 @@ function ZenEditor({
                 )}
                 onBlur={() => {
                   if (!overBound && draft !== open.view.body) {
-                    onSaveBody(open.documentId, draft);
+                    saveBody(draft);
                   }
                 }}
                 onChange={setDraft}
