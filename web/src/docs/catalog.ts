@@ -3,6 +3,7 @@ import gettingStartedSource from "../../../docs/guide/GETTING_STARTED.md?raw";
 import hostedOwnerSource from "../../../docs/guide/BROWSER.md?raw";
 import librarySource from "../../../docs/guide/LIBRARY.md?raw";
 import zenSource from "../../../docs/guide/ZEN.md?raw";
+import assistantSource from "../../../docs/guide/ASSISTANT.md?raw";
 import referencesSource from "../../../docs/guide/REFERENCES.md?raw";
 import readingSource from "../../../docs/guide/READING.md?raw";
 import syncSource from "../../../docs/guide/SYNC.md?raw";
@@ -31,6 +32,7 @@ import adrZenSource from "../../../docs/v2/ADR_0011_ZEN_DOCUMENTS.md?raw";
 import adrLibraryGraphSource from "../../../docs/v2/ADR_0012_DERIVED_LIBRARY_GRAPH.md?raw";
 import adrBrowserTokenSource from "../../../docs/v2/ADR_0013_REMEMBER_BROWSER_TOKEN.md?raw";
 import adrZenLinksSource from "../../../docs/v2/ADR_0014_ZEN_LINK_COMPLETION.md?raw";
+import adrAssistantSource from "../../../docs/v2/ADR_0015_BYOK_AI_ASSISTANCE.md?raw";
 import releaseSource from "../../../docs/releases/v2.3.0.md?raw";
 import release222Source from "../../../docs/releases/v2.2.2.md?raw";
 import release221Source from "../../../docs/releases/v2.2.1.md?raw";
@@ -126,6 +128,14 @@ export const referenceDocuments: ReferenceDocument[] = [
     description: "Install browser capture, enrich metadata, read captured Markdown, and manage page content.",
     sourcePath: "docs/guide/READING.md",
     source: readingSource,
+  },
+  {
+    id: "assistant",
+    section: "guides",
+    title: "Assistant",
+    description: "Connect your own model key or a local server, suggest tags, and draft summaries you choose to keep.",
+    sourcePath: "docs/guide/ASSISTANT.md",
+    source: assistantSource,
   },
   {
     id: "sync",
@@ -334,6 +344,14 @@ export const referenceDocuments: ReferenceDocument[] = [
     description: "Architecture decision 0014: zen links and backlinks. Historical design context; see user guides for shipped behavior.",
     sourcePath: "docs/v2/ADR_0014_ZEN_LINK_COMPLETION.md",
     source: adrZenLinksSource,
+  },
+  {
+    id: "adr-assistant",
+    section: "decisions",
+    title: "0015: Bring-your-own-key assistance",
+    description: "Architecture decision 0015: bring-your-own-key assistance. Historical design context; see user guides for shipped behavior.",
+    sourcePath: "docs/v2/ADR_0015_BYOK_AI_ASSISTANCE.md",
+    source: adrAssistantSource,
   },
   {
     id: "release",

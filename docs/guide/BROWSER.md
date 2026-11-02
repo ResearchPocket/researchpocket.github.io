@@ -38,15 +38,9 @@ These additions are beyond the published 2.3.0 browser. See
 
 ## Work offline
 
-Once the app has loaded, saves and accepted edits can continue offline. They
-commit to local storage and queue updates before synchronization. Offline work
-does not require a token.
-
-A known [offline-reload issue (#199)](https://github.com/ResearchPocket/researchpocket.github.io/issues/199)
-can prevent a fresh offline load from opening the domain worker even when the
-static shell is cached. Keep the working app open while offline; reopening may
-require a connection until that issue is fixed. This does not discard already
-committed local changes.
+After one successful online load has installed the app, you can reopen it
+offline. Saves and accepted edits commit to local storage and queue updates
+before synchronization. Offline work does not require a token.
 
 The pending-change count means work is durable on this device and still needs
 to upload. It is not a remote-backup confirmation. Captured pages you have not

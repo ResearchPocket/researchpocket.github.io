@@ -89,6 +89,30 @@ not written into the library or synchronization data.
 
 The browser-capture URI never accepts a provider or credential.
 
+## Assistant privacy
+
+The browser assistant is off until you configure it in **Settings →
+Assistant**. It sends nothing by itself: each tag suggestion or summary is a
+request you start from an open save. The Reader lists the fields a request
+contains before you send it: title, URL, excerpt, and up to 24,000 characters
+of captured page, plus your tag names for tag suggestions. Your private note is
+included only when you tick **Include my note** for that request. The first
+request to a provider asks you to confirm the destination, and that provider's
+own data policy applies to what it receives.
+
+Requests go directly from your browser to the provider you chose, or to a model
+server on your own computer. ResearchPocket has no server in between. Results
+are proposals; only the tags or summary text you accept become part of your
+library, as ordinary edits that sync like any other.
+
+The provider key is kept in memory by default. **Remember key in this browser**
+saves it in the same local-only credential database as a remembered GitHub
+token, for that library only. **Forget key** removes it from every open tab;
+deleting the library removes it too. Provider choice, model, and key never
+enter the library replica, sync, exports, or published output, and forgetting
+does not revoke the key with the provider. See
+[ADR 0015](./ADR_0015_BYOK_AI_ASSISTANCE.md).
+
 ## Backups and recovery
 
 Before an upgrade that includes a migration, close every ResearchPocket process

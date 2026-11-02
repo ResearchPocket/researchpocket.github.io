@@ -114,6 +114,22 @@ for (const [name, markers] of [
   }
 }
 
+// Assistant destinations are reviewed in src/assistant/providers.json. Only the
+// owner app may reach them, and its connect-src must match that list exactly.
+const assistantRegistry = JSON.parse(
+  readFileSync(resolve(webRoot, "src/assistant/providers.json"), "utf8"),
+);
+const expectedOwnerConnect = [
+  "'self'",
+  "https://api.github.com",
+  ...assistantRegistry.providers.map(({ origin }) => origin).filter(Boolean),
+  ...assistantRegistry.loopbackSources,
+];
+function connectSources(html) {
+  const match = /connect-src ([^;"]+)/.exec(html);
+  return match ? match[1].trim().split(/\s+/) : null;
+}
+
 const documents = ["index.html", "app/index.html", "docs/index.html", "overview/index.html"];
 for (const document of documents) {
   const path = resolve(distRoot, document);
@@ -127,6 +143,16 @@ for (const document of documents) {
   }
   if (/unsafe-inline|nonce-[a-z0-9]+/i.test(html)) {
     failures.push(`${document} contains an unsafe or development-only CSP source`);
+  }
+  const connect = connectSources(html);
+  const expectedConnect =
+    document === "app/index.html" ? expectedOwnerConnect : ["'self'", "https://api.github.com"];
+  if (
+    !connect ||
+    connect.length !== expectedConnect.length ||
+    expectedConnect.some((source) => !connect.includes(source))
+  ) {
+    failures.push(`${document} connect-src does not match the reviewed destinations`);
   }
 
   const runtimeTags = html.match(/<(?:img|link|script)\b[^>]*>/gi) ?? [];

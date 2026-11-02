@@ -21,6 +21,7 @@ between documents, and derived backlinks. These are browser changes beyond the
 | Write a document, keep todos, or reference saved items | [Zen documents](ZEN.md) |
 | Keep technical documentation and research references together | [Documentation and references](REFERENCES.md) |
 | Read an excerpt or capture a page as Markdown | [Capture and reading](READING.md) |
+| Get tag suggestions or a draft summary from your own model key | [Assistant](ASSISTANT.md) |
 | Set up another device or recover a library | [Sync and recovery](SYNC.md) |
 
 ## What lives in your library
@@ -40,8 +41,7 @@ second copy of it.
 ## Choose an interface
 
 The [browser app](BROWSER.md) stores a library in the current browser profile and
-supports offline edits once loaded. The browser guide documents a known
-offline-reload limitation. The CLI and TUI share
+works offline once it has been installed by an online load. The CLI and TUI share
 a native library in the platform data directory. They become replicas of the
 same library when connected through [private sync](SYNC.md); opening the browser
 app does not automatically open the native SQLite library.

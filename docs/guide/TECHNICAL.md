@@ -42,6 +42,7 @@ current release behavior.
 | [0012](../v2/ADR_0012_DERIVED_LIBRARY_GRAPH.md) | Derived library graph |
 | [0013](../v2/ADR_0013_REMEMBER_BROWSER_TOKEN.md) | Explicit browser-token persistence |
 | [0014](../v2/ADR_0014_ZEN_LINK_COMPLETION.md) | Current browser update: Zen link completion, document references, and derived backlinks |
+| [0015](../v2/ADR_0015_BYOK_AI_ASSISTANCE.md) | Bring-your-own-key assistance in the owner app: provider allowlist, key lifecycle, disclosed payloads, accept-only output |
 
 Zen has shipped in its own aggregate namespace; saves still use protocol v1.
 The item-aggregate migration described by ADR 0010 has not shipped. An ADR's

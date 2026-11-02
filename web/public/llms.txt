@@ -31,6 +31,7 @@ index. Native completion and item-note completion are not included.
 - [Zen documents, tasks, and item mentions](https://researchpocket.github.io/docs/?page=zen)
 - [Documentation and references](https://researchpocket.github.io/docs/?page=references)
 - [Capture and reading](https://researchpocket.github.io/docs/?page=reading)
+- [Assistant: bring-your-own-key tag suggestions and summaries](https://researchpocket.github.io/docs/?page=assistant)
 - [Sync and recovery](https://researchpocket.github.io/docs/?page=sync)
 
 ## Reference

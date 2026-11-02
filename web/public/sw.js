@@ -1,10 +1,14 @@
 const CACHE_PREFIX = "research-pocket-shell-";
-const CACHE_NAME = `${CACHE_PREFIX}v4-root`;
+const CACHE_NAME = `${CACHE_PREFIX}v5-root`;
 const SITE_ROOT = new URL("../", self.registration.scope);
 const ASSET_MANIFEST = new URL("asset-manifest.json", SITE_ROOT);
 const SHELL_FILES = ["app/", "app/index.html", "manifest.webmanifest", "favicon.png"];
+// Fonts and the favicon are precached too; without their destinations here an
+// offline reload bypassed the cache and requested them from the network.
 const SHELL_DESTINATIONS = new Set([
   "document",
+  "font",
+  "image",
   "manifest",
   "script",
   "style",
@@ -46,6 +50,24 @@ async function cacheApplicationShell() {
     (file) => new URL(file, SITE_ROOT).href,
   );
   await cache.addAll(shellUrls);
+  // The domain worker is a separate bundle, so the WASM it loads is absent from
+  // the manifest. Read each precached worker for the same-origin modules it
+  // names; offline, the worker would otherwise die fetching them.
+  await cache.addAll(await workerDependencies(cache, shellUrls));
+}
+
+async function workerDependencies(cache, shellUrls) {
+  const dependencies = new Set();
+  for (const url of shellUrls) {
+    if (!/\.worker-[\w-]+\.js$/.test(url)) continue;
+    const response = await cache.match(url);
+    const source = response ? await response.text() : "";
+    for (const [name] of source.matchAll(/[\w-]+\.wasm\b/g)) {
+      const dependency = new URL(name, url);
+      if (dependency.origin === self.location.origin) dependencies.add(dependency.href);
+    }
+  }
+  return [...dependencies];
 }
 
 self.addEventListener("activate", (event) => {
