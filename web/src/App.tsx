@@ -927,7 +927,7 @@ export function App() {
   function resolveZenMention(itemId: string): ZenMentionTarget | null {
     const item = items.find((candidate) => candidate.id === itemId);
     if (!item) return null;
-    return { title: item.title ?? null, url: item.url, deleted: item.deleted };
+    return { title: item.title ?? null, url: item.url, deleted: item.deleted, excerpt: item.excerpt ?? null };
   }
 
   async function refreshProfiles() {
@@ -1669,6 +1669,7 @@ export function App() {
           onSaveTitle={(documentId, title) => void saveZenTitle(documentId, title)}
           open={openZen}
           resolveMention={resolveZenMention}
+          onOpenAssistantSettings={openAssistantSettings}
           linkTargets={[
             ...zenDocuments.filter((doc) => !doc.deleted).map((doc) => ({
               kind: "zen" as const, id: doc.documentId,

@@ -2,9 +2,20 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AppIcon } from "./AppIcon.tsx";
-import { ZenLinkInput } from "./ZenLinkInput.tsx";
+import { ZenLinkInput, type ZenLinkInputHandle } from "./ZenLinkInput.tsx";
+import { AssistantProgress } from "./AssistantParts.tsx";
+import { ZenAssistMenu, ZenProposal, type ProposalPlacement } from "./ZenAssistant.tsx";
+import {
+  DOCUMENT_ACTIONS,
+  documentRequest,
+  parseTitle,
+  titleRequest,
+  type DocumentAction,
+  type LinkedSave,
+} from "../assistant/prompts.ts";
+import { useAssistantTask } from "../assistant/useAssistantTask.ts";
 import { ZenBacklinks } from "./ZenBacklinks.tsx";
-import { parseZenLink, type ZenLinkTarget } from "../data/zenLinks.ts";
+import { extractZenLinks, parseZenLink, type ZenLinkTarget } from "../data/zenLinks.ts";
 
 import type { PersistedZenDocument } from "../data/db";
 import type { ZenDocumentView } from "../data/library.ts";
@@ -16,6 +27,8 @@ export interface ZenMentionTarget {
   title: string | null;
   url: string;
   deleted: boolean;
+  /** Offered to the assistant only for saves the document links to. */
+  excerpt?: string | null;
 }
 
 interface ZenWorkspaceProps {
@@ -35,6 +48,7 @@ interface ZenWorkspaceProps {
   onDelete(documentId: string): void;
   onSaveTitle(documentId: string, title: string | null): void;
   onSaveBody(documentId: string, body: string): void;
+  onOpenAssistantSettings(): void;
 }
 
 export function ZenWorkspace(props: ZenWorkspaceProps) {
@@ -228,6 +242,7 @@ function ZenEditor({
   onDelete,
   onSaveTitle,
   onSaveBody,
+  onOpenAssistantSettings,
 }: ZenWorkspaceProps & { open: { documentId: string; view: ZenDocumentView } }) {
   // Reading is the default everywhere, phones included: a document is opened to
   // be read far more often than to be changed. An empty one is the exception —
@@ -241,6 +256,107 @@ function ZenEditor({
   const byteLength = new TextEncoder().encode(draft).length;
   const overBound = byteLength > MAX_BODY_BYTES;
   const section = useRef<HTMLElement>(null);
+  const bodyInput = useRef<ZenLinkInputHandle>(null);
+  const assist = useAssistantTask();
+  const titleAssist = useAssistantTask();
+  const assistantStatus = assist.snapshot.status;
+  const assistantAvailable = assistantStatus === "ready" || assistantStatus === "locked";
+  // What a running action was asked about, so its result lands where it was meant.
+  const pending = useRef<{
+    action: DocumentAction;
+    body: string;
+    selection: { start: number; end: number } | null;
+  } | null>(null);
+  const [applyError, setApplyError] = useState<string | null>(null);
+  const suggestedTitle =
+    titleAssist.state.kind === "done" ? parseTitle(titleAssist.state.text) : null;
+
+  function linkedSaves(body: string): LinkedSave[] {
+    const saves: LinkedSave[] = [];
+    for (const link of extractZenLinks(body)) {
+      if (!link.startsWith("item:")) continue;
+      const id = link.slice("item:".length);
+      const save = resolveMention(id);
+      if (save && !save.deleted) {
+        saves.push({ id, title: save.title, url: save.url, excerpt: save.excerpt ?? null });
+      }
+    }
+    return saves;
+  }
+
+  function currentSelection() {
+    return mode === "edit" ? bodyInput.current?.selection() ?? null : null;
+  }
+
+  function runAction(action: DocumentAction) {
+    const selection = currentSelection();
+    const label = DOCUMENT_ACTIONS.find(({ id }) => id === action)?.label ?? "Assist";
+    pending.current = { action, body: draft, selection };
+    setApplyError(null);
+    void assist.run({
+      id: action,
+      label,
+      request: documentRequest(action, {
+        title: title.trim() || null,
+        body: draft,
+        selection,
+        linked: action === "linked" ? linkedSaves(draft) : [],
+      }),
+      stream: true,
+    });
+  }
+
+  /** Splices accepted text into the body as one ordinary edit. */
+  function applyProposal(placement: ProposalPlacement) {
+    if (assist.state.kind !== "done" || !pending.current) return;
+    const text = assist.state.text;
+    const { body, selection } = pending.current;
+    const unchanged = draft === body;
+    let next: string;
+    if (placement === "replace") {
+      if (!selection || !unchanged) {
+        setApplyError("The document changed since you asked. Select the text again, or copy the proposal.");
+        return;
+      }
+      next = draft.slice(0, selection.start) + text + draft.slice(selection.end);
+    } else if (placement === "cursor" && selection && unchanged) {
+      const before = draft.slice(0, selection.end);
+      const after = draft.slice(selection.end);
+      const lead = !before || /\s$/u.test(before) ? "" : text.includes("\n") ? "\n\n" : " ";
+      const trail = !after || /^\s/u.test(after) ? "" : text.includes("\n") ? "\n\n" : " ";
+      next = before + lead + text + trail + after;
+    } else {
+      const trimmed = draft.replace(/\s+$/u, "");
+      next = trimmed ? `${trimmed}\n\n${text}\n` : `${text}\n`;
+    }
+    if (new TextEncoder().encode(next).length > MAX_BODY_BYTES) {
+      setApplyError(`That would take the document over the ${formatBytes(MAX_BODY_BYTES)} bound.`);
+      return;
+    }
+    setDraft(next);
+    onSaveBody(open.documentId, next);
+    pending.current = null;
+    setApplyError(null);
+    assist.reset();
+  }
+
+  const placements: ProposalPlacement[] = (() => {
+    const request = pending.current;
+    if (!request) return ["end"];
+    const fresh = draft === request.body;
+    const hasRange = request.selection && request.selection.end > request.selection.start;
+    if ((request.action === "improve" || request.action === "shorten") && hasRange && fresh) {
+      return ["replace", "end"];
+    }
+    if (request.selection && fresh) return ["cursor", "end"];
+    return ["end"];
+  })();
+
+  function acceptTitle(next: string) {
+    setTitle(next);
+    if (next !== (open.view.title.value ?? null)) onSaveTitle(open.documentId, next);
+    titleAssist.reset();
+  }
 
   useEffect(() => {
     function handleEscape(event: KeyboardEvent) {
@@ -288,6 +404,33 @@ function ZenEditor({
             {open.view.title.value?.trim() || "Untitled document"}
           </span>
         </nav>
+        {assistantAvailable ? (
+          <ZenAssistMenu
+            disabled={busy || assist.state.kind === "working"}
+            locked={assistantStatus === "locked"}
+            onOpen={() => {
+              const selection = currentSelection();
+              return {
+                hasSelection: Boolean(selection && selection.end > selection.start),
+                linkedSaves: linkedSaves(draft).length,
+              };
+            }}
+            onOpenSettings={onOpenAssistantSettings}
+            onRun={runAction}
+          />
+        ) : null}
+        {mode === "edit" ? (
+          <button
+            aria-label="Insert link"
+            className="zen-tool-button"
+            onClick={() => bodyInput.current?.openPicker()}
+            onPointerDown={(event) => event.preventDefault()}
+            title="Insert link — or type [["
+            type="button"
+          >
+            <AppIcon name="link" />
+          </button>
+        ) : null}
         <div className="zen-mode" role="group" aria-label="Document mode">
           <button
             aria-pressed={mode === "edit"}
@@ -330,6 +473,7 @@ function ZenEditor({
           {/* The title sits outside the mode switch. It is one line, it is never
               Markdown, and hiding it behind edit mode was the only reason it
               could not be changed while reading. */}
+          <div className="zen-title-row">
           <input
             aria-label="Document title"
             className="zen-title-input"
@@ -347,6 +491,61 @@ function ZenEditor({
             type="text"
             value={title}
           />
+          {assistantStatus === "ready" ? (
+            <button
+              aria-label={title.trim() ? "Suggest another title" : "Suggest a title"}
+              className="zen-tool-button zen-title-assist"
+              disabled={busy || !draft.trim() || titleAssist.state.kind === "working"}
+              onClick={() =>
+                void titleAssist.run({
+                  id: "title",
+                  label: title.trim() ? "Suggest another title" : "Suggest a title",
+                  request: titleRequest(draft, title.trim() || null),
+                  stream: false,
+                })}
+              title={draft.trim() ? (title.trim() ? "Suggest another title" : "Suggest a title") : "Write something first"}
+              type="button"
+            >
+              <AppIcon name="assistant" />
+            </button>
+          ) : null}
+          </div>
+          {titleAssist.state.kind !== "idle" ? (
+            <div className="assistant-block zen-title-suggestion">
+              <AssistantProgress onOpenSettings={onOpenAssistantSettings} task={titleAssist} />
+              {titleAssist.state.kind === "done" ? (
+                suggestedTitle ? (
+                  <div className="assistant-row assistant-title-row">
+                    <p><small>Suggested title</small> <strong>{suggestedTitle}</strong></p>
+                    <div className="assistant-actions">
+                      <button className="assistant-action assistant-action-primary" onClick={() => acceptTitle(suggestedTitle)} type="button">Use</button>
+                      <button
+                        className="assistant-action"
+                        onClick={() =>
+                          void titleAssist.run({
+                            id: "title",
+                            label: "Suggest another title",
+                            request: titleRequest(draft, suggestedTitle),
+                            stream: false,
+                          })}
+                        type="button"
+                      >
+                        Another
+                      </button>
+                      <button className="assistant-action assistant-action-quiet" onClick={titleAssist.reset} type="button">Dismiss</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="assistant-row assistant-title-row">
+                    <p className="assistant-error" role="alert">The model did not return a usable title.</p>
+                    <div className="assistant-actions">
+                      <button className="assistant-action assistant-action-quiet" onClick={titleAssist.reset} type="button">Dismiss</button>
+                    </div>
+                  </div>
+                )
+              ) : null}
+            </div>
+          ) : null}
           {open.view.tags.length > 0 && (
             <p className="zen-tags">
               {open.view.tags.map((tag) => (
@@ -366,6 +565,7 @@ function ZenEditor({
           ) : (
             <>
               <ZenLinkInput
+                handle={bodyInput}
                 targets={linkTargets.filter(
                   (target) => target.kind !== "zen" || target.id !== open.documentId,
                 )}
@@ -393,6 +593,14 @@ function ZenEditor({
         </div>
       </div>
 
+      <ZenProposal
+        error={applyError}
+        onApply={applyProposal}
+        onOpenSettings={onOpenAssistantSettings}
+        placements={placements}
+        task={assist}
+      />
+
       {/* The budget lives here rather than in the toolbar: it is a readout
           about the body, and the toolbar is the one bar that has to stay
           legible while scrolling. */}
@@ -401,6 +609,11 @@ function ZenEditor({
           <b>esc</b> close
         </span>
         <span className="zen-footer-desktop">saves as you go</span>
+        {mode === "edit" ? (
+          <span className="zen-footer-desktop">
+            <b>[[</b> link
+          </span>
+        ) : null}
         <span className="zen-footer-mobile">saved</span>
         <span className="zen-budget">
           {formatBytes(byteLength)} of {formatBytes(MAX_BODY_BYTES)}

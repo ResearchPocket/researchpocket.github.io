@@ -150,6 +150,11 @@ lists every field and character count before sending.
 | --- | --- |
 | Suggest tags | title, URL, excerpt, bounded captured Markdown, and up to 200 of the owner's tag names, busiest first |
 | Summarize | the same fields, without the tag names |
+| Zen title | the document, up to 16,000 characters, plus its current title when asking for another |
+| Zen continue writing | the document up to the cursor (its last 16,000 characters) |
+| Zen improve or shorten | only the selected text |
+| Zen summarize or extract todos | the document, up to 16,000 characters |
+| Zen draft from linked saves | the last 4,000 characters of the document, plus the title, URL, and excerpt (up to 1,500 characters each) of up to 20 saves the document links to |
 
 The private note is excluded unless the owner ticks **Include my note** for
 that request. Context is capped at 24,000 characters, with truncation marked
@@ -157,6 +162,13 @@ in the preview.
 
 The first request to a provider shows a one-time confirmation naming the
 destination and stating that its data policy applies.
+
+Zen documents are the owner's own private writing. Each Zen action names what
+it sends in its menu entry before it is chosen. Linked saves contribute only
+their title, URL, and excerpt, never their notes. Results are placed only by an
+explicit **Replace selection**, **Insert at cursor**, or **Add to end**, as one
+ordinary body edit. A result is offered only at the end of the document if the
+body changed while it was being written.
 
 ### Model output is untrusted
 

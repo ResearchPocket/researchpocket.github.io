@@ -6,6 +6,9 @@ import { complete, listModels, stream } from "./client.ts";
 import { findPreset } from "./presets.ts";
 import {
   CONTEXT_CHARACTER_LIMIT,
+  documentRequest,
+  parseTitle,
+  titleRequest,
   SUGGESTED_TAG_LIMIT,
   parseTagSuggestions,
   summaryRequest,
@@ -190,4 +193,29 @@ test("both wire formats complete privately, and failures are classified for the 
     await assert.rejects(complete(local, request), (error) =>
       error.category === "network" && error.message.includes("OLLAMA_ORIGINS"));
   });
+});
+
+test("document actions send only what they name, and titles come back clean", () => {
+  const body = "Intro text. PRIVATE_DRAFT_SENTINEL\n\nSee [Paper](research:item/0190a0a0-0000-7000-8000-000000000001).";
+  const selection = { start: 0, end: 11 };
+  const improve = documentRequest("improve", { title: "T", body, selection, linked: [] });
+  assert.ok(improve.prompt.includes("Intro text."));
+  assert.ok(!improve.prompt.includes("PRIVATE_DRAFT_SENTINEL"));
+
+  const cont = documentRequest("continue", { title: null, body, selection: { start: 11, end: 11 }, linked: [] });
+  assert.ok(!cont.prompt.includes("PRIVATE_DRAFT_SENTINEL"));
+
+  const linked = documentRequest("linked", {
+    title: "T",
+    body,
+    selection: null,
+    linked: [{ id: "0190a0a0-0000-7000-8000-000000000001", title: "Paper", url: "https://example.com/p", excerpt: "Findings." }],
+  });
+  assert.match(linked.prompt, /research:item\/0190a0a0-0000-7000-8000-000000000001/u);
+  assert.match(linked.prompt, /Findings\./u);
+
+  assert.match(titleRequest(body, "Old").system, /different title/u);
+  assert.equal(parseTitle('Title: "Rust and WASM in practice".\nextra'), "Rust and WASM in practice");
+  assert.equal(parseTitle("## Notes on CRDTs"), "Notes on CRDTs");
+  assert.equal(parseTitle("x".repeat(200)), null);
 });

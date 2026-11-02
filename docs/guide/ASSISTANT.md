@@ -46,7 +46,8 @@ what it could not reach.
 ## Suggest tags
 
 Open a save. Once a provider is set up, the Reader shows an **Assistant** panel
-under the title and tags. Choose **Suggest tags**. Suggestions that match tags already in your library are
+under the title and tags, with its actions on the first line and what they send
+on the second. Choose **Suggest tags**. Suggestions that match tags already in your library are
 selected for you and keep your spelling. New tags are marked **new** and start
 unselected. Toggle the ones you want and choose **Add tags**. The change is an
 ordinary edit, so **Undo** reverses it.
@@ -58,10 +59,36 @@ key points. **Stop** ends it early. **Add to note** appends the draft to your
 private note, where you can edit it like anything else you wrote. **Copy**
 copies it, and **Discard** throws it away.
 
+## Use the assistant in Zen documents
+
+Open a document. With a provider set up, two controls appear.
+
+**Title.** The ✦ button at the end of the title suggests a title from the
+document's text, or a different one if it already has a title. Choose **Use**
+to keep it, **Another** for a new suggestion, or **Dismiss**.
+
+**Assist.** The **Assist** menu in the toolbar works on the document:
+
+| Action | Sends | Result |
+| --- | --- | --- |
+| Continue writing | the document up to the cursor | new text to insert at the cursor |
+| Improve selection | the selected text | a clearer rewrite to replace the selection |
+| Shorten selection | the selected text | a shorter version to replace the selection |
+| Summarize document | the whole document | a few bullet points |
+| Extract todos | the whole document | a `- [ ]` task list of the actions it implies |
+| Draft from linked saves | the title, URL, and excerpt of each save the document links to, plus the end of the document | a short section comparing those sources, citing each with its link |
+
+Selection actions need text selected in **edit** mode; the menu says when an
+action doesn't apply. Each menu entry names what it sends before you choose it.
+The result streams into a panel above the footer. Choose **Replace selection**,
+**Insert at cursor**, or **Add to end**, or **Copy** or **Discard** it. If you
+edit the document while it is working, the result can only be added at the end.
+Notes of linked saves are never sent.
+
 ## What gets sent
 
-Expand **What gets sent** in the assistant panel to see each field and its size
-before you send. A request includes:
+The line under the Reader panel's actions lists each field and its size before
+you send. A request includes:
 
 - the save's title, URL, and excerpt;
 - its captured page, up to 24,000 characters in total;

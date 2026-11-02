@@ -100,6 +100,11 @@ included only when you tick **Include my note** for that request. The first
 request to a provider asks you to confirm the destination, and that provider's
 own data policy applies to what it receives.
 
+In a Zen document, the title suggestion and the **Assist** actions send the
+document text, only the selection, or the text up to the cursor, as each action
+says before you choose it. **Draft from linked saves** also sends the title,
+URL, and excerpt of each save the document links to, never their notes.
+
 Requests go directly from your browser to the provider you chose, or to a model
 server on your own computer. ResearchPocket has no server in between. Results
 are proposals; only the tags or summary text you accept become part of your

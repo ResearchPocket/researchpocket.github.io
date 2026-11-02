@@ -274,8 +274,8 @@ The complete credential and publication boundary remains in
 
 In a Zen document's edit mode, type `[[` and a title or URL to find an existing
 document or saved item. Use Up/Down and Enter to insert a link; Escape dismisses
-suggestions without closing the document. On touch screens, use **Insert link**,
-search, and tap a result. The selection becomes ordinary Markdown containing the
+suggestions without closing the document. On touch screens, use the toolbar's
+link icon (**Insert link**), search, and tap a result. The selection becomes ordinary Markdown containing the
 target UUID. Renaming a target changes its displayed title without breaking links.
 
 Document links open in Zen; saved-item links open the local Reader. Each target

@@ -235,14 +235,16 @@ ruled disclosure naming the destination, and one **Test and save** primary
 action. A configured assistant collapses to a fact list with change, forget,
 and turn-off actions.
 
-In the Reader, a configured assistant is always an inline panel between the
-title block and the note, separated by rules rather than a card, so its actions
-are visible without a toolbar toggle. It offers explicit actions, a
-collapsed **What gets sent** preview, and a single result region. Suggestions
-are toggle chips (`aria-pressed`) with a text **new** marker; drafts render in
-an inert ruled block labelled **not saved**. Each result has one primary accept
-action and a text dismiss action. The first request to a provider replaces the
-result region with a confirmation naming the destination. With no provider
+Every assistant surface uses one block: the Reader note's tint and accent edge,
+with no internal rules. A header line carries the label, the model, and
+compact actions, followed by one line saying what is sent. Results sit in the
+same block. In the Reader, a configured assistant is always this inline block
+between the title and the note. In Zen, document tools live in the toolbar as
+compact icon buttons (**Assist** menu, **Insert link**); a ✦ button ends the
+title row, and proposals pin above the footer. Suggestions are toggle chips
+(`aria-pressed`) with a text **new** marker; drafts render inert. Each result
+has one primary accept action and a quiet dismiss action. The first request to
+a provider shows a confirmation in the result area naming the destination. With no provider
 configured, the Reader shows no assistant control.
 
 ### Dialogs

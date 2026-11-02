@@ -1,20 +1,39 @@
-import { useEffect, useId, useRef, useState, type CSSProperties } from "react";
+import {
+  useEffect,
+  useId,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type CSSProperties,
+  type Ref,
+} from "react";
 import {
   insertZenLink,
   linkCompletion,
   type ZenLinkTarget,
 } from "../data/zenLinks.ts";
 
+/** What the editor's toolbar needs from the body field. */
+export interface ZenLinkInputHandle {
+  /** Opens the link search at the caret, as the toolbar's link button. */
+  openPicker(): void;
+  /** The textarea keeps its selection after blur, so toolbar actions can use it. */
+  selection(): { start: number; end: number } | null;
+  focus(): void;
+}
+
 export function ZenLinkInput({
   value,
   onChange,
   onBlur,
   targets,
+  handle,
 }: {
   value: string;
   onChange(value: string): void;
   onBlur(): void;
   targets: ZenLinkTarget[];
+  handle?: Ref<ZenLinkInputHandle>;
 }) {
   const input = useRef<HTMLTextAreaElement>(null);
   const search = useRef<HTMLInputElement>(null);
@@ -180,33 +199,35 @@ export function ZenLinkInput({
     }
   }
 
+  useImperativeHandle(handle, () => ({
+    openPicker() {
+      const element = input.current;
+      if (!element) return;
+      insertion.current = {
+        body: element.value,
+        start: element.selectionStart,
+        end: element.selectionEnd,
+      };
+      setRange({
+        start: element.selectionStart,
+        end: element.selectionEnd,
+        query: "",
+      });
+      setExplicit(true);
+      setSelected(0);
+      requestAnimationFrame(() => search.current?.focus());
+    },
+    selection() {
+      const element = input.current;
+      return element ? { start: element.selectionStart, end: element.selectionEnd } : null;
+    },
+    focus() {
+      input.current?.focus();
+    },
+  }));
+
   return (
     <>
-      <div className="zen-link-tools">
-        <button
-          type="button"
-          onPointerDown={(event) => event.preventDefault()}
-          onClick={() => {
-            const element = input.current!;
-            insertion.current = {
-              body: value,
-              start: element.selectionStart,
-              end: element.selectionEnd,
-            };
-            setRange({
-              start: element.selectionStart,
-              end: element.selectionEnd,
-              query: "",
-            });
-            setExplicit(true);
-            setSelected(0);
-            requestAnimationFrame(() => search.current?.focus());
-          }}
-        >
-          Insert link
-        </button>
-        <span>or type [[ to link a document or save</span>
-      </div>
       <textarea
         aria-label="Document body"
         aria-autocomplete="list"
