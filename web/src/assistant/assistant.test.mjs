@@ -104,6 +104,34 @@ test("both wire formats complete privately, and failures are classified for the 
   assert.equal(seen[0].init.credentials, "omit");
   assert.equal(seen[0].init.referrerPolicy, "no-referrer");
 
+  // OpenAI rejects max_tokens on newer models, and Responses stores by default.
+  const openai = { preset: findPreset("openai"), baseURL: findPreset("openai").baseURL, apiKey: "test-key", model: "gpt-new" };
+  let openaiRequest;
+  await withFetch(async (url, init) => {
+    openaiRequest = { url: String(url), body: JSON.parse(init.body) };
+    return Response.json({
+      id: "resp_1",
+      object: "response",
+      created_at: 0,
+      status: "completed",
+      model: "gpt-new",
+      output: [{
+        type: "message",
+        id: "msg_1",
+        role: "assistant",
+        status: "completed",
+        content: [{ type: "output_text", text: "OK", annotations: [] }],
+      }],
+      usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+    });
+  }, async () => {
+    assert.equal(await complete(openai, request), "OK");
+  });
+  assert.equal(openaiRequest.url, "https://api.openai.com/v1/responses");
+  assert.equal(openaiRequest.body.store, false);
+  assert.equal(openaiRequest.body.max_output_tokens, 1_200);
+  assert.equal("max_tokens" in openaiRequest.body, false);
+
   const anthropic = { preset: findPreset("anthropic"), baseURL: findPreset("anthropic").baseURL, apiKey: "test-key", model: "m" };
   const events = [
     ["message_start", { type: "message_start", message: { id: "m", type: "message", role: "assistant", model: "m", content: [], usage: { input_tokens: 1, output_tokens: 0 } } }],

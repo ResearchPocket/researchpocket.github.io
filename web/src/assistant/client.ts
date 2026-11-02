@@ -55,7 +55,10 @@ function languageModel({ preset, baseURL, apiKey, model }: Connection): Language
   const key = apiKey ?? "";
   switch (preset.api) {
     case "openai":
-      return createOpenAI({ apiKey: key, baseURL, fetch: privateFetch }).chat(model);
+      // The Responses API takes max_output_tokens for every model family, where
+      // Chat Completions needs max_tokens or max_completion_tokens depending on
+      // whether the SDK recognises the model as a reasoning model.
+      return createOpenAI({ apiKey: key, baseURL, fetch: privateFetch }).responses(model);
     case "anthropic":
       return createAnthropic({
         apiKey: key,
@@ -75,6 +78,13 @@ function languageModel({ preset, baseURL, apiKey, model }: Connection): Language
       }).chatModel(model);
   }
 }
+
+/**
+ * OpenAI's Responses API keeps responses server-side unless told not to; a
+ * saved page and its summary have no reason to outlive the request there.
+ * Options are keyed by provider, so other adapters ignore this.
+ */
+const providerOptions = { openai: { store: false } };
 
 function signalFor(signal: AbortSignal | undefined) {
   const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
@@ -164,8 +174,11 @@ export async function testConnection(connection: Connection, signal?: AbortSigna
     const result = await generateText({
       model: languageModel(connection),
       prompt: "Reply with the single word OK.",
-      maxOutputTokens: 64,
+      // Reasoning models may spend a small budget before answering; any
+      // accepted completion, even an empty one, proves the path works.
+      maxOutputTokens: 256,
       maxRetries: 0,
+      providerOptions,
       abortSignal: signalFor(signal),
     });
     return { milliseconds: Math.round(performance.now() - started), reply: result.text.trim().slice(0, 40) };
@@ -182,6 +195,7 @@ export async function complete(connection: Connection, request: AssistantRequest
       prompt: request.prompt,
       maxOutputTokens: 1_200,
       maxRetries: 1,
+      providerOptions,
       abortSignal: signalFor(signal),
     });
     return result.text;
@@ -204,6 +218,7 @@ export async function stream(
       prompt: request.prompt,
       maxOutputTokens: 1_200,
       maxRetries: 1,
+      providerOptions,
       abortSignal: signalFor(signal),
     });
     for await (const part of result.stream) {

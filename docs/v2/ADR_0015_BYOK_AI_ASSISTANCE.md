@@ -47,6 +47,11 @@ ResearchPocket uses the Apache-2.0 [AI SDK](https://ai-sdk.dev) packages:
 - `@ai-sdk/openai`, `@ai-sdk/anthropic`, and `@ai-sdk/google`;
 - `@ai-sdk/openai-compatible` for every other provider and for local servers.
 
+OpenAI is called through its Responses API with `store: false`. Responses
+accepts `max_output_tokens` for every model family, whereas Chat Completions
+rejects `max_tokens` on newer models. Responses also keeps output server-side
+unless `store: false` is sent.
+
 The SDK is bundled into a separate same-origin chunk and loaded only when the
 owner first configures or uses the assistant, so TM-06's ban on remote runtime
 code still holds. Its built-in requests use a wrapper that omits credentials,
