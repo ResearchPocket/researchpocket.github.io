@@ -235,8 +235,9 @@ ruled disclosure naming the destination, and one **Test and save** primary
 action. A configured assistant collapses to a fact list with change, forget,
 and turn-off actions.
 
-In the Reader, the assistant is an inline panel between the title block and the
-note, separated by rules rather than a card. It offers explicit actions, a
+In the Reader, a configured assistant is always an inline panel between the
+title block and the note, separated by rules rather than a card, so its actions
+are visible without a toolbar toggle. It offers explicit actions, a
 collapsed **What gets sent** preview, and a single result region. Suggestions
 are toggle chips (`aria-pressed`) with a text **new** marker; drafts render in
 an inert ruled block labelled **not saved**. Each result has one primary accept

@@ -3292,7 +3292,6 @@ function ReaderView({
   );
   const [capturedContextLoading, setCapturedContextLoading] = useState(false);
   const [captureOpen, setCaptureOpen] = useState(false);
-  const [assistantOpen, setAssistantOpen] = useState(false);
   const assistant = useSyncExternalStore(assistantSession.subscribe, assistantSession.getSnapshot);
   const assistantAvailable = assistant.status === "ready" || assistant.status === "locked";
   const imageCloseRef = useRef<HTMLButtonElement | null>(null);
@@ -3390,19 +3389,6 @@ function ReaderView({
             <span>All saves</span>
           </button>
           <div className="reader-toolbar-actions">
-            {assistantAvailable ? (
-              <button
-                aria-controls="reader-assistant"
-                aria-expanded={assistantOpen}
-                aria-label="Assistant"
-                className="icon-button"
-                onClick={() => setAssistantOpen((open) => !open)}
-                title="Assistant"
-                type="button"
-              >
-                <AppIcon name="assistant" />
-              </button>
-            ) : null}
             <button
               aria-label={item.favorite ? "Remove favorite" : "Favorite"}
               aria-pressed={item.favorite}
@@ -3449,7 +3435,9 @@ function ReaderView({
           </div>
           <h1 id="reader-title">{label}</h1>
           {item.tags.length > 0 ? <p className="reader-tags">{item.tags.map((tag) => <span key={tag}>#{tag}</span>)}</p> : null}
-          {assistantOpen && assistantAvailable ? (
+          {/* Shown on every save once a provider is configured; nothing is sent
+              until one of its actions is chosen. */}
+          {assistantAvailable ? (
             <div id="reader-assistant">
               <ReaderAssistant
                 busy={busy}
@@ -3460,7 +3448,6 @@ function ReaderView({
                     : Promise.resolve(null)}
                 onAddTags={(tags) => onAddSuggestedTags(item, tags)}
                 onAppendToNote={(text) => onAppendToNote(item, text)}
-                onClose={() => setAssistantOpen(false)}
                 onOpenSettings={onOpenAssistantSettings}
                 vocabulary={tagVocabulary}
               />

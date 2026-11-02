@@ -141,7 +141,7 @@ to build a reading plan from technical documentation, papers, and examples.
 In the browser workspace, **Settings → Assistant** connects a model provider
 with your own key (OpenAI, Anthropic, Gemini, OpenRouter, Groq, Mistral,
 DeepSeek, xAI, or Together AI) or a model server on your computer such as
-Ollama. Open a save and use the Reader's **Assistant** action to suggest tags
+Ollama. Open a save and use the Reader's **Assistant** panel to suggest tags
 or draft a summary. Nothing is sent until you ask, the Reader shows exactly
 what a request includes, and only the tags or summary text you accept become
 part of your library. Keys stay in your browser and never sync. See the

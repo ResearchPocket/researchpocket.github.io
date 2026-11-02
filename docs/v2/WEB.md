@@ -296,8 +296,8 @@ The AI SDK adapters in `src/assistant/client.ts` are a separate chunk that
 downloads only on first use and is runtime-cached for offline reuse; the
 service worker does not precache it.
 
-With a provider configured, the Reader toolbar shows an **Assistant** action.
-Its panel offers **Suggest tags** and **Summarize**, previews the fields each
+With a provider configured, the Reader shows an inline **Assistant** panel under
+the title and tags. It offers **Suggest tags** and **Summarize**, previews the fields each
 request sends, and asks once per provider before the first request. Tag
 suggestions appear as toggles—existing tags preselected, new ones marked—and
 **Add tags** applies the selection as one undoable item edit. A summary streams

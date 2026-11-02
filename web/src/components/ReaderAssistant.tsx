@@ -9,6 +9,7 @@ import {
   type TagSuggestion,
 } from "../assistant/prompts.ts";
 import { assistantSession, loadAssistantClient } from "../assistant/session.ts";
+import { AppIcon } from "./AppIcon.tsx";
 import { MarkdownDocument } from "./MarkdownDocument.tsx";
 
 type Task = "tags" | "summary";
@@ -41,7 +42,6 @@ export function ReaderAssistant({
   loadCaptured,
   onAddTags,
   onAppendToNote,
-  onClose,
   onOpenSettings,
   vocabulary,
 }: {
@@ -50,7 +50,6 @@ export function ReaderAssistant({
   loadCaptured: () => Promise<string | null>;
   onAddTags: (tags: string[]) => Promise<boolean>;
   onAppendToNote: (text: string) => Promise<boolean>;
-  onClose: () => void;
   onOpenSettings: () => void;
   vocabulary: string[];
 }) {
@@ -185,9 +184,8 @@ export function ReaderAssistant({
   return (
     <section aria-labelledby="reader-assistant-heading" className="reader-assistant">
       <header className="reader-assistant-header">
-        <h2 id="reader-assistant-heading">Assistant</h2>
+        <h2 id="reader-assistant-heading"><AppIcon name="assistant" />Assistant</h2>
         <span className="reader-assistant-model">{preset.label} · {snapshot.settings?.model}</span>
-        <button aria-label="Close assistant" className="close-button" onClick={onClose} type="button">×</button>
       </header>
 
       {snapshot.status === "locked" ? (

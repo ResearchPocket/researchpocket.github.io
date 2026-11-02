@@ -45,8 +45,8 @@ what it could not reach.
 
 ## Suggest tags
 
-Open a save and choose the **Assistant** button in the Reader toolbar, then
-**Suggest tags**. Suggestions that match tags already in your library are
+Open a save. Once a provider is set up, the Reader shows an **Assistant** panel
+under the title and tags. Choose **Suggest tags**. Suggestions that match tags already in your library are
 selected for you and keep your spelling. New tags are marked **new** and start
 unselected. Toggle the ones you want and choose **Add tags**. The change is an
 ordinary edit, so **Undo** reverses it.

@@ -85,6 +85,10 @@ function AssistantSummary({ onChange }: { onChange: () => void }) {
         <span aria-hidden="true" className={`status-dot${snapshot.status === "ready" ? "" : " status-dot-warning"}`} />
         {snapshot.status === "ready" ? "Ready" : "Key needed for this tab"}
       </p>
+      <p className="sync-help">
+        Open any save: the Reader shows an Assistant panel with <strong>Suggest tags</strong> and{" "}
+        <strong>Summarize</strong> under the title.
+      </p>
       <dl className="assistant-facts">
         <div><dt>Provider</dt><dd>{preset.label}</dd></div>
         <div><dt>Model</dt><dd><code>{settings.model}</code></dd></div>

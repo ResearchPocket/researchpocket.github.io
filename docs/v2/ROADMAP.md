@@ -248,6 +248,134 @@ V2 must preserve the following boundaries throughout delivery:
   clean-room restore drill succeeds, no open P0/P1 correctness or privacy
   defects remain, and publication privacy gates pass.
 
+## Repository split: source repository and Pages shell
+
+Status: planned infrastructure work, not yet scheduled. It changes the
+repository topology named by `AGENTS.md`, [THREAT_MODEL.md](./THREAT_MODEL.md)
+TM-12, and [WEB.md](./WEB.md), so execution needs an issue and an ADR. It
+changes no protocol, schema, or browser-storage behavior.
+
+### Why
+
+#60 renamed the product repository to `researchpocket.github.io` because
+GitHub serves the organization root site only from a repository with exactly
+that name. The source repository therefore doubles as the Pages repository: its
+issues, releases, crate metadata, and clone directory are named after a website,
+and product CI is tied to the Pages deployment environment.
+
+Only one name is constrained by GitHub. The Pages repository must be called
+`researchpocket.github.io`. The source repository can have any name, and the
+right one is `ResearchPocket/ResearchPocket`: it is the name the project had
+before #60, and GitHub still redirects it to the current repository, so links
+written before #60 resolve directly again after the split.
+
+### Target topology
+
+| Repository | Holds | Never holds |
+| --- | --- | --- |
+| `ResearchPocket/ResearchPocket` (renamed current repo) | All source, issues, PRs, releases, Project #2 items, crates.io metadata, CI, release workflows | A GitHub Pages site, the `github-pages` environment |
+| `ResearchPocket/researchpocket.github.io` (new) | A `source` submodule pinned to one source commit, the deploy workflow, a README pointing at the source | Application source, build output committed to Git, issues, release assets |
+| Private data repositories | Unchanged | Unchanged |
+
+The browser origin stays `https://researchpocket.github.io`. That means
+IndexedDB libraries, remembered tokens (bound to the *data* repository, ADR
+0013), service-worker scopes, `/app/`, and the `/ResearchPocket/` redirect
+documents are all unaffected. No owner has to migrate anything.
+
+### Deployment model
+
+The Pages repository deploys exactly the commit its submodule points at, so the
+live owner JavaScript is always one reviewable SHA on protected source `main`.
+
+1. The source repository keeps `pages.yml` as a build-only job, so PRs still
+   produce the required `Build static owner app` check. It loses the
+   `configure-pages`, upload, and deploy steps. The build stays behind a single
+   entry point owned by the source (`web/` `verify`), so the Pages repository
+   never duplicates build logic, toolchain pins, or `check-dist` policy.
+2. The Pages repository workflow checks out the public submodule without
+   credentials. Before building, it fails closed unless the pinned SHA is an
+   ancestor of source `main` and the source's required checks passed on that
+   SHA. A pointer to a fork, a PR head, or an unmerged branch can never deploy.
+   It then runs the source's build entry point and deploys `source/web/dist`
+   through the `github-pages` environment, restricted to Pages `main`.
+3. Promotion advances the pointer. **Recommended:** a `promote` workflow in the
+   Pages repository resolves the newest green source `main` commit itself,
+   commits the pointer bump, then builds and deploys in the same run. It runs
+   on `workflow_dispatch`, on a daily schedule as a backstop, and on a
+   `repository_dispatch` sent by the source repository's `main` CI. That
+   dispatch uses a GitHub App installed only on the Pages repository. Its
+   payload is never trusted: it only says "check now", so the credential can
+   start a deployment but cannot choose which code ships. Dependabot
+   `gitsubmodule` updates are the zero-credential fallback, at the cost of up
+   to a day of deployment lag.
+
+Open decision for the ADR: deploy every green `main` commit, as today, or
+promote only release tags. Tags give a slower but more conservative owner shell.
+The pinning and verification above work either way.
+
+### Cut-over sequence
+
+Order matters. Reusing a name deletes GitHub's redirect for it, and while the
+source still owns Pages, renaming it would briefly serve the app as a project
+site under `/ResearchPocket/`, the path the redirect documents occupy.
+
+1. **Prepare in place (one PR, safe before and after):** change every in-tree
+   `github.com/ResearchPocket/researchpocket.github.io` link to
+   `ResearchPocket/ResearchPocket`. That covers README, CONTRIBUTING, guides,
+   ADR issue links, release notes, `Cargo.toml` `repository`, the
+   cargo-release user agent, `web/overview`, `web/docs`, and `llms.txt`. The
+   new URL already redirects today, so nothing breaks in between. Also update
+   the organization `.github` profile.
+2. **Stage the Pages repository** under a temporary name. Add the submodule,
+   workflows, README, and an issue-template config whose only entry links to
+   source issues. Verify a build with deployment disabled.
+3. **Cut over in one short window:** disable Pages on the source repository,
+   rename it to `ResearchPocket`, rename the staged repository to
+   `researchpocket.github.io`, enable Pages with the workflow source, restrict
+   the `github-pages` environment, and run `promote`. Expected downtime is
+   minutes. Owners with an installed shell keep working from the service-worker
+   cache, and sync is unaffected because it talks only to the data repository
+   API.
+4. **Follow up:** run `git remote set-url origin
+   git@github.com:ResearchPocket/ResearchPocket.git` in every clone. Re-point
+   required checks, rulesets, secrets (`CRATES_TOKEN`), and Dependabot to the
+   right repository. Update `AGENTS.md`, TM-12, and `WEB.md`. The next crate
+   release refreshes crates.io metadata, since already-published versions keep
+   the old URL.
+
+### What is preserved and what is not
+
+- **Preserved by the rename:** history, issue and PR numbers, Project #2 links,
+  releases and their assets, stars, watchers, forks, tag rulesets, and secrets.
+  Avoid the alternative of creating a new source repository and pushing
+  history: it strands issues, PRs, releases, and stars.
+- **Not preserved:** once the Pages repository takes the
+  `researchpocket.github.io` name, external links and remotes still using that
+  name land on the Pages repository rather than redirecting. Its description,
+  README, and issue chooser point to the source. Already-published crate
+  versions and old release-asset URLs are affected the same way. In-tree links
+  are fixed in step 1.
+
+### Invariants after the split
+
+- Exactly one repository publishes to the organization origin. The source
+  repository must never re-enable Pages, because a project site there would
+  collide with the `/ResearchPocket/` compatibility path and share the owner
+  origin (TM-12).
+- The owner PAT still selects only a private data repository and has no write
+  access to either the source or the Pages repository.
+- The Pages repository contains no generated JavaScript in Git history. What is
+  live is fully determined by the submodule SHA plus the source's locked build.
+
+### Exit criteria
+
+- `https://researchpocket.github.io/` and `/app/` are served from the new Pages
+  repository, built from a submodule SHA verified to be on source `main`.
+- An existing browser library opens with its queued edits intact after the
+  cut-over, and a pinned non-`main` SHA is shown to fail the deploy workflow.
+- `github.com/ResearchPocket/ResearchPocket` hosts the issues, releases, and
+  Project #2 items, and no in-tree link points at the old source name.
+
 ## Beyond V2: candidate directions
 
 Items here are recorded, not committed. None is scheduled, and none may be

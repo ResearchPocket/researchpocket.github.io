@@ -6556,10 +6556,18 @@ kbd {
 }
 
 .reader-assistant-header h2 {
+  align-items: center;
+  display: inline-flex;
+  gap: var(--space-2);
   font-size: var(--font-size-sm);
   letter-spacing: 0.08em;
   margin: 0;
   text-transform: uppercase;
+}
+
+.reader-assistant-header .app-icon {
+  height: 1rem;
+  width: 1rem;
 }
 
 .reader-assistant-model {
