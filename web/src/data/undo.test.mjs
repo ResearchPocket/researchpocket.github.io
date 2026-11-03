@@ -61,3 +61,30 @@ test("undo restores edited fields and refuses a stale item projection", () => {
   );
   assert.equal(matchesUndoExpectation(undefined, undo.expectedItem), false);
 });
+
+test("undo of a page edit points back at the version it replaced", () => {
+  const page = (sha256, byte_length) => ({
+    sha256,
+    byte_length,
+    media_type: "text/markdown; charset=utf-8",
+    provenance: {
+      provider: "firecrawl",
+      source_url: original.url,
+      captured_at: "2026-11-03T00:00:00.000Z",
+    },
+  });
+  const captured = { ...original, capturedDocument: page("a".repeat(64), 900) };
+  const trimmed = { ...original, capturedDocument: page("b".repeat(64), 300) };
+  const undo = createUndoableChange("edit", captured, trimmed);
+  assert.deepEqual(undo.mutation, {
+    type: "edit",
+    item_id: original.id,
+    captured_document: captured.capturedDocument,
+  });
+  assert.equal(matchesUndoExpectation(captured, undo.expectedItem), false);
+  // A first capture has no earlier version to return to.
+  assert.equal(
+    "captured_document" in createUndoableChange("edit", original, captured).mutation,
+    false,
+  );
+});

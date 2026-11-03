@@ -51,8 +51,9 @@ and does not search every document body.
 
 ## Read a save
 
-The Reader shows your excerpt first and keeps a captured page in a separate
-**Captured page** section. Your private note remains item context. Open the
+The Reader shows one body: the captured page when a save has one, otherwise
+your excerpt. The excerpt stays the short summary in your library list. Your
+private note remains item context. Open the
 original URL when you need the current source, and use **Edit save** for your
 own context. [Capture and reading](READING.md) explains what is stored, fetched,
 and available offline.

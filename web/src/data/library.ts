@@ -555,23 +555,52 @@ class LibraryRepository {
     });
   }
 
+  /** Attaches a page the owner just captured with Firecrawl. */
+  async captureItemPage(
+    itemId: string,
+    markdown: string,
+    sourceUrl: string,
+  ): Promise<UndoableChange | null> {
+    return this.attachCapturedPage(itemId, markdown, {
+      provider: "firecrawl",
+      source_url: sourceUrl,
+      captured_at: new Date().toISOString(),
+    });
+  }
+
   /**
-   * Attaches a page the owner just captured. The bytes are stored first and
-   * marked for upload, so the update that references them can never reach the
-   * repository ahead of its content.
+   * Saves the owner's edit of a captured page as a new immutable version. It
+   * keeps the capture's provenance, so clients that know only Firecrawl
+   * captures still accept it; the previous version stays recoverable.
    */
-  async captureItemPage(itemId: string, markdown: string, sourceUrl: string): Promise<void> {
+  async editCapturedPage(
+    itemId: string,
+    current: CapturedDocumentReference,
+    markdown: string,
+  ): Promise<UndoableChange | null> {
+    return this.attachCapturedPage(itemId, markdown, current.provenance);
+  }
+
+  /**
+   * The bytes are stored first and marked for upload, so the update that
+   * references them can never reach the repository ahead of its content.
+   */
+  private async attachCapturedPage(
+    itemId: string,
+    markdown: string,
+    provenance: CapturedDocumentReference["provenance"],
+  ): Promise<UndoableChange | null> {
     const artifact = JSON.parse(
       await domainCore.call(
         "createCapturedDocument",
         markdown,
-        "firecrawl",
-        sourceUrl,
-        new Date().toISOString(),
+        provenance.provider,
+        provenance.source_url,
+        provenance.captured_at,
       ),
     ) as { path: string; markdown: string; reference: CapturedDocumentReference };
     await this.storeCapturedDocument(artifact.reference, artifact.path, artifact.markdown, true);
-    await this.commitMutation({
+    return this.commitMutation({
       type: "edit",
       item_id: itemId,
       captured_document: artifact.reference,
@@ -2485,8 +2514,20 @@ class LibraryWorkspace {
     );
   }
 
-  async captureItemPage(itemId: string, markdown: string, sourceUrl: string): Promise<void> {
+  async captureItemPage(
+    itemId: string,
+    markdown: string,
+    sourceUrl: string,
+  ): Promise<UndoableChange | null> {
     return (await this.instance()).captureItemPage(itemId, markdown, sourceUrl);
+  }
+
+  async editCapturedPage(
+    itemId: string,
+    current: CapturedDocumentReference,
+    markdown: string,
+  ): Promise<UndoableChange | null> {
+    return (await this.instance()).editCapturedPage(itemId, current, markdown);
   }
 
   async pendingCapturedDocuments(): Promise<PersistedCapturedDocument[]> {

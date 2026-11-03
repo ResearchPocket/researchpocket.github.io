@@ -37,9 +37,12 @@ Three facts make browser capture possible without a backend:
   owner's consent in the profile's local-only credential database, under its
   own `firecrawl` record. It never enters the library replica, outbox, sync,
   exports, logs, or caches.
-- **Capture:** the Reader's captured-page slot. A save without a capture shows
-  **Capture page** there; a save with one shows **Recapture** in the section
-  header. In a tab without the key, either control opens settings instead.
+- **Reading and editing: one body.** A save has one body in the Reader. When it
+  has a captured page, that page is the body, followed by one provenance line
+  (provider, capture date, size) with **Edit page** and **Recapture**. Without
+  one, the excerpt is the body, followed by **Capture page**. The excerpt stays
+  the short summary that lists and search show, edited in **Edit save**. In a
+  tab without the key, the capture controls open settings instead.
 - **Assistant:** unchanged. Its requests already include the captured page, so
   capturing improves suggested tags, summaries, and titles with no new control.
 
@@ -59,8 +62,28 @@ writes the same register the CLI writes, through `write_captured_document`,
 which validates the reference first. The update carries only the hash, length,
 media type, and provenance (`firecrawl`, source URL, capture time). It is an
 explicit owner action, so it uses an ordinary revision ID rather than the
-enrichment prefix that yields to concurrent human edits. Capture offers no undo:
-**Recapture** replaces a page, and the CLI's `enrich forget` drops one.
+enrichment prefix that yields to concurrent human edits. The CLI's
+`enrich forget` still drops a page.
+
+### Editing a page writes a new version
+
+Captures often include navigation, footers, and other noise the owner trims.
+**Edit page** opens the page's Markdown in place; **Save page** stores the
+edited text as a new content-addressed document and points the item at it with
+the same edit mutation. The new version keeps the capture's provenance (the
+provider, source URL, and original capture time): released clients accept
+only `firecrawl` as a provider, so a new provider value would break their sync.
+**Undo**, after an edit or a recapture, points the item back at the version it
+replaced, whose bytes are still local and in the repository. Concurrent edits
+on two devices resolve like any scalar register, and the losing version stays
+in the register's revision history.
+
+The page is not merged into the excerpt. The excerpt is merged CRDT text: every
+character replicates to every device, rides in every checkpoint, and stays in
+history V2 never prunes. Sixty saves enriched before #192, which put whole
+pages in their excerpts, carry 5.7 MB that way in one real library, the largest
+1.5 MB. A captured page is fetched only when its save is opened, and an edited
+version costs one new file rather than permanent merged text.
 
 This changes no protocol, schema, or projection: native clients already apply
 and display the register.
@@ -88,8 +111,10 @@ from the owner app; owners who self-host keep using the CLI.
 ## Alternatives considered
 
 - **A separate settings section or panel for page capture.** Rejected as
-  redundant: keys for third-party services already live under *Assistant*,
-  and the Reader already has a captured-page slot.
+  redundant: keys for third-party services already live under *Assistant*.
+- **A collapsible "Captured page" section under the excerpt.** Replaced: it
+  presented one save as two texts. The page is now the body.
+- **Storing the page in the excerpt.** Rejected for the reasons above.
 - **Capturing implicitly before an assistant request.** Rejected: it would
   spend Firecrawl credits as a side effect of a different action.
 - **A browser retry queue like the CLI's.** Deferred. A failed capture leaves

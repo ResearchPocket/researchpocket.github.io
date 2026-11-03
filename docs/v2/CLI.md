@@ -173,9 +173,9 @@ URL is sent to the configured Firecrawl service. ResearchPocket uses the narrow
 Markdown once under its SHA-256 identity in `sync/v2/content/sha256/`, while the
 item carries only the hash, byte length, media type, and provenance. List and
 bootstrap projections contain no Markdown bytes; the Reader fetches and
-validates them lazily, under a labelled **Captured page** section that names
-the provider, capture date, and size. The excerpt above it is always the
-authored one. Markdown is preserved up to 4 MiB and the complete JSON
+validates them lazily and shows the page as the save's body, with a line naming
+the provider, capture date, and size. The excerpt remains the authored summary
+that lists and search show. Markdown is preserved up to 4 MiB and the complete JSON
 response is limited to 8 MiB. Larger results fail explicitly and remain
 retryable without affecting the already-saved URL. The request includes the
 complete page instead of restricting extraction to main content, disables

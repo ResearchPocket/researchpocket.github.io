@@ -93,10 +93,16 @@ Older whole-page excerpts remain until explicitly re-enriched. See the
 
 ## Read a captured page
 
-Open a save in the browser Reader. Your excerpt appears first. If there is a
-capture, expand **Captured page** to see its content, provider, date, and size.
-If no excerpt exists, the capture opens automatically. Capture bytes load only
-when the section is opened; a library list does not fetch every page body.
+Open a save in the browser Reader. If it has a captured page, the page is what
+you read, with a line underneath naming the provider, capture date, and size.
+Otherwise you read your excerpt. Page bytes load when you open the save; the
+library list never fetches page bodies, and shows your excerpt as the summary.
+
+Captures often include menus, footers, and other noise. Choose **Edit page** to
+trim the Markdown in place, then **Save page**. The edit is saved as a new
+version of the page and syncs like any change; **Undo** returns to the previous
+version. **Recapture** fetches the page again, and **Undo** after it brings
+back your trimmed version. Edit the short summary with **Edit save**.
 
 The native client that fetched a capture has its Markdown locally. A new browser
 may need its private sync connection to retrieve a capture it has not cached.
