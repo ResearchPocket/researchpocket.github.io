@@ -46,11 +46,11 @@ cargo install --locked research
 research --version
 ```
 
-The version described here is `research 2.3.0`. You can also download an archive
+The version described here is `research 2.4.0`. You can also download an archive
 for Linux, macOS, or Windows from the
 [releases page](https://github.com/ResearchPocket/researchpocket.github.io/releases)
 and verify it against `SHA256SUMS`. The archives are unsigned; the
-[2.3.0 release notes](../releases/v2.3.0.md) include a source-build alternative.
+[2.4.0 release notes](../releases/v2.4.0.md) include a source-build alternative.
 
 Create a library and save a URL:
 

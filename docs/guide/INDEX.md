@@ -6,11 +6,8 @@ pages, and use Zen to write documents and task lists that reference your saves.
 Start locally in a browser or terminal; connect private GitHub sync when you need
 another device.
 
-The current published release is **ResearchPocket 2.3.0**. The
-[latest release notes](../releases/v2.3.0.md) explain upgrades and compatibility.
-Browser guides also cover the current Zen linking update: completion, links
-between documents, and derived backlinks. These are browser changes beyond the
-2.3.0 release; see [Zen links and backlinks](ZEN.md#insert-links-and-follow-backlinks).
+The current published release is **ResearchPocket 2.4.0**. The
+[latest release notes](../releases/v2.4.0.md) explain upgrades and compatibility.
 
 ## Start here
 
@@ -54,10 +51,11 @@ and deletion. Contributors can start with the
 
 ## Available now and planned work
 
-2.3.0 includes local URL management, native browser capture, optional enrichment
+2.4.0 includes local URL management, native browser capture, optional enrichment
 and captured Markdown, private GitHub sync and restore, browser library profiles,
-Zen documents, the TUI documents workspace, a derived browser library graph,
-and optional token remembering in trusted browsers.
+Zen documents with links and backlinks, the TUI documents workspace, a derived
+browser library graph, optional token remembering in trusted browsers,
+bring-your-own-key assistance, and browser page capture.
 
 Selective public collections and publication, `research ui` and its loopback API,
 broader import/export formats, and background-service installation remain planned.

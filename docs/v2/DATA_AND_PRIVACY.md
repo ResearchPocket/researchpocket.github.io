@@ -2,7 +2,7 @@
 
 ResearchPocket is local first. Saving, editing, searching, deleting, and
 restoring links and Zen documents does not require a ResearchPocket account or
-an always-running server. This guide describes the 2.3.0 release.
+an always-running server. This guide describes the 2.4.0 release.
 
 ## Where the library lives
 
@@ -145,7 +145,7 @@ directory, connect it to the existing private repository, and synchronize.
 
 ## Public sharing
 
-ResearchPocket 2.3.0 does not publish selected collections. The hosted browser
+ResearchPocket 2.4.0 does not publish selected collections. The hosted browser
 app is a private owner surface. Zen titles, bodies, and document IDs are private
 and excluded from publication. Saved-item mentions do not grant access to a
 library. [Documentation and references](../guide/REFERENCES.md) explains their
