@@ -113,6 +113,30 @@ export function summaryRequest(source: ItemSource, includeNote: boolean): Assist
   };
 }
 
+/**
+ * Asks for a better title for one save. The current title is part of the page
+ * context already, so the request only adds the instruction to replace it.
+ */
+export function itemTitleRequest(
+  source: ItemSource,
+  includeNote: boolean,
+  rejected: string | null = null,
+): AssistantRequest {
+  const context = itemContext(source, includeNote);
+  return {
+    system: [
+      "You title one saved web page in a person's private research library.",
+      UNTRUSTED,
+      "Reply with one concise, specific title of at most twelve words that says what the page is about, in the page's language.",
+      "Reply with the title only: no quotes, no Markdown, no site name suffix, no trailing period.",
+      source.title?.trim() ? "Offer a clearer title than the current one." : "",
+      rejected ? "The owner rejected the title in <rejected_title>; offer a different one." : "",
+    ].filter(Boolean).join("\n"),
+    prompt: `${rejected ? `<rejected_title>${rejected}</rejected_title>\n` : ""}<page>\n${context.text}\n</page>`,
+    fields: context.fields,
+  };
+}
+
 function extractTagList(raw: string): unknown[] {
   const text = raw.replace(/```(?:json)?/giu, "").trim();
   for (const [open, close] of [["{", "}"], ["[", "]"]] as const) {

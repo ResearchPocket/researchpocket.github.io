@@ -1089,6 +1089,20 @@ export function App() {
     return saved;
   }
 
+  async function setSuggestedTitle(item: LibraryItemView, title: string) {
+    let undo: UndoableChange | null = null;
+    const saved = await runAction("Use suggested title", "Title updated.", () =>
+      libraryRepository.edit(item.id, {
+        title,
+        expectedNote: item.note ?? null,
+      }).then((change) => {
+        undo = change;
+      }),
+    );
+    if (saved) offerUndo(undo, "Title updated.");
+    return saved;
+  }
+
   function openAssistantSettings() {
     setReaderItem(null);
     navigateToView("settings");
@@ -1622,6 +1636,7 @@ export function App() {
             onFavorite={toggleFavorite}
             onAddSuggestedTags={addSuggestedTags}
             onAppendToNote={appendToNote}
+            onSetSuggestedTitle={setSuggestedTitle}
             onOpenAssistantSettings={openAssistantSettings}
             tagVocabulary={tagVocabulary}
             documents={zenDocuments}
@@ -3264,6 +3279,7 @@ function ReaderView({
   item,
   onAddSuggestedTags,
   onAppendToNote,
+  onSetSuggestedTitle,
   onBack,
   onDelete,
   onEdit,
@@ -3279,6 +3295,7 @@ function ReaderView({
   item: LibraryItemView;
   onAddSuggestedTags: (item: LibraryItemView, tags: string[]) => Promise<boolean>;
   onAppendToNote: (item: LibraryItemView, text: string) => Promise<boolean>;
+  onSetSuggestedTitle: (item: LibraryItemView, title: string) => Promise<boolean>;
   onOpenAssistantSettings: () => void;
   tagVocabulary: string[];
   onBack: () => void;
@@ -3456,6 +3473,7 @@ function ReaderView({
                 onAddTags={(tags) => onAddSuggestedTags(item, tags)}
                 onAppendToNote={(text) => onAppendToNote(item, text)}
                 onOpenSettings={onOpenAssistantSettings}
+                onSetTitle={(title) => onSetSuggestedTitle(item, title)}
                 vocabulary={tagVocabulary}
               />
             </div>

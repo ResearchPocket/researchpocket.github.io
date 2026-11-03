@@ -24,7 +24,7 @@ the owner's GitHub token.
 ### Assistance proposes; the owner decides
 
 The hosted owner app (`/app/`) may offer assistant actions on a single open
-save. The first ones are **Suggest tags** and **Summarize**. Every request
+save: **Suggest tags**, **Summarize**, and **Suggest title**. Every request
 starts from an explicit owner action. There is no background, on-capture,
 scheduled, or batch-unattended request, and no fallback between providers.
 
@@ -32,9 +32,10 @@ Output is a proposal shown in the Reader. Dismissing it changes nothing.
 Accepting it performs exactly the mutation the owner could have typed:
 
 - tags are added through the existing item edit;
-- a summary is appended to the note through the existing note mutation.
+- a summary is appended to the note through the existing note mutation;
+- a title replaces the save's title through the existing item edit.
 
-Both are undoable and converge like any other edit. Assistant output, prompts,
+Each is undoable and converges like any other edit. Assistant output, prompts,
 provenance, and conversation state are never stored in CRDT state, the outbox,
 exports, or publications. This decision therefore changes no protocol, schema,
 or sync behavior.
@@ -150,6 +151,7 @@ lists every field and character count before sending.
 | --- | --- |
 | Suggest tags | title, URL, excerpt, bounded captured Markdown, and up to 200 of the owner's tag names, busiest first |
 | Summarize | the same fields, without the tag names |
+| Suggest title | the same fields as Summarize, plus the suggestion being passed over when asking for another |
 | Zen title | the document, up to 16,000 characters, plus its current title when asking for another |
 | Zen continue writing | the document up to the cursor (its last 16,000 characters) |
 | Zen improve or shorten | only the selected text |
@@ -180,6 +182,9 @@ untrusted data. Output is handled as untrusted too:
   library's existing spelling, and capped at eight.
 - **Summaries:** rendered through the existing Markdown renderer with images
   inert.
+- **Titles:** reduced to the first non-empty line, stripped of quotes,
+  Markdown markers, and a trailing period, shown as plain text, and rejected
+  above 120 characters.
 - **No tools:** model output never executes or calls a tool, and is never
   applied without an explicit accept.
 

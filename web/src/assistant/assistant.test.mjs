@@ -7,6 +7,7 @@ import { findPreset } from "./presets.ts";
 import {
   CONTEXT_CHARACTER_LIMIT,
   documentRequest,
+  itemTitleRequest,
   parseTitle,
   titleRequest,
   SUGGESTED_TAG_LIMIT,
@@ -32,6 +33,10 @@ test("requests stay bounded, frame the page as data, and leave the note out unle
   assert.match(request.system, /untrusted/u);
   assert.ok(request.fields.some(({ label, truncated }) => label === "Captured page" && truncated));
   assert.ok(summaryRequest(source, true).prompt.includes("PRIVATE_NOTE_SENTINEL"));
+  const retitle = itemTitleRequest(source, false, "Rejected guess");
+  assert.ok(!retitle.prompt.includes("PRIVATE_NOTE_SENTINEL"));
+  assert.ok(retitle.prompt.includes("<rejected_title>Rejected guess</rejected_title>"));
+  assert.ok(retitle.prompt.length < CONTEXT_CHARACTER_LIMIT + 1_000);
 });
 
 test("tag suggestions keep library spelling, drop current and junk tags, and are capped", () => {
