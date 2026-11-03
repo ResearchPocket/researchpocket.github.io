@@ -283,8 +283,9 @@ repository that serves the application JavaScript.
 
 Owner mode loads no third-party runtime scripts or analytics. Enforce a self-only
 content security policy and limit network connections to the required GitHub API
-plus the reviewed assistant provider origins and loopback sources listed in
-`web/src/assistant/providers.json` (ADR 0015); `check:dist` enforces the list.
+plus the reviewed assistant provider origins, the Firecrawl page-capture origin,
+and loopback sources listed in `web/src/assistant/providers.json` (ADR 0015,
+ADR 0016); `check:dist` enforces the list.
 Native secrets belong in the OS credential store or a local ignored credential
 file, never SQLite, protocol updates, exports, or publication artifacts.
 

@@ -114,8 +114,8 @@ for (const [name, markers] of [
   }
 }
 
-// Assistant destinations are reviewed in src/assistant/providers.json. Only the
-// owner app may reach them, and its connect-src must match that list exactly.
+// Assistant and page-capture destinations are reviewed in
+// src/assistant/providers.json. Only the owner app may reach them, and its connect-src must match that list exactly.
 const assistantRegistry = JSON.parse(
   readFileSync(resolve(webRoot, "src/assistant/providers.json"), "utf8"),
 );
@@ -123,6 +123,7 @@ const expectedOwnerConnect = [
   "'self'",
   "https://api.github.com",
   ...assistantRegistry.providers.map(({ origin }) => origin).filter(Boolean),
+  ...assistantRegistry.captureOrigins,
   ...assistantRegistry.loopbackSources,
 ];
 function connectSources(html) {

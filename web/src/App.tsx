@@ -18,6 +18,8 @@ import { AssistantSettings } from "./components/AssistantSettings.tsx";
 import { ReaderAssistant } from "./components/ReaderAssistant.tsx";
 import { noteWithSummary } from "./assistant/prompts.ts";
 import { assistantSession } from "./assistant/session.ts";
+import { scrapeMarkdown } from "./capture/firecrawl.ts";
+import { captureSession } from "./capture/session.ts";
 import { ZenBacklinks } from "./components/ZenBacklinks.tsx";
 import { LibraryGraph } from "./components/LibraryGraph.tsx";
 import {
@@ -272,6 +274,7 @@ export function App() {
   const [readerItem, setReaderItem] = useState<LibraryItemView | null>(null);
   const [editingItem, setEditingItem] = useState<LibraryItemView | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [capturingIds, setCapturingIds] = useState<ReadonlySet<string>>(() => new Set());
   const [autoBootstrapAttempted, setAutoBootstrapAttempted] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
@@ -659,7 +662,9 @@ export function App() {
   const activeNamespace = profiles.find((profile) => profile.id === activeProfileId)?.namespace ?? null;
 
   useEffect(() => {
-    if (activeNamespace) void assistantSession.open(activeNamespace);
+    if (!activeNamespace) return;
+    void assistantSession.open(activeNamespace);
+    void captureSession.open(activeNamespace);
   }, [activeNamespace]);
 
   // The rail shows the busiest tags plus anything already filtered on; the
@@ -993,8 +998,36 @@ export function App() {
       offerUndo(undo, "Saved link.");
       navigateToView("library");
       closeCapture();
+      const savedId = (undo as UndoableChange | null)?.itemId;
+      if (savedId && captureSession.getSnapshot().captureOnSave) void capturePage(savedId, input.url);
     }
     return saved;
+  }
+
+  /**
+   * Fetches the whole page with Firecrawl and attaches it to the save. It runs
+   * beside other work rather than blocking it: the save already exists, and a
+   * failure leaves it exactly as it was, ready to capture again.
+   */
+  async function capturePage(itemId: string, url: string) {
+    const apiKey = captureSession.key();
+    if (!apiKey) return;
+    setCapturingIds((current) => new Set(current).add(itemId));
+    setAnnouncement("Capturing the page…");
+    try {
+      const markdown = await scrapeMarkdown(apiKey, url);
+      await libraryRepository.captureItemPage(itemId, markdown, url);
+      setAnnouncement("Page captured.");
+    } catch (error: unknown) {
+      setLocalError(readError(error));
+      setAnnouncement("Page capture failed.");
+    } finally {
+      setCapturingIds((current) => {
+        const next = new Set(current);
+        next.delete(itemId);
+        return next;
+      });
+    }
   }
 
   async function deleteItem(item: LibraryItemView) {
@@ -1637,6 +1670,8 @@ export function App() {
             onAppendToNote={appendToNote}
             onSetSuggestedTitle={setSuggestedTitle}
             onOpenAssistantSettings={openAssistantSettings}
+            capturing={capturingIds.has(readerItem.id)}
+            onCapturePage={(item) => void capturePage(item.id, item.url)}
             tagVocabulary={tagVocabulary}
             documents={zenDocuments}
             onOpenDocument={(documentId) => {
@@ -3264,7 +3299,9 @@ function KeyboardShortcutsDialog({ onClose }: { onClose: () => void }) {
 
 function ReaderView({
   busy,
+  capturing,
   item,
+  onCapturePage,
   onAddSuggestedTags,
   onAppendToNote,
   onSetSuggestedTitle,
@@ -3278,6 +3315,8 @@ function ReaderView({
   tagVocabulary,
 }: {
   busy: boolean;
+  capturing: boolean;
+  onCapturePage: (item: LibraryItemView) => void;
   documents: PersistedZenDocument[];
   onOpenDocument(documentId: string): void;
   item: LibraryItemView;
@@ -3306,6 +3345,11 @@ function ReaderView({
   const [captureOpen, setCaptureOpen] = useState(false);
   const assistant = useSyncExternalStore(assistantSession.subscribe, assistantSession.getSnapshot);
   const assistantAvailable = assistant.status === "ready" || assistant.status === "locked";
+  const pageCapture = useSyncExternalStore(captureSession.subscribe, captureSession.getSnapshot);
+  const captureAvailable = pageCapture.status === "ready" || pageCapture.status === "locked";
+  // A tab without the key sends the owner to enter it rather than failing.
+  const requestCapture = () =>
+    pageCapture.status === "ready" ? onCapturePage(item) : onOpenAssistantSettings();
   const imageCloseRef = useRef<HTMLButtonElement | null>(null);
   const label = item.title?.trim() || item.url;
   // The excerpt is what the owner authored and edited, so it is what the
@@ -3493,6 +3537,7 @@ function ReaderView({
             )}
             {capture ? (
               <section className="reader-capture">
+                <div className="reader-capture-header">
                 <button
                   aria-controls="reader-capture-body"
                   aria-expanded={captureOpen}
@@ -3509,6 +3554,12 @@ function ReaderView({
                     {formatBytes(capture.byte_length)}
                   </small>
                 </button>
+                {captureAvailable ? (
+                  <button className="assistant-action" disabled={capturing} onClick={requestCapture} type="button">
+                    {capturing ? "Capturing…" : "Recapture"}
+                  </button>
+                ) : null}
+                </div>
                 {captureOpen ? (
                   <div
                     aria-labelledby="reader-capture-toggle"
@@ -3535,6 +3586,12 @@ function ReaderView({
                     ) : null}
                   </div>
                 ) : null}
+              </section>
+            ) : captureAvailable ? (
+              <section className="reader-capture">
+                <button className="assistant-action" disabled={capturing} onClick={requestCapture} type="button">
+                  {capturing ? "Capturing the page…" : "Capture page"}
+                </button>
               </section>
             ) : null}
             <p className="reader-source"><a href={item.url} rel="noreferrer" target="_blank">{readHostname(item.url)} ↗</a></p>

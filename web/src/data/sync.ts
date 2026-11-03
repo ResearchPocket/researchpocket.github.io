@@ -550,6 +550,7 @@ class BrowserSyncService {
     this.patch({ status: "Checking remote changes…" });
     let pull = await this.pullRemote(client, remote);
     let uploaded = 0;
+    await this.ensureCapturedDocumentsUploaded(client, remote);
     const pendingAtFlushStart = await libraryRepository.pendingSyncBatches();
     const uploads = await buildPendingUploads(pendingAtFlushStart);
     if (pendingAtFlushStart.length > 0) {
@@ -795,6 +796,49 @@ class BrowserSyncService {
         "The browser library changed while its restore checkpoint was being selected.",
         "local_state",
       );
+    }
+  }
+
+  /**
+   * Pages captured in this browser go up before any update that references
+   * them, as the CLI orders them, so no reader meets a reference whose
+   * content is missing. Content is addressed by its hash: an identical
+   * existing object is success, a different one is an integrity failure.
+   */
+  private async ensureCapturedDocumentsUploaded(
+    client: GitHubClient,
+    remote: GitHubRemote,
+  ): Promise<void> {
+    const pending = await libraryRepository.pendingCapturedDocuments();
+    if (pending.length === 0) return;
+    this.patch({
+      status: `Uploading ${pending.length} captured page${pending.length === 1 ? "" : "s"}…`,
+    });
+    let tree = await client.discover(remote);
+    for (const document of pending) {
+      for (let attempt = 0; ; attempt += 1) {
+        const existingSha = tree.blobs.get(document.path);
+        if (existingSha) {
+          if ((await client.downloadText(remote, existingSha)) !== document.markdown) {
+            throw new GitHubSyncError(
+              "A captured page in the repository does not match its content address.",
+              "integrity",
+            );
+          }
+          break;
+        }
+        const put = await client.putNew(remote, document.path, document.markdown, remote.branch);
+        if (put.type === "created") break;
+        if (attempt + 1 >= MAX_UPLOAD_ATTEMPTS) {
+          throw new GitHubSyncError(
+            "Captured page upload remained contended after safe retries.",
+            "contention",
+          );
+        }
+        await retryDelay(document.path, attempt);
+        tree = await client.discover(remote);
+      }
+      await libraryRepository.confirmCapturedDocumentUploaded(document.sha256);
     }
   }
 

@@ -3098,6 +3098,12 @@ kbd {
   width: 100%;
 }
 
+.reader-capture-header {
+  align-items: baseline;
+  display: flex;
+  gap: var(--space-3);
+}
+
 .reader-capture-toggle {
   align-items: baseline;
   background: none;
@@ -6539,6 +6545,18 @@ kbd {
   border: 0;
   margin: 0;
   padding: 0;
+}
+
+.page-capture-settings {
+  border-top: var(--rule) solid var(--color-border);
+  display: grid;
+  gap: var(--space-3);
+  padding-top: var(--space-4);
+}
+
+.page-capture-settings h4 {
+  font-size: var(--font-size-sm);
+  margin: 0;
 }
 
 .assistant-buttons {

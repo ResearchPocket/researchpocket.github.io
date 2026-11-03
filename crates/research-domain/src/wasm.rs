@@ -87,6 +87,10 @@ enum BrowserMutation {
         add_tags: Vec<String>,
         #[serde(default)]
         remove_tags: Vec<String>,
+        /// A page the owner captured in the browser; its bytes travel as
+        /// content-addressed sync content, never inside the update.
+        #[serde(default)]
+        captured_document: OptionalField<CapturedDocumentRef>,
     },
     Delete {
         item_id: String,
@@ -470,6 +474,7 @@ fn apply_one_mutation(
             expected_note,
             add_tags,
             remove_tags,
+            captured_document,
         } => apply_edit(
             library,
             projection,
@@ -486,6 +491,7 @@ fn apply_one_mutation(
             expected_note.0,
             add_tags,
             remove_tags,
+            captured_document.0,
         ),
         BrowserMutation::Delete { item_id } => transition_item(
             library,
@@ -532,6 +538,7 @@ fn apply_edit(
     expected_note: Option<NullableText>,
     add_tags: Vec<String>,
     remove_tags: Vec<String>,
+    captured_document: Option<CapturedDocumentRef>,
 ) -> DomainResult<()> {
     let current = projection
         .items
@@ -544,7 +551,8 @@ fn apply_edit(
         || language.is_some()
         || saved_at.is_some()
         || !add_tags.is_empty()
-        || !remove_tags.is_empty();
+        || !remove_tags.is_empty()
+        || captured_document.is_some();
     if !has_non_note_changes && note.is_none() {
         return Err(DomainError::InvalidState(
             "edit must include at least one change".into(),
@@ -581,6 +589,13 @@ fn apply_edit(
     }
     if let Some(saved_at) = saved_at {
         library.write_saved_at(item_id, &format!("{prefix}/saved-at"), saved_at)?;
+    }
+    if let Some(reference) = &captured_document {
+        library.write_captured_document(
+            item_id,
+            &format!("{prefix}/captured-document"),
+            Some(reference),
+        )?;
     }
     if let Some(note) = note {
         if let Some(expected_note) = expected_note

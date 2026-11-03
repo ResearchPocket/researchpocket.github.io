@@ -152,8 +152,8 @@ fenced code blocks retain literal dollar signs and TeX.
 
 The public documents' CSP allows only same-origin resources and connections to
 `https://api.github.com`. The owner app additionally allows the reviewed
-assistant provider origins and loopback model servers listed in
-`src/assistant/providers.json`, and omits `upgrade-insecure-requests` so loopback
+assistant provider origins, the Firecrawl page-capture origin, and loopback model
+servers listed in `src/assistant/providers.json`, and omits `upgrade-insecure-requests` so loopback
 HTTP is not rewritten; `check:dist` fails if either policy drifts from that
 registry. The service worker handles only GETs
 from pages controlled beneath `/app/` for same-origin shell resources and WASM.
@@ -297,7 +297,7 @@ downloads only on first use and is runtime-cached for offline reuse; the
 service worker does not precache it.
 
 With a provider configured, the Reader shows an inline **Assistant** panel under
-the title and tags. It offers **Suggest tags** and **Summarize**, previews the fields each
+the title and tags. It offers **Suggest tags**, **Summarize**, and **Suggest title**, previews the fields each
 request sends, and asks once per provider before the first request. Tag
 suggestions appear as toggles—existing tags preselected, new ones marked—and
 **Add tags** applies the selection as one undoable item edit. A summary streams
@@ -308,3 +308,17 @@ until the owner accepts it.
 Prompts, payload bounds, and output parsing live in `src/assistant/prompts.ts`.
 Settings and an opted-in key are stored per library in the credential database
 and never sync. See [ADR 0015](./ADR_0015_BYOK_AI_ASSISTANCE.md).
+
+### Page capture
+
+**Settings → Assistant → Page capture** takes a Firecrawl key, checked with
+Firecrawl's credit-usage endpoint (no credit spent), and one choice: **Capture
+each new save**, on by default. The Reader's captured-page slot offers
+**Capture page** for a save without one and **Recapture** for a save with one.
+`src/capture/firecrawl.ts` sends the CLI's exact `/v2/scrape` request with an
+8 MiB response bound; the domain core's `createCapturedDocument` normalizes,
+bounds, and hashes the Markdown. The page is stored as a pending entry in
+`capturedDocuments` before an `edit` mutation attaches its reference, and the
+next sync uploads pending pages, create-only, before any queued update. The key
+follows the assistant key's memory and opt-in lifecycle under its own credential
+record. See [ADR 0016](./ADR_0016_BROWSER_PAGE_CAPTURE.md).

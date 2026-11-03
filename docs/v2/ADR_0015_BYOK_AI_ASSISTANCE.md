@@ -77,8 +77,9 @@ and fast-moving provider APIs, and maintained adapters are worth the dependency.
 ### The network allowlist is static and reviewed
 
 A meta-tag CSP cannot widen at runtime. `connect-src` for `/app/` therefore
-lists `'self'`, `https://api.github.com`, every reviewed provider origin, and
-loopback (`http://localhost:*`, `http://127.0.0.1:*`). The list lives in
+lists `'self'`, `https://api.github.com`, every reviewed provider origin, the
+Firecrawl page-capture origin ([ADR 0016](./ADR_0016_BROWSER_PAGE_CAPTURE.md)),
+and loopback (`http://localhost:*`, `http://127.0.0.1:*`). The list lives in
 `web/src/assistant/providers.json`. `check:dist` fails the build unless the
 owner CSP matches it exactly and the public entries keep the GitHub-only
 policy.

@@ -56,13 +56,21 @@ saved. Run `research enrich configure --no-on-capture` to keep captures exactly
 as the bookmarklet sent them, or `--on-capture` to resume.
 
 An unsuccessful request leaves a durable retryable job. The browser app does
-not expose provider configuration or run enrichment requests; configure and run
-the provider with the native CLI/TUI.
+not run the direct provider; it can capture whole pages with Firecrawl, as
+described below.
 
 ## Capture Markdown with Firecrawl
 
 Firecrawl is an explicit hosted extractor. Choosing it sends the saved URL to
-the configured Firecrawl service. Keep its credential local:
+the configured Firecrawl service.
+
+In the browser app, add your key under **Settings → Assistant → Page capture**.
+With **Capture each new save** on, every link you save there is captured right
+after it is stored. Open any save to use **Capture page**, or **Recapture** to
+refresh an existing capture. The page syncs to your other devices with the
+library. A failed capture leaves the save as it was, ready to try again.
+
+In the CLI, keep its credential local:
 
 ```sh
 printf '%s' "$FIRECRAWL_API_KEY" | \

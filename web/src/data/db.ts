@@ -47,6 +47,8 @@ export interface PersistedCapturedDocument {
   markdown: string;
   byteLength: number;
   storedAt: string;
+  /** Captured in this browser and not yet confirmed in the private repository. */
+  pendingUpload?: true;
 }
 
 export interface PersistedBatch {
@@ -67,7 +69,8 @@ export type PersistedChangeField =
   | "title"
   | "excerpt"
   | "note"
-  | "language";
+  | "language"
+  | "capture";
 
 export interface PersistedChangeSummary {
   version: 1;
