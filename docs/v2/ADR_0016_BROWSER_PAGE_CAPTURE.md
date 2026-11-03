@@ -38,19 +38,24 @@ Three facts make browser capture possible without a backend:
   own `firecrawl` record. It never enters the library replica, outbox, sync,
   exports, logs, or caches.
 - **Reading and editing: the excerpt is the body.** The excerpt is the save's
-  one editable body and its source of truth, edited in place in the Reader with
-  **Edit** (the Edit save dialog no longer has an excerpt field). A captured
-  page is the read-only *original page*, labelled with its provider, capture
-  date, and size:
-  - excerpt only: the excerpt, with **Edit** and **Capture page**;
-  - original page only: the page, with **Edit** and **Recapture**; saving the
-    edit makes the trimmed copy the excerpt and leaves the original as it was;
-  - both: the excerpt, with **Edit**, **Use captured page** (replaces the
-    excerpt, with Undo), and **Recapture**;
-  - neither: "Nothing saved from this page yet." with **Capture page** and
-    **Write excerpt**.
+  one editable body and its source of truth. The Reader's edit (pencil) button
+  turns the Reader itself into the editor: title, tags, excerpt, and note become
+  fields in place, and the sticky toolbar offers **Save** and **Cancel**. The
+  Edit save dialog remains for quick edits from the library list and command
+  palette, without an excerpt field. A captured page is the read-only *original
+  page*; its line (provider, capture date, size) and actions sit under the
+  title, never at the end of a long page:
+  - excerpt only: the excerpt, with **Capture page**;
+  - original page only: the page, with **Recapture**; editing starts from the
+    page, and a changed copy becomes the excerpt while the original stays;
+  - both: the excerpt, with **Use captured page** (replaces the excerpt, with
+    Undo) and **Recapture**;
+  - neither: "Nothing saved from this page yet." with **Write excerpt** and
+    **Capture page**.
 
-  In a tab without the key, the capture controls open settings instead.
+  An excerpt left unchanged in the editor is not saved, so editing only the
+  title never copies a page. In a tab without the key, the capture controls
+  open settings instead.
 - **Assistant:** unchanged. Its requests already include the captured page, so
   capturing improves suggested tags, summaries, and titles with no new control.
 

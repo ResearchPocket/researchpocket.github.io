@@ -97,12 +97,17 @@ Open a save in the browser Reader. The excerpt is the save's text: it is what
 you read, edit, search, and publish. A captured page is the *original page*, a
 read-only copy labelled with its provider, capture date, and size.
 
-- With an excerpt, you read the excerpt. **Edit** changes it in place, and
-  **Use captured page** replaces it with the original page (Undo restores it).
+Choose the edit (pencil) button in the Reader's toolbar to edit the save in
+place: its title, tags, excerpt, and note become fields, and **Save** and
+**Cancel** stay at the top while you scroll. The page's capture line and its
+actions sit under the title.
+
+- With an excerpt, you read the excerpt. **Use captured page** replaces it with
+  the original page (Undo restores it).
 - With only an original page, you read the page. Captures often include menus,
-  footers, and other noise: choose **Edit**, trim it, and **Save**. Your trimmed
-  copy becomes the excerpt, and the original stays as it was.
-- With neither, choose **Capture page** or **Write excerpt**.
+  footers, and other noise: choose edit, trim the excerpt field, and **Save**.
+  Your trimmed copy becomes the excerpt, and the original stays as it was.
+- With neither, choose **Write excerpt** or **Capture page**.
 
 **Recapture** fetches the original page again. The original page loads only
 when it is shown; the library list never fetches page bodies.

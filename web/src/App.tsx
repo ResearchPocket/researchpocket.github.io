@@ -1156,18 +1156,18 @@ export function App() {
     return saved;
   }
 
-  /** The excerpt is the save's one editable body; Undo restores the last one. */
-  async function saveExcerpt(item: LibraryItemView, excerpt: string) {
+  /** Edits made in the Reader are one undoable item edit, like the dialog's. */
+  async function saveReaderEdit(item: LibraryItemView, input: EditInput) {
     let undo: UndoableChange | null = null;
-    const saved = await runAction("Save excerpt", "Excerpt saved.", () =>
+    const saved = await runAction("Save changes", "Changes saved.", () =>
       libraryRepository.edit(item.id, {
-        excerpt,
+        ...input,
         expectedNote: item.note ?? null,
       }).then((change) => {
         undo = change;
       }),
     );
-    if (saved) offerUndo(undo, "Excerpt saved.");
+    if (saved) offerUndo(undo, "Changes saved.");
     return saved;
   }
 
@@ -1714,7 +1714,6 @@ export function App() {
             item={items.find((item) => item.id === readerItem.id) ?? readerItem}
             onBack={closeReader}
             onDelete={deleteItem}
-            onEdit={openEditor}
             onFavorite={toggleFavorite}
             onAddSuggestedTags={addSuggestedTags}
             onAppendToNote={appendToNote}
@@ -1722,7 +1721,7 @@ export function App() {
             onOpenAssistantSettings={openAssistantSettings}
             capturing={capturingIds.has(readerItem.id)}
             onCapturePage={(item) => void capturePage(item.id, item.url)}
-            onSaveExcerpt={saveExcerpt}
+            onSaveEdit={saveReaderEdit}
             tagVocabulary={tagVocabulary}
             documents={zenDocuments}
             onOpenDocument={(documentId) => {
@@ -3383,18 +3382,27 @@ function KeyboardShortcutsDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
+interface ReaderDraft {
+  title: string;
+  tags: string[];
+  tagDraft: string;
+  excerpt: string;
+  /** The excerpt the editor opened with, so an untouched one is not saved. */
+  excerptStart: string;
+  note: string;
+}
+
 function ReaderView({
   busy,
   capturing,
   item,
   onCapturePage,
-  onSaveExcerpt,
+  onSaveEdit,
   onAddSuggestedTags,
   onAppendToNote,
   onSetSuggestedTitle,
   onBack,
   onDelete,
-  onEdit,
   onFavorite,
   onOpenAssistantSettings,
   documents,
@@ -3404,7 +3412,7 @@ function ReaderView({
   busy: boolean;
   capturing: boolean;
   onCapturePage: (item: LibraryItemView) => void;
-  onSaveExcerpt: (item: LibraryItemView, excerpt: string) => Promise<boolean>;
+  onSaveEdit: (item: LibraryItemView, input: EditInput) => Promise<boolean>;
   documents: PersistedZenDocument[];
   onOpenDocument(documentId: string): void;
   item: LibraryItemView;
@@ -3415,7 +3423,6 @@ function ReaderView({
   tagVocabulary: string[];
   onBack: () => void;
   onDelete: (item: LibraryItemView) => Promise<void>;
-  onEdit: (item: LibraryItemView, opener: HTMLButtonElement) => void;
   onFavorite: (item: LibraryItemView) => Promise<void>;
 }) {
   const [itemsWithImages, setItemsWithImages] = useState<Set<string>>(
@@ -3430,7 +3437,7 @@ function ReaderView({
     null,
   );
   const [capturedContextLoading, setCapturedContextLoading] = useState(false);
-  const [excerptDraft, setExcerptDraft] = useState<string | null>(null);
+  const [draft, setDraft] = useState<ReaderDraft | null>(null);
   const assistant = useSyncExternalStore(assistantSession.subscribe, assistantSession.getSnapshot);
   const assistantAvailable = assistant.status === "ready" || assistant.status === "locked";
   const pageCapture = useSyncExternalStore(captureSession.subscribe, captureSession.getSnapshot);
@@ -3450,20 +3457,39 @@ function ReaderView({
 
   useEffect(() => {
     setExpandedImage(null);
-    setExcerptDraft(null);
+    setDraft(null);
   }, [item.id]);
 
-  async function saveExcerptDraft() {
-    if (excerptDraft !== null && (await onSaveExcerpt(item, excerptDraft))) {
-      setExcerptDraft(null);
-    }
+  function startEditing() {
+    // While a save has no excerpt, editing starts from the original page; the
+    // copy becomes the excerpt only if the owner changes it.
+    const excerpt = authoredContext ?? capturedContext ?? "";
+    setDraft({
+      title: item.title ?? "",
+      tags: item.tags,
+      tagDraft: "",
+      excerpt,
+      excerptStart: excerpt,
+      note: item.note ?? "",
+    });
+  }
+
+  async function saveDraft() {
+    if (!draft) return;
+    const input: EditInput = {
+      title: optionalText(draft.title),
+      tags: withTagDraft(draft.tags, draft.tagDraft),
+      note: optionalText(draft.note),
+      ...(draft.excerpt !== draft.excerptStart ? { excerpt: draft.excerpt } : {}),
+    };
+    if (await onSaveEdit(item, input)) setDraft(null);
   }
 
   async function useCapturedPage() {
     if (!capture) return;
     try {
       const markdown = capturedContext ?? (await browserSync.loadCapturedDocument(capture));
-      await onSaveExcerpt(item, markdown);
+      await onSaveEdit(item, { excerpt: markdown });
     } catch (error: unknown) {
       setCapturedContextError(
         error instanceof Error ? error.message : "Captured page content could not be loaded.",
@@ -3544,6 +3570,16 @@ function ReaderView({
             <AppIcon name="back" />
             <span>All saves</span>
           </button>
+          {draft ? (
+            <div className="reader-toolbar-actions">
+              <button className="secondary-button" onClick={() => setDraft(null)} type="button">
+                Cancel
+              </button>
+              <button className="primary-button" disabled={busy} onClick={() => void saveDraft()} type="button">
+                Save
+              </button>
+            </div>
+          ) : (
           <div className="reader-toolbar-actions">
             <button
               aria-label={item.favorite ? "Remove favorite" : "Favorite"}
@@ -3556,11 +3592,10 @@ function ReaderView({
               <AppIcon name="favorites" />
             </button>
             <button
-              aria-haspopup="dialog"
               aria-label="Edit save"
               className="icon-button"
-              disabled={busy}
-              onClick={(event) => onEdit(item, event.currentTarget)}
+              disabled={busy || Boolean(capture && !authoredContext && capturedContextLoading)}
+              onClick={startEditing}
               type="button"
             >
               <AppIcon name="edit" />
@@ -3584,16 +3619,67 @@ function ReaderView({
               <AppIcon name="archive" />
             </button>
           </div>
+          )}
         </header>
         <div className="reader-content">
           <div className="reader-meta">
             <span>{readHostname(item.url)} · Saved {formatDate(item.savedAt)}</span>
           </div>
-          <h1 id="reader-title">{label}</h1>
-          {item.tags.length > 0 ? <p className="reader-tags">{item.tags.map((tag) => <span key={tag}>#{tag}</span>)}</p> : null}
+          {draft ? (
+            <>
+              <h1 className="sr-only" id="reader-title">Editing {label}</h1>
+              <label className="field">
+                <span>Title</span>
+                <input
+                  onChange={(event) => setDraft({ ...draft, title: event.target.value })}
+                  placeholder={item.url}
+                  type="text"
+                  value={draft.title}
+                />
+              </label>
+              <TagField
+                id="reader-edit-tags"
+                knownTags={tagVocabulary}
+                onDraftChange={(tagDraft) => setDraft({ ...draft, tagDraft })}
+                onChange={(tags) => setDraft({ ...draft, tags })}
+                draft={draft.tagDraft}
+                value={draft.tags}
+              />
+            </>
+          ) : (
+            <>
+              <h1 id="reader-title">{label}</h1>
+              {item.tags.length > 0 ? <p className="reader-tags">{item.tags.map((tag) => <span key={tag}>#{tag}</span>)}</p> : null}
+            </>
+          )}
+          {capture || (captureAvailable && !draft) ? (
+            <p className="reader-capture">
+              {capture ? (
+                <span>
+                  {draft && !authoredContext
+                    ? "Original page · saves as excerpt once edited"
+                    : `Original page · ${providerLabel(capture.provenance.provider)} · ${formatDate(capture.provenance.captured_at)} · ${formatBytes(capture.byte_length)}`}
+                </span>
+              ) : null}
+              {draft ? null : (
+                <>
+                  {authoredContext && capture ? (
+                    <button className="assistant-action" disabled={busy} onClick={() => void useCapturedPage()} type="button">
+                      Use captured page
+                    </button>
+                  ) : null}
+                  {captureAvailable ? (
+                    <button className="assistant-action" disabled={capturing} onClick={requestCapture} type="button">
+                      {capturing ? "Capturing…" : capture ? "Recapture" : "Capture page"}
+                    </button>
+                  ) : null}
+                </>
+              )}
+            </p>
+          ) : null}
           {/* Shown on every save once a provider is configured; nothing is sent
               until one of its actions is chosen. */}
-          {assistantAvailable ? (
+          {assistantAvailable && !draft ? (
             <div id="reader-assistant">
               <ReaderAssistant
                 busy={busy}
@@ -3610,7 +3696,7 @@ function ReaderView({
               />
             </div>
           ) : null}
-          {item.note?.trim() ? (
+          {draft ? null : item.note?.trim() ? (
             <aside className="reader-note">
               <strong>Your note</strong>
               <MarkdownDocument
@@ -3620,16 +3706,30 @@ function ReaderView({
               />
             </aside>
           ) : null}
-          <ZenBacklinks target={`item:${item.id}`} documents={documents} onOpen={onOpenDocument} />
+          {draft ? null : (
+            <ZenBacklinks target={`item:${item.id}`} documents={documents} onOpen={onOpenDocument} />
+          )}
           <div className="reader-body">
-            {excerptDraft !== null ? (
-              <textarea
-                aria-label="Excerpt"
-                className="reader-page-editor"
-                onChange={(event) => setExcerptDraft(event.target.value)}
-                spellCheck={false}
-                value={excerptDraft}
-              />
+            {draft ? (
+              <>
+                <label className="field">
+                  <span>Excerpt</span>
+                  <textarea
+                    className="reader-page-editor"
+                    onChange={(event) => setDraft({ ...draft, excerpt: event.target.value })}
+                    spellCheck={false}
+                    value={draft.excerpt}
+                  />
+                </label>
+                <label className="field">
+                  <span>Note</span>
+                  <textarea
+                    onChange={(event) => setDraft({ ...draft, note: event.target.value })}
+                    rows={4}
+                    value={draft.note}
+                  />
+                </label>
+              </>
             ) : authoredContext ? (
               <MarkdownDocument
                 imageBaseUrl={item.url}
@@ -3653,59 +3753,14 @@ function ReaderView({
             ) : capture && capturedContextLoading ? (
               <p role="status">Loading the original page…</p>
             ) : capture ? null : (
-              <p>Nothing saved from this page yet.</p>
+              <p>
+                Nothing saved from this page yet.{" "}
+                <button className="assistant-link" onClick={startEditing} type="button">Write excerpt</button>
+              </p>
             )}
             {capturedContextError ? (
               <p className="sync-error" role="alert">{capturedContextError}</p>
             ) : null}
-            <p className="reader-capture">
-              {excerptDraft !== null && !authoredContext && capture ? (
-                <span>Saves as excerpt · original kept</span>
-              ) : capture ? (
-                <span>
-                  Original page · {providerLabel(capture.provenance.provider)} ·{" "}
-                  {formatDate(capture.provenance.captured_at)} ·{" "}
-                  {formatBytes(capture.byte_length)}
-                </span>
-              ) : null}
-              {excerptDraft !== null ? (
-                <>
-                  <button
-                    className="assistant-action assistant-action-primary"
-                    disabled={busy || excerptDraft === (item.excerpt ?? "")}
-                    onClick={() => void saveExcerptDraft()}
-                    type="button"
-                  >
-                    Save
-                  </button>
-                  <button className="assistant-action assistant-action-quiet" onClick={() => setExcerptDraft(null)} type="button">
-                    Cancel
-                  </button>
-                </>
-              ) : (
-                <>
-                  {authoredContext || capturedContext !== null || !capture || capturedContextError ? (
-                    <button
-                      className="assistant-action"
-                      onClick={() => setExcerptDraft(authoredContext ?? capturedContext ?? "")}
-                      type="button"
-                    >
-                      {authoredContext || capturedContext !== null ? "Edit" : "Write excerpt"}
-                    </button>
-                  ) : null}
-                  {authoredContext && capture ? (
-                    <button className="assistant-action" disabled={busy} onClick={() => void useCapturedPage()} type="button">
-                      Use captured page
-                    </button>
-                  ) : null}
-                  {captureAvailable ? (
-                    <button className="assistant-action" disabled={capturing} onClick={requestCapture} type="button">
-                      {capturing ? "Capturing…" : capture ? "Recapture" : "Capture page"}
-                    </button>
-                  ) : null}
-                </>
-              )}
-            </p>
             <p className="reader-source"><a href={item.url} rel="noreferrer" target="_blank">{readHostname(item.url)} ↗</a></p>
           </div>
         </div>

@@ -1,5 +1,5 @@
 export function AppIcon({ name }: {
-  name: "saves" | "favorites" | "archive" | "zen" | "tags" | "sync" | "settings" | "back" | "edit" | "external" | "assistant" | "link" | "close";
+  name: "saves" | "favorites" | "archive" | "zen" | "tags" | "sync" | "settings" | "back" | "edit" | "external" | "assistant" | "link" | "close" | "chevron";
 }) {
   const paths = {
     saves: <><path d="M5 3h14v18l-7-4-7 4z" /><path d="M9 7h6" /></>,
@@ -14,6 +14,7 @@ export function AppIcon({ name }: {
     link: <><path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1.2 1.2" /><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1.2-1.2" /></>,
     external: <path d="M14 3h7v7M21 3 10 14M10 3H3v18h18v-7" />,
     close: <path d="M6 6l12 12M18 6 6 18" />,
+    chevron: <path d="m9 6 6 6-6 6" />,
     settings: <><path d="m9.7 4.5.6-2.4h3.4l.6 2.4 1.4.6 2-1.3 2.5 2.5-1.3 2 .6 1.4 2.4.6v3.4l-2.4.6-.6 1.4 1.3 2-2.5 2.5-2-1.3-1.4.6-.6 2.4h-3.4l-.6-2.4-1.4-.6-2 1.3-2.5-2.5 1.3-2-.6-1.4-2.4-.6v-3.4l2.4-.6.6-1.4-1.3-2 2.5-2.5 2 1.3z" /><circle cx="12" cy="12" r="3" /></>,
   };
   return <svg aria-hidden="true" className="app-icon" viewBox="0 0 24 24">{paths[name]}</svg>;

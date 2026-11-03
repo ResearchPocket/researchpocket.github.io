@@ -136,6 +136,7 @@ export function ReaderAssistant({
       >
         <AppIcon name="assistant" />
         Assistant
+        <AppIcon name="chevron" />
       </button>
     );
   }
@@ -156,6 +157,7 @@ export function ReaderAssistant({
           >
             <AppIcon name="assistant" />
             Assistant
+            <AppIcon name="chevron" />
           </button>
         </h2>
         <span className="assistant-model">{preset.label} · {snapshot.settings?.model}</span>
