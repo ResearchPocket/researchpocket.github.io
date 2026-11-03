@@ -48,7 +48,7 @@ Three facts make browser capture possible without a backend:
   - excerpt only: the excerpt, with **Capture page**;
   - original page only: the page, with **Recapture**; editing starts from the
     page, and a changed copy becomes the excerpt while the original stays;
-  - both: the excerpt, with **Use captured page** (replaces the excerpt, with
+  - both: the excerpt, with **Use as excerpt** (replaces the excerpt, with
     Undo) and **Recapture**;
   - neither: "Nothing saved from this page yet." with **Write excerpt** and
     **Capture page**.
@@ -87,7 +87,7 @@ that way in one real library, the largest 1.5 MB. A captured page is a separate
 file fetched only when it is shown.
 
 So an unedited capture costs no merged text. Its text is copied into the excerpt
-only when the owner edits it or chooses **Use captured page**, and then the
+only when the owner edits it or chooses **Use as excerpt**, and then the
 excerpt holds exactly what the owner decided to keep, usually a trimmed page.
 The original stays immutable for later reference or a fresh copy; **Recapture**
 replaces it, and Undo after a recapture points back at the version it replaced.
@@ -127,7 +127,7 @@ from the owner app; owners who self-host keep using the CLI.
 - **Copying every capture into the excerpt.** Rejected: unedited pages would
   become permanent merged text.
 - **Tabs between the excerpt and the original page.** Considered; one
-  **Use captured page** action with Undo was preferred as the smaller control.
+  **Use as excerpt** action with Undo was preferred as the smaller control.
 - **Capturing implicitly before an assistant request.** Rejected: it would
   spend Firecrawl credits as a side effect of a different action.
 - **A browser retry queue like the CLI's.** Deferred. A failed capture leaves
