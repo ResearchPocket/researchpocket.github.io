@@ -1,0 +1,116 @@
+name: Update Homebrew formula
+
+# Publishing a stable release points korigamik/tap/researchpocket at its
+# archives. The formula itself lives in the tap; this only moves its version
+# and checksums. Requires HOMEBREW_TAP_TOKEN: a fine-grained token limited to
+# KorigamiK/homebrew-tap with Contents read/write.
+
+on:
+  release:
+    types:
+      - released
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published stable release tag (for example, v2.3.1)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: homebrew-formula
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    name: Bump researchpocket formula
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Resolve release tag
+        id: release
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Homebrew follows stable v-prefixed releases only: $RELEASE_TAG" >&2
+            exit 1
+          fi
+          if [[ -z "$TAP_TOKEN" ]]; then
+            echo "Set the HOMEBREW_TAP_TOKEN secret to update the tap." >&2
+            exit 1
+          fi
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Download release checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release download "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern SHA256SUMS
+
+      - name: Check out tap
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: KorigamiK/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Update version and checksums
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        shell: python
+        run: |
+          import os
+          import pathlib
+          import re
+
+          version = os.environ["VERSION"]
+          checksums = {}
+          for line in pathlib.Path("SHA256SUMS").read_text().splitlines():
+              digest, name = line.split()
+              checksums[name] = digest
+
+          formula = pathlib.Path("tap/Formula/researchpocket.rb")
+          text = formula.read_text()
+          for platform in ("macos-arm64", "macos-amd64", "linux-amd64"):
+              archive = f"research-v{version}-{platform}.tar.gz"
+              pattern = re.compile(
+                  r'(url "https://github\.com/ResearchPocket/researchpocket\.github\.io'
+                  r'/releases/download/)v[^/"]+/research-v[^/"]+-'
+                  + re.escape(platform)
+                  + r'\.tar\.gz"(\s+sha256 ")[0-9a-f]{64}"'
+              )
+              text, count = pattern.subn(
+                  lambda match: f'{match[1]}v{version}/{archive}"{match[2]}{checksums[archive]}"',
+                  text,
+              )
+              if count != 1:
+                  raise SystemExit(f"expected one {platform} archive in the formula, found {count}")
+          formula.write_text(text)
+
+      - name: Commit and push
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        working-directory: tap
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo "The formula already points at $VERSION."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "researchpocket $VERSION"
+          git push origin HEAD:main

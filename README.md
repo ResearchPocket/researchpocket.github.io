@@ -46,6 +46,19 @@ existing library** before adding anything on the new device.
 
 ### From the terminal
 
+On macOS, install with [Homebrew](https://brew.sh):
+
+```sh
+brew install korigamik/tap/researchpocket
+```
+
+Homebrew keeps `research` up to date with `brew upgrade`. A browser capture
+handler installed by a release after 2.3.0 keeps working across upgrades; one
+installed by 2.3.0 needs `research capture install` once after upgrading. Run
+`research capture uninstall` before `brew uninstall researchpocket`; your library
+stays in place. The [getting-started guide](docs/guide/GETTING_STARTED.md#install-the-cli)
+covers every installation method.
+
 If Rust is installed, install the current CLI directly from crates.io:
 
 ```sh
@@ -156,17 +169,25 @@ not need a browser extension or a server running in the background.
 2. Run `research capture install` and then `research capture status`.
 3. Create a bookmark named `Save to ResearchPocket`.
 4. Copy the single line from [bookmarklet.js](bookmarklet.js) into the bookmark's
-   URL field.
+   URL field. `research capture bookmarklet | pbcopy` copies it on macOS.
 5. Open a page and click the bookmarklet.
+
+The handler belongs to the operating system, so the bookmarklet works the same
+in Firefox, Chrome, Edge, Brave, Arc, and Safari. Chrome asks whether the site
+may open ResearchPocket Capture; choose **Open**, and tick **Always allow** to
+stop it asking on that site.
 
 The bookmarklet can include the page title, description, language, and tags you
 enter. Its tag prompt runs inside the open page, so use it only for non-sensitive
 tags. Add private context later in ResearchPocket.
 
-Browser captures are saved locally first. If you later turn on automatic
-enrichment, ResearchPocket can fill metadata that the page did not provide. The
-bookmarklet never carries a provider or credential. ResearchPocket skips the
-extra request when all eligible metadata is already present.
+Browser captures are saved locally first. Once a provider is configured,
+ResearchPocket enriches every capture right after it is saved: Firecrawl keeps
+the whole page as Markdown beside the excerpt the bookmarklet sent, and the
+direct fetcher fills metadata the page did not provide. The bookmarklet never
+carries a provider or credential. Run `research enrich configure --no-on-capture`
+to keep captures exactly as the bookmarklet saved them, and
+`research enrich configure --on-capture` to turn enrichment back on.
 
 See the [capture guide](docs/v2/CLI.md#browser-capture-through-the-url-scheme)
 for browser and operating-system troubleshooting.
