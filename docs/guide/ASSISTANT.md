@@ -1,6 +1,6 @@
 # Assistant
 
-The browser workspace can suggest tags and draft summaries for a save using a
+The browser workspace can suggest tags, draft summaries, and suggest titles for a save using a
 model provider you choose and pay for yourself. It is off until you set it up.
 It never runs on its own, and nothing it produces enters your library until you
 accept it.
@@ -61,6 +61,15 @@ private note, where you can edit it like anything else you wrote. The Reader
 shows notes as formatted Markdown, with images left unloaded. **Copy**
 copies it, and **Discard** throws it away.
 
+## Suggest a title
+
+Choose **Suggest title** when a save's title is missing, vague, or just the
+site's name. The assistant reads the same page context as **Summarize** and
+proposes one concise title. **Use** replaces the save's title with it; the change
+is an ordinary edit, so **Undo** restores the old one. **Another** asks for a
+different title, telling the model which one you passed over, and **Dismiss**
+keeps the title you have.
+
 ## Use the assistant in Zen documents
 
 Open a document. With a provider set up, two controls appear.
@@ -94,7 +103,8 @@ you send. A request includes:
 
 - the save's title, URL, and excerpt;
 - its captured page, up to 24,000 characters in total;
-- for tag suggestions, the names of up to 200 of your most-used tags.
+- for tag suggestions, the names of up to 200 of your most-used tags;
+- for **Another** title, the suggested title you passed over.
 
 Your private note is sent only when you tick **Include my note** for that
 request. Nothing else from your library is sent. The first time you use a

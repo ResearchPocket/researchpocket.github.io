@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 
 import {
+  itemTitleRequest,
   parseTagSuggestions,
+  parseTitle,
   summaryRequest,
   tagSuggestionRequest,
   type ItemSource,
@@ -31,6 +33,7 @@ export function ReaderAssistant({
   onAddTags,
   onAppendToNote,
   onOpenSettings,
+  onSetTitle,
   vocabulary,
 }: {
   busy: boolean;
@@ -39,6 +42,7 @@ export function ReaderAssistant({
   onAddTags: (tags: string[]) => Promise<boolean>;
   onAppendToNote: (text: string) => Promise<boolean>;
   onOpenSettings: () => void;
+  onSetTitle: (title: string) => Promise<boolean>;
   vocabulary: string[];
 }) {
   const task = useAssistantTask();
@@ -79,6 +83,10 @@ export function ReaderAssistant({
     [state, vocabulary, item.tags],
   );
 
+  const proposedTitle = state.kind === "done" && state.task.id === "title"
+    ? parseTitle(state.text)
+    : null;
+
   useEffect(() => {
     setSelected(new Set(suggestions.filter(({ existing }) => existing).map(({ tag }) => tag)));
   }, [suggestions]);
@@ -100,6 +108,14 @@ export function ReaderAssistant({
   async function addSelected() {
     const tags = suggestions.map(({ tag }) => tag).filter((tag) => selected.has(tag));
     if (tags.length > 0 && (await onAddTags(tags))) task.reset();
+  }
+
+  function suggestTitle(rejected: string | null = null) {
+    void task.run({ id: "title", label: "Suggest title", request: itemTitleRequest(source, note, rejected), stream: false });
+  }
+
+  async function acceptTitle() {
+    if (proposedTitle && (await onSetTitle(proposedTitle))) task.reset();
   }
 
   async function appendSummary() {
@@ -160,6 +176,14 @@ export function ReaderAssistant({
               type="button"
             >
               Summarize
+            </button>
+            <button
+              className="assistant-action"
+              disabled={working}
+              onClick={() => suggestTitle()}
+              type="button"
+            >
+              Suggest title
             </button>
           </div>
         ) : null}
@@ -226,6 +250,29 @@ export function ReaderAssistant({
               <button className="assistant-action assistant-action-quiet" onClick={task.reset} type="button">Dismiss</button>
             </div>
           </fieldset>
+        )
+      ) : null}
+
+      {state.kind === "done" && state.task.id === "title" ? (
+        proposedTitle ? (
+          <div className="assistant-row assistant-title-row">
+            <p><small>Suggested title</small> <strong>{proposedTitle}</strong></p>
+            <div className="assistant-actions">
+              <button className="assistant-action assistant-action-primary" disabled={busy} onClick={() => void acceptTitle()} type="button">
+                Use
+              </button>
+              <button className="assistant-action" onClick={() => suggestTitle(proposedTitle)} type="button">Another</button>
+              <button className="assistant-action assistant-action-quiet" onClick={task.reset} type="button">Dismiss</button>
+            </div>
+          </div>
+        ) : (
+          <div className="assistant-row assistant-title-row">
+            <p className="assistant-error" role="alert">The model did not return a usable title.</p>
+            <div className="assistant-actions">
+              <button className="assistant-action" onClick={() => suggestTitle()} type="button">Try again</button>
+              <button className="assistant-action assistant-action-quiet" onClick={task.reset} type="button">Dismiss</button>
+            </div>
+          </div>
         )
       ) : null}
 
