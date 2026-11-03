@@ -18,6 +18,8 @@ import { AssistantSettings } from "./components/AssistantSettings.tsx";
 import { ReaderAssistant } from "./components/ReaderAssistant.tsx";
 import { noteWithSummary } from "./assistant/prompts.ts";
 import { assistantSession } from "./assistant/session.ts";
+import { scrapeMarkdown } from "./capture/firecrawl.ts";
+import { captureSession } from "./capture/session.ts";
 import { ZenBacklinks } from "./components/ZenBacklinks.tsx";
 import { LibraryGraph } from "./components/LibraryGraph.tsx";
 import {
@@ -272,6 +274,7 @@ export function App() {
   const [readerItem, setReaderItem] = useState<LibraryItemView | null>(null);
   const [editingItem, setEditingItem] = useState<LibraryItemView | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [capturingIds, setCapturingIds] = useState<ReadonlySet<string>>(() => new Set());
   const [autoBootstrapAttempted, setAutoBootstrapAttempted] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
@@ -659,7 +662,9 @@ export function App() {
   const activeNamespace = profiles.find((profile) => profile.id === activeProfileId)?.namespace ?? null;
 
   useEffect(() => {
-    if (activeNamespace) void assistantSession.open(activeNamespace);
+    if (!activeNamespace) return;
+    void assistantSession.open(activeNamespace);
+    void captureSession.open(activeNamespace);
   }, [activeNamespace]);
 
   // The rail shows the busiest tags plus anything already filtered on; the
@@ -993,8 +998,38 @@ export function App() {
       offerUndo(undo, "Saved link.");
       navigateToView("library");
       closeCapture();
+      const savedId = (undo as UndoableChange | null)?.itemId;
+      if (savedId && captureSession.getSnapshot().captureOnSave) void capturePage(savedId, input.url);
     }
     return saved;
+  }
+
+  /**
+   * Fetches the whole page with Firecrawl and attaches it to the save. It runs
+   * beside other work rather than blocking it: the save already exists, and a
+   * failure leaves it exactly as it was, ready to capture again.
+   */
+  async function capturePage(itemId: string, url: string) {
+    const apiKey = captureSession.key();
+    if (!apiKey) return;
+    setCapturingIds((current) => new Set(current).add(itemId));
+    setAnnouncement("Capturing the page…");
+    try {
+      const markdown = await scrapeMarkdown(apiKey, url);
+      const change = await libraryRepository.captureItemPage(itemId, markdown, url);
+      setAnnouncement("Page captured.");
+      // A recapture replaces a version the owner may have trimmed by hand.
+      if (change && "captured_document" in change.mutation) offerUndo(change, "Page recaptured.");
+    } catch (error: unknown) {
+      setLocalError(readError(error));
+      setAnnouncement("Page capture failed.");
+    } finally {
+      setCapturingIds((current) => {
+        const next = new Set(current);
+        next.delete(itemId);
+        return next;
+      });
+    }
   }
 
   async function deleteItem(item: LibraryItemView) {
@@ -1085,6 +1120,19 @@ export function App() {
       }),
     );
     if (saved) offerUndo(undo, "Summary added to your note.");
+    return saved;
+  }
+
+  async function editCapturedPage(item: LibraryItemView, markdown: string) {
+    const current = item.capturedDocument;
+    if (!current) return false;
+    let undo: UndoableChange | null = null;
+    const saved = await runAction("Save page", "Page saved.", () =>
+      libraryRepository.editCapturedPage(item.id, current, markdown).then((change) => {
+        undo = change;
+      }),
+    );
+    if (saved) offerUndo(undo, "Page saved.");
     return saved;
   }
 
@@ -1637,6 +1685,9 @@ export function App() {
             onAppendToNote={appendToNote}
             onSetSuggestedTitle={setSuggestedTitle}
             onOpenAssistantSettings={openAssistantSettings}
+            capturing={capturingIds.has(readerItem.id)}
+            onCapturePage={(item) => void capturePage(item.id, item.url)}
+            onEditPage={editCapturedPage}
             tagVocabulary={tagVocabulary}
             documents={zenDocuments}
             onOpenDocument={(documentId) => {
@@ -3264,7 +3315,10 @@ function KeyboardShortcutsDialog({ onClose }: { onClose: () => void }) {
 
 function ReaderView({
   busy,
+  capturing,
   item,
+  onCapturePage,
+  onEditPage,
   onAddSuggestedTags,
   onAppendToNote,
   onSetSuggestedTitle,
@@ -3278,6 +3332,9 @@ function ReaderView({
   tagVocabulary,
 }: {
   busy: boolean;
+  capturing: boolean;
+  onCapturePage: (item: LibraryItemView) => void;
+  onEditPage: (item: LibraryItemView, markdown: string) => Promise<boolean>;
   documents: PersistedZenDocument[];
   onOpenDocument(documentId: string): void;
   item: LibraryItemView;
@@ -3303,38 +3360,42 @@ function ReaderView({
     null,
   );
   const [capturedContextLoading, setCapturedContextLoading] = useState(false);
-  const [captureOpen, setCaptureOpen] = useState(false);
+  const [pageDraft, setPageDraft] = useState<string | null>(null);
   const assistant = useSyncExternalStore(assistantSession.subscribe, assistantSession.getSnapshot);
   const assistantAvailable = assistant.status === "ready" || assistant.status === "locked";
+  const pageCapture = useSyncExternalStore(captureSession.subscribe, captureSession.getSnapshot);
+  const captureAvailable = pageCapture.status === "ready" || pageCapture.status === "locked";
+  // A tab without the key sends the owner to enter it rather than failing.
+  const requestCapture = () =>
+    pageCapture.status === "ready" ? onCapturePage(item) : onOpenAssistantSettings();
   const imageCloseRef = useRef<HTMLButtonElement | null>(null);
   const label = item.title?.trim() || item.url;
-  // The excerpt is what the owner authored and edited, so it is what the
-  // reader shows. A captured page is an archive of the source and gets its own
-  // labelled section: standing in for the excerpt would quietly undo every
-  // trim made to it, with no way to tell which of the two is on screen.
+  // A save has one body. A captured page is the fuller text, so it is what the
+  // Reader shows, with a provenance line saying so; the excerpt stays the short
+  // summary in lists and search, and is the body only when nothing is captured.
   const authoredContext = item.excerpt?.trim() ? item.excerpt : null;
   const capture = item.capturedDocument ?? null;
   const imagesAllowed = itemsWithImages.has(item.id);
 
   useEffect(() => {
     setExpandedImage(null);
+    setPageDraft(null);
   }, [item.id]);
 
-  // An item with no excerpt of its own has nothing else to read, so its
-  // archive opens on arrival. Otherwise the excerpt leads and the archive waits
-  // to be asked for.
-  useEffect(() => {
-    setCaptureOpen(Boolean(capture) && !authoredContext);
-  }, [authoredContext, capture?.sha256, item.id]);
+  async function savePageDraft() {
+    if (pageDraft !== null && pageDraft.trim() && (await onEditPage(item, pageDraft))) {
+      setPageDraft(null);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
     setCapturedContext(null);
     setCapturedContextError(null);
     const reference = item.capturedDocument;
-    // Fetched only once the section is open: the bytes live outside the
-    // library projection precisely so that opening a save never pulls them.
-    if (!reference || !captureOpen) {
+    // A captured page is fetched when its save is opened, never with the
+    // library: the bytes live outside the projection for exactly that reason.
+    if (!reference) {
       setCapturedContextLoading(false);
       return () => {
         cancelled = true;
@@ -3360,7 +3421,7 @@ function ReaderView({
     return () => {
       cancelled = true;
     };
-  }, [captureOpen, item.id, item.capturedDocument?.sha256]);
+  }, [item.id, item.capturedDocument?.sha256]);
 
   useEffect(() => {
     if (expandedImage) imageCloseRef.current?.focus();
@@ -3478,7 +3539,27 @@ function ReaderView({
           ) : null}
           <ZenBacklinks target={`item:${item.id}`} documents={documents} onOpen={onOpenDocument} />
           <div className="reader-body">
-            {authoredContext ? (
+            {pageDraft !== null ? (
+              <textarea
+                aria-label="Captured page Markdown"
+                className="reader-page-editor"
+                onChange={(event) => setPageDraft(event.target.value)}
+                spellCheck={false}
+                value={pageDraft}
+              />
+            ) : capturedContext ? (
+              <MarkdownDocument
+                imageBaseUrl={item.url}
+                imagesAllowed={imagesAllowed}
+                onLoadImages={loadImagesForItem}
+                onOpenImage={(image, opener) =>
+                  setExpandedImage({ image, opener })
+                }
+                source={capturedContext}
+              />
+            ) : capture && capturedContextLoading ? (
+              <p role="status">Loading the captured page…</p>
+            ) : authoredContext ? (
               <MarkdownDocument
                 imageBaseUrl={item.url}
                 imagesAllowed={imagesAllowed}
@@ -3488,54 +3569,54 @@ function ReaderView({
                 }
                 source={authoredContext}
               />
-            ) : capture ? null : (
+            ) : capture || captureAvailable ? null : (
               <p>No preview yet.</p>
             )}
+            {capturedContextError ? (
+              <p className="sync-error" role="alert">{capturedContextError}</p>
+            ) : null}
             {capture ? (
-              <section className="reader-capture">
-                <button
-                  aria-controls="reader-capture-body"
-                  aria-expanded={captureOpen}
-                  className="reader-capture-toggle"
-                  id="reader-capture-toggle"
-                  onClick={() => setCaptureOpen((open) => !open)}
-                  type="button"
-                >
-                  <span aria-hidden="true">{captureOpen ? "▾" : "▸"}</span>
-                  <strong>Captured page</strong>
-                  <small>
-                    {capture.provenance.provider} ·{" "}
-                    {formatDate(capture.provenance.captured_at)} ·{" "}
-                    {formatBytes(capture.byte_length)}
-                  </small>
+              <p className="reader-capture">
+                <span>
+                  Captured with {capture.provenance.provider} ·{" "}
+                  {formatDate(capture.provenance.captured_at)} ·{" "}
+                  {formatBytes(capture.byte_length)}
+                </span>
+                {pageDraft !== null ? (
+                  <>
+                    <button
+                      className="assistant-action assistant-action-primary"
+                      disabled={busy || !pageDraft.trim() || pageDraft === capturedContext}
+                      onClick={() => void savePageDraft()}
+                      type="button"
+                    >
+                      Save page
+                    </button>
+                    <button className="assistant-action assistant-action-quiet" onClick={() => setPageDraft(null)} type="button">
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    {capturedContext !== null ? (
+                      <button className="assistant-action" disabled={capturing} onClick={() => setPageDraft(capturedContext)} type="button">
+                        Edit page
+                      </button>
+                    ) : null}
+                    {captureAvailable ? (
+                      <button className="assistant-action" disabled={capturing} onClick={requestCapture} type="button">
+                        {capturing ? "Capturing…" : "Recapture"}
+                      </button>
+                    ) : null}
+                  </>
+                )}
+              </p>
+            ) : captureAvailable ? (
+              <p className="reader-capture">
+                <button className="assistant-action" disabled={capturing} onClick={requestCapture} type="button">
+                  {capturing ? "Capturing the page…" : "Capture page"}
                 </button>
-                {captureOpen ? (
-                  <div
-                    aria-labelledby="reader-capture-toggle"
-                    className="reader-capture-body"
-                    id="reader-capture-body"
-                    role="region"
-                  >
-                    {capturedContextLoading ? (
-                      <p role="status">Loading captured page content…</p>
-                    ) : null}
-                    {capturedContextError ? (
-                      <p className="sync-error" role="alert">{capturedContextError}</p>
-                    ) : null}
-                    {capturedContext ? (
-                      <MarkdownDocument
-                        imageBaseUrl={item.url}
-                        imagesAllowed={imagesAllowed}
-                        onLoadImages={loadImagesForItem}
-                        onOpenImage={(image, opener) =>
-                          setExpandedImage({ image, opener })
-                        }
-                        source={capturedContext}
-                      />
-                    ) : null}
-                  </div>
-                ) : null}
-              </section>
+              </p>
             ) : null}
             <p className="reader-source"><a href={item.url} rel="noreferrer" target="_blank">{readHostname(item.url)} ↗</a></p>
           </div>

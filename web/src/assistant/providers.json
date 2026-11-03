@@ -1,6 +1,7 @@
 {
-  "$comment": "Reviewed assistant destinations. scripts/check-dist.mjs requires the owner app's connect-src to equal 'self', https://api.github.com, every hosted origin below, and the loopback sources. Add a provider only after its CORS behaviour from https://researchpocket.github.io is verified and recorded in docs/v2/ADR_0015_BYOK_AI_ASSISTANCE.md.",
+  "$comment": "Reviewed assistant destinations. scripts/check-dist.mjs requires the owner app's connect-src to equal 'self', https://api.github.com, every hosted origin below, the page-capture origins, and the loopback sources. Add a provider only after its CORS behaviour from https://researchpocket.github.io is verified and recorded in docs/v2/ADR_0015_BYOK_AI_ASSISTANCE.md (assistant) or docs/v2/ADR_0016_BROWSER_PAGE_CAPTURE.md (page capture).",
   "loopbackSources": ["http://localhost:*", "http://127.0.0.1:*"],
+  "captureOrigins": ["https://api.firecrawl.dev"],
   "providers": [
     {
       "id": "openai",

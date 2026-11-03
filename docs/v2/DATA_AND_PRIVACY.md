@@ -118,6 +118,12 @@ enter the library replica, sync, exports, or published output, and forgetting
 does not revoke the key with the provider. See
 [ADR 0015](./ADR_0015_BYOK_AI_ASSISTANCE.md).
 
+Page capture in the browser app sends only the saved URL and your Firecrawl key
+to Firecrawl. The key follows the same memory-or-remembered rules under its own
+record. The captured Markdown is private library content: it syncs to your
+private repository as a content-addressed file and is never published. See
+[ADR 0016](./ADR_0016_BROWSER_PAGE_CAPTURE.md).
+
 ## Backups and recovery
 
 Before an upgrade that includes a migration, close every ResearchPocket process

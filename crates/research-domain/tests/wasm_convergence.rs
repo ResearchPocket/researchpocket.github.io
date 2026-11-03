@@ -2,8 +2,8 @@
 
 use research_domain::{
     GOLDEN_CANONICAL_JSON, apply_mutation, apply_remote_envelopes, apply_zen_envelope,
-    apply_zen_mutation, initialize_library, materialize_library, run_convergence_scenario,
-    zen_document_view,
+    apply_zen_mutation, create_captured_document, initialize_library, materialize_library,
+    run_convergence_scenario, zen_document_view,
 };
 use serde_json::{Value, json};
 use wasm_bindgen_test::*;
@@ -203,6 +203,63 @@ fn browser_snapshot_boundary_preserves_the_mutation_and_replay_contract() {
     .expect("remote result JSON");
     assert_eq!(replayed["pending_indices"], json!([]));
     assert_eq!(replayed["projection"], expected_projection);
+}
+
+/// A page captured in the owner app is attached the way the CLI attaches one:
+/// the item gains the content-addressed reference, and a reference the domain
+/// would not have produced is refused before it reaches the library.
+#[wasm_bindgen_test]
+fn browser_capture_attaches_only_a_validated_reference() {
+    const ITEM_ID: &str = "00000000-0000-7000-8000-000000000003";
+    let empty = initialize_library("18446744073709551614").expect("empty snapshot");
+    let created = mutation(
+        &empty,
+        "1",
+        json!({
+            "type": "create",
+            "item_id": ITEM_ID,
+            "url": "https://example.com/article",
+            "title": null,
+            "excerpt": null,
+            "favorite": false,
+            "language": null,
+            "saved_at": 1_700_000_000,
+            "note": null,
+            "tags": []
+        }),
+    );
+    let created_snapshot = created["snapshot"].as_str().expect("created snapshot");
+    let artifact = create_captured_document(
+        "# Article\r\n\r\nThe whole page.",
+        "firecrawl",
+        "https://example.com/article",
+        "2026-11-03T00:00:00Z",
+    )
+    .expect("captured document");
+    let reference = serde_json::to_value(&artifact.reference).expect("reference JSON");
+
+    let captured = mutation(
+        created_snapshot,
+        "2",
+        json!({"type": "edit", "item_id": ITEM_ID, "captured_document": reference}),
+    );
+    assert_eq!(captured["item"]["captured_document"], reference);
+
+    let mut forged = reference.clone();
+    forged["media_type"] = json!("text/html");
+    assert!(
+        apply_mutation(
+            created_snapshot,
+            "18446744073709551614",
+            "00000000-0000-7000-8000-000000000001",
+            "00000000-0000-7000-8000-000000000002",
+            "2",
+            "2026-07-11T00:00:00Z",
+            &json!({"type": "edit", "item_id": ITEM_ID, "captured_document": forged})
+                .to_string(),
+        )
+        .is_err()
+    );
 }
 
 fn mutation(snapshot: &str, sequence: &str, mutation: Value) -> Value {

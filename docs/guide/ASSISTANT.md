@@ -70,6 +70,17 @@ is an ordinary edit, so **Undo** restores the old one. **Another** asks for a
 different title, telling the model which one you passed over, and **Dismiss**
 keeps the title you have.
 
+## Capture whole pages
+
+Under **Settings → Assistant → Page capture**, add a
+[Firecrawl](https://www.firecrawl.dev) key to keep each save's whole page as
+Markdown. ResearchPocket checks the key without spending a credit and shows how
+many credits are left. **Capture each new save** captures every link you save
+in this browser; turn it off to capture only when you choose **Capture page**
+on a save. Only the saved URL is sent to Firecrawl. A captured page is read
+offline, syncs with your library, and is included in what the assistant reads,
+so tags, summaries, and titles have the whole page to work from.
+
 ## Use the assistant in Zen documents
 
 Open a document. With a provider set up, two controls appear.

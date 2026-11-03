@@ -33,6 +33,7 @@ import adrLibraryGraphSource from "../../../docs/v2/ADR_0012_DERIVED_LIBRARY_GRA
 import adrBrowserTokenSource from "../../../docs/v2/ADR_0013_REMEMBER_BROWSER_TOKEN.md?raw";
 import adrZenLinksSource from "../../../docs/v2/ADR_0014_ZEN_LINK_COMPLETION.md?raw";
 import adrAssistantSource from "../../../docs/v2/ADR_0015_BYOK_AI_ASSISTANCE.md?raw";
+import adrPageCaptureSource from "../../../docs/v2/ADR_0016_BROWSER_PAGE_CAPTURE.md?raw";
 import releaseSource from "../../../docs/releases/v2.3.0.md?raw";
 import release222Source from "../../../docs/releases/v2.2.2.md?raw";
 import release221Source from "../../../docs/releases/v2.2.1.md?raw";
@@ -352,6 +353,14 @@ export const referenceDocuments: ReferenceDocument[] = [
     description: "Architecture decision 0015: bring-your-own-key assistance. Historical design context; see user guides for shipped behavior.",
     sourcePath: "docs/v2/ADR_0015_BYOK_AI_ASSISTANCE.md",
     source: adrAssistantSource,
+  },
+  {
+    id: "adr-page-capture",
+    section: "decisions",
+    title: "0016: Page capture in the owner app",
+    description: "Architecture decision 0016: Firecrawl page capture in the owner app. Historical design context; see user guides for shipped behavior.",
+    sourcePath: "docs/v2/ADR_0016_BROWSER_PAGE_CAPTURE.md",
+    source: adrPageCaptureSource,
   },
   {
     id: "release",

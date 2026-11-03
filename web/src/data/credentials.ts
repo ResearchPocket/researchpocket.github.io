@@ -36,8 +36,22 @@ interface AssistantRecord {
   saved: { version: 1; binding: AssistantKeyBinding; apiKey: string } | null;
 }
 
+/** Page capture choices; like the assistant's, they never leave this profile. */
+export interface CaptureSettings {
+  version: 1;
+  /** Capture each page right after it is saved in this browser. */
+  captureOnSave: boolean;
+}
+
+interface CaptureRecord {
+  key: "firecrawl";
+  revision: number;
+  settings: CaptureSettings | null;
+  saved: { version: 1; apiKey: string } | null;
+}
+
 interface CredentialDatabase extends DBSchema {
-  credentials: { key: string; value: CredentialRecord | AssistantRecord };
+  credentials: { key: string; value: CredentialRecord | AssistantRecord | CaptureRecord };
 }
 
 async function database(name: string) {
@@ -187,6 +201,53 @@ export async function forgetAssistant(name: string, clearSettings: boolean): Pro
     });
     await tx.done;
     return revision;
+  } finally {
+    db.close();
+  }
+}
+
+/** The Firecrawl record shares the same local-only database under its own key. */
+export async function readCapture(name: string) {
+  const db = await database(name);
+  try {
+    const record = (await db.get("credentials", "firecrawl")) as CaptureRecord | undefined;
+    const saved = record?.saved?.version === 1 ? record.saved : null;
+    return {
+      revision: record?.revision ?? 0,
+      settings: record?.settings ?? null,
+      apiKey: record?.settings ? saved?.apiKey ?? null : null,
+    };
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Saves the settings, and the key only when the owner opted in; `null`
+ * settings turn page capture off and drop the key. A forget in another tab
+ * after `expectedRevision` was read wins over a late remember.
+ */
+export async function writeCapture(
+  name: string,
+  settings: CaptureSettings | null,
+  apiKey: string | null,
+  expectedRevision: number,
+): Promise<{ revision: number; remembered: boolean }> {
+  const db = await database(name);
+  try {
+    const tx = db.transaction("credentials", "readwrite");
+    const record = (await tx.store.get("firecrawl")) as CaptureRecord | undefined;
+    const current = record?.revision ?? 0;
+    const remembered = settings !== null && apiKey !== null && current === expectedRevision;
+    const revision = current + 1;
+    await tx.store.put({
+      key: "firecrawl",
+      revision,
+      settings,
+      saved: remembered ? { version: 1, apiKey } : null,
+    });
+    await tx.done;
+    return { revision, remembered };
   } finally {
     db.close();
   }

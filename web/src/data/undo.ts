@@ -58,6 +58,14 @@ export function createUndoableChange(
   if (beforeItem.language !== afterItem.language) {
     mutation.language = textUpdate(beforeItem.language);
   }
+  // A replaced page version is restored by pointing back at it; the first
+  // capture of a save has no earlier version to return to.
+  if (
+    beforeItem.capturedDocument &&
+    beforeItem.capturedDocument.sha256 !== afterItem.capturedDocument?.sha256
+  ) {
+    mutation.captured_document = beforeItem.capturedDocument;
+  }
   const tagsChanged = !sameTags(beforeItem.tags, afterItem.tags);
 
   return {
@@ -77,6 +85,7 @@ export function matchesUndoExpectation(
       current.url === expected.url &&
       current.title === expected.title &&
       current.excerpt === expected.excerpt &&
+      current.capturedDocument?.sha256 === expected.capturedDocument?.sha256 &&
       current.note === expected.note &&
       current.favorite === expected.favorite &&
       current.language === expected.language &&

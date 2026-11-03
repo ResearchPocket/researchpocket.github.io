@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, useSyncExternalStore, type SubmitEvent } from "react";
+import { useEffect, useId, useState, useSyncExternalStore, type ReactNode, type SubmitEvent } from "react";
 
 import {
   PROVIDER_PRESETS,
@@ -8,6 +8,8 @@ import {
 } from "../assistant/presets.ts";
 import type { ModelOption } from "../assistant/client.ts";
 import { assistantSession, loadAssistantClient } from "../assistant/session.ts";
+import { FIRECRAWL_KEY_URL } from "../capture/firecrawl.ts";
+import { captureSession } from "../capture/session.ts";
 
 const CUSTOM_MODEL = "__custom-model__";
 
@@ -39,8 +41,8 @@ export function AssistantSettings() {
       <div>
         <h3>Assistant</h3>
         <p>
-          Use your own model key to suggest tags and draft summaries for a save. Requests go
-          straight from this browser to the provider you choose, only when you ask.
+          Use your own keys: a model to suggest tags, summaries, and titles, and Firecrawl to
+          capture whole pages. Requests go straight from this browser to the service you choose.
         </p>
       </div>
       <div className="assistant-settings">
@@ -54,8 +56,100 @@ export function AssistantSettings() {
             onSaved={() => setEditing(false)}
           />
         )}
+        <PageCaptureSettings />
       </div>
     </div>
+  );
+}
+
+/**
+ * Firecrawl is the only page-capture service. Only the saved URL is sent, and
+ * only when the owner captures a page or, if they keep it on, saves one.
+ */
+function PageCaptureSettings() {
+  const snapshot = useSyncExternalStore(captureSession.subscribe, captureSession.getSnapshot);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function run(task: () => Promise<void>) {
+    setBusy(true);
+    setError(null);
+    try {
+      await task();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "That change could not be saved.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (snapshot.status === "loading") return null;
+  const credits = snapshot.remainingCredits === null
+    ? ""
+    : ` · ${snapshot.remainingCredits.toLocaleString()} credits left`;
+
+  return (
+    <section aria-labelledby="page-capture-heading" className="page-capture-settings">
+      <h4 id="page-capture-heading">Page capture</h4>
+      {snapshot.status === "off" ? (
+        <>
+          <p className="sync-help">
+            Keep each save&apos;s whole page as Markdown, so you can read it offline and the
+            assistant can use it. Only the saved URL is sent to Firecrawl.{" "}
+            <a href={FIRECRAWL_KEY_URL} rel="noreferrer" target="_blank">Get a Firecrawl key</a>
+          </p>
+          <UnlockForm
+            busy={busy}
+            label="Firecrawl"
+            onUnlock={(apiKey, remember, data) =>
+              run(() => captureSession.save({ apiKey, remember, captureOnSave: data.get("capture-on-save") === "on" }))}
+            submitLabel="Turn on"
+          >
+            <label className="check-field">
+              <input defaultChecked name="capture-on-save" type="checkbox" />
+              <span>Capture each new save</span>
+            </label>
+          </UnlockForm>
+        </>
+      ) : (
+        <>
+          <p className="settings-status assistant-status" role="status">
+            <span aria-hidden="true" className={`status-dot${snapshot.status === "ready" ? "" : " status-dot-warning"}`} />
+            {snapshot.status === "ready" ? `Ready${credits}` : "Key needed for this tab"}
+          </p>
+          {snapshot.status === "locked" ? (
+            <UnlockForm busy={busy} label="Firecrawl" onUnlock={(apiKey, remember) => run(() => captureSession.unlock(apiKey, remember))} />
+          ) : (
+            <>
+              <label className="check-field">
+                <input
+                  checked={snapshot.captureOnSave}
+                  disabled={busy}
+                  onChange={(event) => void run(() => captureSession.setCaptureOnSave(event.target.checked))}
+                  type="checkbox"
+                />
+                <span>Capture each new save</span>
+              </label>
+              <label className="check-field">
+                <input
+                  checked={snapshot.keyRemembered}
+                  disabled={busy}
+                  onChange={(event) => void run(() => captureSession.setRemembered(event.target.checked))}
+                  type="checkbox"
+                />
+                <span>Remember key in this browser</span>
+              </label>
+            </>
+          )}
+          <div className="assistant-buttons">
+            <button className="text-button" disabled={busy} onClick={() => void run(() => captureSession.turnOff())} type="button">
+              Turn off page capture
+            </button>
+          </div>
+        </>
+      )}
+      {error ? <p className="sync-error" role="alert">{error}</p> : null}
+    </section>
   );
 }
 
@@ -86,8 +180,8 @@ function AssistantSummary({ onChange }: { onChange: () => void }) {
         {snapshot.status === "ready" ? "Ready" : "Key needed for this tab"}
       </p>
       <p className="sync-help">
-        Open any save: the Reader shows an Assistant panel with <strong>Suggest tags</strong> and{" "}
-        <strong>Summarize</strong> under the title.
+        Open any save: the Reader&apos;s Assistant panel under the title suggests tags, summaries,
+        and titles.
       </p>
       <dl className="assistant-facts">
         <div><dt>Provider</dt><dd>{preset.label}</dd></div>
@@ -153,10 +247,12 @@ function AssistantSummary({ onChange }: { onChange: () => void }) {
   );
 }
 
-function UnlockForm({ busy, label, onUnlock }: {
+function UnlockForm({ busy, children, label, onUnlock, submitLabel = "Use key" }: {
   busy: boolean;
+  children?: ReactNode;
   label: string;
-  onUnlock: (key: string, remember: boolean) => Promise<void>;
+  onUnlock: (key: string, remember: boolean, data: FormData) => Promise<void>;
+  submitLabel?: string;
 }) {
   function submit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -165,7 +261,7 @@ function UnlockForm({ busy, label, onUnlock }: {
     const key = String(data.get("assistant-unlock-key") ?? "");
     const remember = data.get("assistant-unlock-remember") === "on";
     form.reset();
-    void onUnlock(key, remember);
+    void onUnlock(key, remember, data);
   }
 
   return (
@@ -174,11 +270,12 @@ function UnlockForm({ busy, label, onUnlock }: {
         <span>{label} key</span>
         <input autoCapitalize="none" autoComplete="off" name="assistant-unlock-key" required spellCheck={false} type="password" />
       </label>
+      {children}
       <label className="check-field">
         <input name="assistant-unlock-remember" type="checkbox" />
         <span>Remember key in this browser</span>
       </label>
-      <button className="primary-button" disabled={busy} type="submit">Use key</button>
+      <button className="primary-button" disabled={busy} type="submit">{submitLabel}</button>
     </form>
   );
 }

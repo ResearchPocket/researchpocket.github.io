@@ -4,6 +4,7 @@ import {
   type BrowserDatabase,
   type CapturedDocumentReference,
   type PersistedBatch,
+  type PersistedCapturedDocument,
   type PersistedCheckpoint,
   type PersistedCheckpointCoverage,
   type PersistedChangeField,
@@ -524,6 +525,7 @@ class LibraryRepository {
     reference: CapturedDocumentReference,
     path: string,
     markdown: string,
+    pendingUpload = false,
   ): Promise<void> {
     validateCapturedDocumentReference(reference);
     const byteLength = new TextEncoder().encode(markdown).byteLength;
@@ -544,7 +546,78 @@ class LibraryRepository {
         markdown,
         byteLength,
         storedAt: new Date().toISOString(),
+        // Bytes already in the repository, downloaded or confirmed, never
+        // need another upload.
+        ...(pendingUpload && (!existing || existing.pendingUpload)
+          ? { pendingUpload: true as const }
+          : {}),
       });
+    });
+  }
+
+  /** Attaches a page the owner just captured with Firecrawl. */
+  async captureItemPage(
+    itemId: string,
+    markdown: string,
+    sourceUrl: string,
+  ): Promise<UndoableChange | null> {
+    return this.attachCapturedPage(itemId, markdown, {
+      provider: "firecrawl",
+      source_url: sourceUrl,
+      captured_at: new Date().toISOString(),
+    });
+  }
+
+  /**
+   * Saves the owner's edit of a captured page as a new immutable version. It
+   * keeps the capture's provenance, so clients that know only Firecrawl
+   * captures still accept it; the previous version stays recoverable.
+   */
+  async editCapturedPage(
+    itemId: string,
+    current: CapturedDocumentReference,
+    markdown: string,
+  ): Promise<UndoableChange | null> {
+    return this.attachCapturedPage(itemId, markdown, current.provenance);
+  }
+
+  /**
+   * The bytes are stored first and marked for upload, so the update that
+   * references them can never reach the repository ahead of its content.
+   */
+  private async attachCapturedPage(
+    itemId: string,
+    markdown: string,
+    provenance: CapturedDocumentReference["provenance"],
+  ): Promise<UndoableChange | null> {
+    const artifact = JSON.parse(
+      await domainCore.call(
+        "createCapturedDocument",
+        markdown,
+        provenance.provider,
+        provenance.source_url,
+        provenance.captured_at,
+      ),
+    ) as { path: string; markdown: string; reference: CapturedDocumentReference };
+    await this.storeCapturedDocument(artifact.reference, artifact.path, artifact.markdown, true);
+    return this.commitMutation({
+      type: "edit",
+      item_id: itemId,
+      captured_document: artifact.reference,
+    });
+  }
+
+  async pendingCapturedDocuments(): Promise<PersistedCapturedDocument[]> {
+    const documents = await (await this.database()).getAll("capturedDocuments");
+    return documents.filter((document) => document.pendingUpload);
+  }
+
+  async confirmCapturedDocumentUploaded(sha256: string): Promise<void> {
+    await this.write(async (database) => {
+      const existing = await database.get("capturedDocuments", sha256);
+      if (!existing?.pendingUpload) return;
+      const { pendingUpload: _, ...confirmed } = existing;
+      await database.put("capturedDocuments", confirmed);
     });
   }
 
@@ -1705,6 +1778,12 @@ function normalizeMutation(
   removeUnchangedTextUpdate(normalized, "note", beforeItem.note);
   removeUnchangedTextUpdate(normalized, "language", beforeItem.language);
   if (normalized.favorite === beforeItem.favorite) delete normalized.favorite;
+  if (
+    normalized.captured_document !== undefined &&
+    JSON.stringify(normalized.captured_document) === JSON.stringify(beforeItem.capturedDocument)
+  ) {
+    delete normalized.captured_document;
+  }
 
   if (!("note" in normalized)) delete normalized.expected_note;
 
@@ -1774,6 +1853,10 @@ function summarizeMutation(
     }
     for (const field of ["url", "title", "excerpt", "note", "language"] as const) {
       if (beforeItem[field] !== afterItem[field]) fields.push(field);
+    }
+    if (beforeItem.capturedDocument?.sha256 !== afterItem.capturedDocument?.sha256 ||
+      beforeItem.capturedDocument?.provenance.captured_at !== afterItem.capturedDocument?.provenance.captured_at) {
+      fields.push("capture");
     }
     if (beforeItem.favorite !== afterItem.favorite) favorite = afterItem.favorite;
     addedTags = afterItem.tags.filter((tag) => !beforeItem.tags.includes(tag));
@@ -1845,6 +1928,7 @@ function isPersistedChangeSummary(value: unknown): value is PersistedChangeSumma
     "excerpt",
     "note",
     "language",
+    "capture",
   ];
   return (
     summary.version === 1 &&
@@ -2428,6 +2512,30 @@ class LibraryWorkspace {
       path,
       markdown,
     );
+  }
+
+  async captureItemPage(
+    itemId: string,
+    markdown: string,
+    sourceUrl: string,
+  ): Promise<UndoableChange | null> {
+    return (await this.instance()).captureItemPage(itemId, markdown, sourceUrl);
+  }
+
+  async editCapturedPage(
+    itemId: string,
+    current: CapturedDocumentReference,
+    markdown: string,
+  ): Promise<UndoableChange | null> {
+    return (await this.instance()).editCapturedPage(itemId, current, markdown);
+  }
+
+  async pendingCapturedDocuments(): Promise<PersistedCapturedDocument[]> {
+    return (await this.instance()).pendingCapturedDocuments();
+  }
+
+  async confirmCapturedDocumentUploaded(sha256: string): Promise<void> {
+    return (await this.instance()).confirmCapturedDocumentUploaded(sha256);
   }
 
   async recordRemoteObservation(path: string, blobSha: string): Promise<void> {
