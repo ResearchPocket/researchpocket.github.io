@@ -31,7 +31,7 @@ between documents, and derived backlinks. These are browser changes beyond the
 | Saved item | An HTTP(S) URL with a title, tags, favorite state, excerpt, and private note | Library, CLI, TUI |
 | Excerpt | Bounded context about a source; editable and merged across devices | Reader and item editor |
 | Private note | Your own explanation of why a saved source matters | Item editor, CLI, TUI |
-| Captured page | Optional bounded Markdown retrieved by Firecrawl and editable in place, stored separately from the excerpt | The Reader's body |
+| Captured page | Optional read-only original page retrieved by Firecrawl, stored separately from the excerpt | The Reader, while a save has no excerpt |
 | Zen document | Your authored Markdown, tasks, and references; up to 256 KiB | Zen, `research zen`, TUI documents workspace |
 
 Saving a URL does not capture its full page. Creating a Zen document does not

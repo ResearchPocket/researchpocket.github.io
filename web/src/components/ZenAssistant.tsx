@@ -111,11 +111,11 @@ export function ZenAssistMenu({
                   <small>
                     {unavailable
                       ? action.needs === "selection"
-                        ? "Select text in edit mode first."
-                        : "Link a save with [[ first."
+                        ? "Select text first"
+                        : "Link a save with [[ first"
                       : action.id === "linked"
-                        ? `Sends ${context.linkedSaves} linked ${context.linkedSaves === 1 ? "save" : "saves"}: title, URL, excerpt.`
-                        : `Sends ${action.sends}.`}
+                        ? `Sends ${context.linkedSaves} linked ${context.linkedSaves === 1 ? "save" : "saves"}: title, URL, excerpt`
+                        : `Sends ${action.sends}`}
                   </small>
                 </button>
               );

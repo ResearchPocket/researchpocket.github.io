@@ -11,8 +11,8 @@ is needed only when you choose to synchronize.
    choose **Restore an existing library** and follow [Sync and recovery](SYNC.md).
 3. Open **Library**, paste an absolute `https://` URL into its search/save field,
    and submit the save. On a small screen, use **Save a link**.
-4. Open the save to read it; choose **Edit save** to add a title, excerpt, private
-   note, or tags.
+4. Open the save to read it, and choose the edit (pencil) button to change its
+   title, tags, excerpt, or private note in place.
 5. Open **Zen** to create a document or task list alongside your sources.
 
 Zen is the default workspace once a library is open. The Library holds URLs;

@@ -20,6 +20,7 @@ import {
   type GraphNode,
   type GraphProjection,
 } from "../data/graph.ts";
+import { AppIcon } from "./AppIcon.tsx";
 
 export interface LibraryGraphProps {
   /** The list's own result set — the graph never shows a different membership. */
@@ -474,7 +475,7 @@ export function LibraryGraph({
                 title="Close details"
                 type="button"
               >
-                <span aria-hidden="true">×</span>
+                <AppIcon name="close" />
                 <span className="sr-only">Close details</span>
               </button>
             ) : null}

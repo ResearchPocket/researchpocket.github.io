@@ -109,8 +109,9 @@ Notes of linked saves are never sent.
 
 ## What gets sent
 
-The line under the Reader panel's actions lists each field and its size before
-you send. A request includes:
+The line under the Reader panel's actions names each field, the total size, and
+the provider before you send, for example "Sends title, URL, excerpt, tags ·
+1.6k → OpenAI". A request includes:
 
 - the save's title, URL, and excerpt;
 - its captured page, up to 24,000 characters in total;

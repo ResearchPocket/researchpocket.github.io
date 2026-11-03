@@ -136,6 +136,7 @@ export function ReaderAssistant({
       >
         <AppIcon name="assistant" />
         Assistant
+        <AppIcon name="chevron" />
       </button>
     );
   }
@@ -156,6 +157,7 @@ export function ReaderAssistant({
           >
             <AppIcon name="assistant" />
             Assistant
+            <AppIcon name="chevron" />
           </button>
         </h2>
         <span className="assistant-model">{preset.label} · {snapshot.settings?.model}</span>
@@ -191,12 +193,12 @@ export function ReaderAssistant({
 
       {snapshot.status === "locked" ? (
         <p className="assistant-note">
-          Enter your {preset.label} key to use the assistant in this tab.{" "}
+          {preset.label} key needed ·{" "}
           <button className="assistant-link" onClick={onOpenSettings} type="button">Open settings</button>
         </p>
       ) : (
         <p className="assistant-note">
-          Sends {describeFields(preview.fields)} to {task.destination}. Tag names go only with Suggest tags.
+          <span title={task.destination}>Sends {describeFields(preview.fields)} → {preset.label}</span>
           {hasNote ? (
             <label className="assistant-inline-check">
               <input
@@ -216,7 +218,7 @@ export function ReaderAssistant({
       {state.kind === "done" && state.task.id === "tags" ? (
         suggestions.length === 0 ? (
           <div className="assistant-row">
-            <p className="assistant-note">No new tags to suggest—this save looks well tagged.</p>
+            <p className="assistant-note">No new tags.</p>
             <div className="assistant-actions">
               <button className="assistant-action assistant-action-quiet" onClick={task.reset} type="button">Dismiss</button>
             </div>

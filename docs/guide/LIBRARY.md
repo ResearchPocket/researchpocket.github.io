@@ -10,9 +10,10 @@ In the browser, open **Library** and paste an absolute HTTP(S) URL into the
 search/save field. Submit the offered save action; ordinary search text filters
 the library instead. On a small screen, **Save a link** opens capture.
 
-Open a save for the Reader and choose **Edit save** to change its context. Titles,
-excerpts, private notes, tags, and favorite state are yours to curate. Editing a
-save does not retrieve the page again.
+Open a save for the Reader and choose the edit (pencil) button to edit its title,
+tags, excerpt, and private note in place. From the library list or command
+palette, **Edit save** opens a quick dialog for the title, URL, tags, favorite
+state, and note. Editing a save does not retrieve the page again.
 
 From the CLI:
 
@@ -51,11 +52,11 @@ and does not search every document body.
 
 ## Read a save
 
-The Reader shows one body: the captured page when a save has one, otherwise
-your excerpt. The excerpt stays the short summary in your library list. Your
-private note remains item context. Open the
-original URL when you need the current source, and use **Edit save** for your
-own context. [Capture and reading](READING.md) explains what is stored, fetched,
+The Reader shows the save's excerpt, or its original captured page while it
+has no excerpt. Editing always changes the excerpt. Your private note remains
+item context. Open the
+original URL when you need the current source, and edit the save for your own
+context. [Capture and reading](READING.md) explains what is stored, fetched,
 and available offline.
 
 ## Explore the library graph

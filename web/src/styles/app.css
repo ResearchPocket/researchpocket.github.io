@@ -1577,6 +1577,10 @@ footer {
   text-align: center;
 }
 
+.boot-shell[role="alert"] {
+  gap: var(--space-3);
+}
+
 .boot-shell .welcome-monogram {
   margin-bottom: var(--space-5);
 }
@@ -2276,6 +2280,13 @@ kbd {
   min-height: 0;
   padding: 0;
   width: 2.5rem;
+}
+
+.search-clear .app-icon,
+.undo-dismiss .app-icon,
+.graph-inspector-close .app-icon {
+  height: 1rem;
+  width: 1rem;
 }
 
 .app-icon {
@@ -3093,15 +3104,13 @@ kbd {
 
 .reader-capture {
   align-items: center;
-  border-top: 1px solid var(--color-border);
   color: var(--color-text-muted);
   display: flex;
   flex-wrap: wrap;
   font-size: var(--font-size-xs);
   gap: var(--space-2);
+  margin: 0;
   max-width: var(--measure);
-  padding-top: 1rem;
-  width: 100%;
 }
 
 .reader-capture > span {
@@ -3583,8 +3592,23 @@ kbd {
 
   /* The groups collapse so their buttons join the one strip. This is what puts
      Zen and the tags one tap from anywhere instead of behind a bottom bar. */
-  .rail-tags {
+  .rail-tags,
+  .rail-nav[aria-label="Library views"] {
     display: contents;
+  }
+
+  /* On the strip Zen follows All saves; the sidebar keeps its sections. */
+  .rail-tags > *,
+  .rail-nav[aria-label="Library views"] > button {
+    order: 2;
+  }
+
+  .rail-nav[aria-label="Library views"] > button:first-child {
+    order: 0;
+  }
+
+  .rail-nav[aria-label="Zen"] {
+    order: 1;
   }
 
   .rail-label-wide {
@@ -6641,6 +6665,16 @@ kbd {
   min-height: 1.75rem;
   padding: 0 var(--space-2);
   text-transform: none;
+}
+
+/* The chevron says the label opens and closes the panel. */
+.assistant-toggle .app-icon:last-child {
+  height: 0.875rem;
+  width: 0.875rem;
+}
+
+.assistant-toggle[aria-expanded="true"] .app-icon:last-child {
+  rotate: 90deg;
 }
 
 .app-shell .assistant-block-reader .assistant-header .assistant-action {
