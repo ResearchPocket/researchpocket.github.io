@@ -32,17 +32,15 @@ export function ZenBacklinks({
       controller.abort();
     };
   }, [target, documents]);
+  // Most saves have no backlinks; an empty box under every one is noise.
+  if (!failed && !sources?.length) return null;
   return (
     <aside className="zen-backlinks" aria-label="Linked from">
       <h2>Linked from</h2>
-      {failed ? (
+      {failed || !sources ? (
         <p role="status">
           Links could not be read. Reopen this document to retry.
         </p>
-      ) : sources === null ? (
-        <p role="status">Finding links…</p>
-      ) : sources.length === 0 ? (
-        <p>No other Zen documents link here yet.</p>
       ) : (
         <ul>
           {sources.map((doc) => (

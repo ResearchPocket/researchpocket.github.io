@@ -357,24 +357,16 @@ export function LibraryGraph({
           {overCeiling ? (
             <p className="graph-notice">
               <strong>
-                {projection.nodes.length.toLocaleString()} nodes is more than the
-                graph draws at once.
+                {projection.nodes.length.toLocaleString()} nodes is too many to draw.
               </strong>
-              <span>
-                Narrow the result set — a search, a tag, or favourites — and the
-                layout will re-form around what is left. The list shows all of
-                them either way.
-              </span>
+              <span>Narrow with a search or a tag.</span>
             </p>
           ) : null}
 
           {unavailable && !overCeiling ? (
             <p className="graph-notice">
-              <strong>This browser could not open a drawing surface.</strong>
-              <span>
-                The graph is listed below instead: every node, in degree order,
-                with the same neighbourhoods.
-              </span>
+              <strong>This browser can't draw the graph.</strong>
+              <span>It is listed below instead.</span>
             </p>
           ) : null}
 

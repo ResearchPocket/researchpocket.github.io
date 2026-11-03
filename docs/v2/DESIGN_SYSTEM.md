@@ -162,6 +162,26 @@ owner application lives at `/app/`. Every surface uses the same tokens,
 typography, controls, rules, states, and responsive breakpoints. Public pages
 must not load the owner WASM bundle or initialize private browser storage.
 
+### Touch and the installed app
+
+The owner app is installable and runs edge to edge (`viewport-fit=cover`) under
+a translucent status bar. The shell pads itself with the `safe-area-inset-*`
+values and paints the canvas under the status bar, so no view handles the
+notch, status bar, or home indicator on its own except sticky bars pinned to
+an edge. Public pages are not installable and keep the default viewport.
+
+- On iOS every text field renders at 16px or larger; WebKit otherwise zooms the
+  page on focus and leaves it zoomed.
+- Double-tap zoom is disabled (`touch-action: manipulation`); pinch zoom stays.
+- The page never scrolls sideways. Grid tracks use `minmax(0, 1fr)` rather than
+  `1fr` so long URLs and code cannot widen a column; wide content scrolls
+  inside its own box, and the root clips any remaining overflow.
+- Hover styles live under `@media (hover: hover)` so a tap does not leave a
+  control highlighted.
+- Keyboard hints and shortcut lists are hidden on touch-only devices.
+- Copy stays minimal: no line that restates a label, a heading, or what the
+  control plainly does.
+
 ## Patterns
 
 ### Buttons
@@ -191,8 +211,10 @@ decorative shadow, gradient, or third-party runtime asset.
 ### Fields
 
 Every field has a persistent text label. Placeholder text is an example, never a
-label. Optionality and formatting hints stay adjacent to the label. Errors use a
-role appropriate to their urgency and identify the failed task in text.
+label. Required fields are marked with `required`; unmarked fields are optional
+and carry no extra caption. A formatting hint appears only when the label and
+control cannot convey it. Errors use a role appropriate to their urgency and
+identify the failed task in text.
 
 Library search is one compact toolbar: a single search field, an inline clear
 action, and adjacent lifecycle filters. It does not introduce a separate search

@@ -9,7 +9,15 @@ html {
   color: var(--color-text);
   min-width: 20rem;
   text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
   -webkit-text-size-adjust: 100%;
+}
+
+/* A page wider than the screen lets a phone pan sideways and zoom out to fit
+   it. Wide content (code, tables) scrolls inside its own box instead. */
+html,
+body {
+  overflow-x: clip;
 }
 
 body {
@@ -18,6 +26,12 @@ body {
   min-height: 100vh;
   font-size: var(--font-size-md);
   line-height: var(--line-height-body);
+}
+
+/* Double-tap zoom is not a gesture this interface uses, and it fires on fast
+   repeated taps. Pinch zoom stays available. */
+* {
+  touch-action: manipulation;
 }
 
 [hidden] {
@@ -35,17 +49,12 @@ textarea {
 button,
 input[type="checkbox"] {
   cursor: pointer;
-  touch-action: manipulation;
 }
 
 button {
+  -webkit-touch-callout: none;
   -webkit-user-select: none;
   user-select: none;
-}
-
-button,
-a {
-  -webkit-tap-highlight-color: transparent;
 }
 
 button:disabled,
@@ -111,6 +120,18 @@ textarea {
   line-height: 1.5;
   padding: var(--space-3);
   resize: vertical;
+}
+
+/* iOS zooms the page into any focused field set below 16px and leaves it
+   zoomed after blur. Only iOS WebKit matches this query, so desktop and
+   Android keep the compact type. A field meant to be larger opts out here. */
+@supports (-webkit-touch-callout: none) {
+  input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], .zen-title-input),
+  select,
+  textarea,
+  [contenteditable]:not([contenteditable="false"]) {
+    font-size: 16px !important;
+  }
 }
 
 input::placeholder,
