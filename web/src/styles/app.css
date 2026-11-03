@@ -4129,7 +4129,7 @@ kbd {
   width: 10rem;
 }
 
-.setting-row input {
+.setting-row input[type="checkbox"] {
   appearance: none;
   background: var(--color-surface-raised);
   border: var(--rule) solid var(--color-border-strong);
@@ -4141,7 +4141,7 @@ kbd {
   width: 3.25rem;
 }
 
-.setting-row input::after {
+.setting-row input[type="checkbox"]::after {
   background: var(--color-text-muted);
   content: "";
   height: 1.125rem;
@@ -4151,14 +4151,26 @@ kbd {
   width: 1.125rem;
 }
 
-.setting-row input:checked {
+.setting-row input[type="checkbox"]:checked {
   background: var(--color-accent-soft);
   border-color: var(--color-accent);
 }
 
-.setting-row input:checked::after {
+.setting-row input[type="checkbox"]:checked::after {
   background: var(--color-accent-strong);
   left: 1.75rem;
+}
+
+.font-setting {
+  display: flex;
+  flex: 0 1 auto;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.font-setting input {
+  min-width: 0;
+  width: 12rem;
 }
 
 .shortcut-list {
