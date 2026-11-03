@@ -40,10 +40,6 @@ export function AssistantSettings() {
     <div className="settings-group" id="assistant-settings">
       <div>
         <h3>Assistant</h3>
-        <p>
-          Use your own keys: a model to suggest tags, summaries, and titles, and Firecrawl to
-          capture whole pages. Requests go straight from this browser to the service you choose.
-        </p>
       </div>
       <div className="assistant-settings">
         {snapshot.status === "loading" ? (
@@ -94,8 +90,7 @@ function PageCaptureSettings() {
       {snapshot.status === "off" ? (
         <>
           <p className="sync-help">
-            Keep each save&apos;s whole page as Markdown, so you can read it offline and the
-            assistant can use it. Only the saved URL is sent to Firecrawl.{" "}
+            Only the saved URL is sent to Firecrawl.{" "}
             <a href={FIRECRAWL_KEY_URL} rel="noreferrer" target="_blank">Get a Firecrawl key</a>
           </p>
           <UnlockForm
@@ -179,10 +174,6 @@ function AssistantSummary({ onChange }: { onChange: () => void }) {
         <span aria-hidden="true" className={`status-dot${snapshot.status === "ready" ? "" : " status-dot-warning"}`} />
         {snapshot.status === "ready" ? "Ready" : "Key needed for this tab"}
       </p>
-      <p className="sync-help">
-        Open any save: the Reader&apos;s Assistant panel under the title suggests tags, summaries,
-        and titles.
-      </p>
       <dl className="assistant-facts">
         <div><dt>Provider</dt><dd>{preset.label}</dd></div>
         <div><dt>Model</dt><dd><code>{settings.model}</code></dd></div>
@@ -217,8 +208,8 @@ function AssistantSummary({ onChange }: { onChange: () => void }) {
           </label>
           <p className="sync-help" id="assistant-remember-help">
             {snapshot.keyRemembered
-              ? "Saved for this library in this browser only. It is never synced or exported."
-              : "Only remember it in a browser you trust—anyone with access to this browser profile could use it."}
+              ? "Never synced or exported."
+              : "Only in a browser you trust: anyone using this browser profile can use the key."}
           </p>
         </>
       ) : null}
@@ -240,8 +231,8 @@ function AssistantSummary({ onChange }: { onChange: () => void }) {
       </div>
       <p className="sync-help">
         {local
-          ? "Requests stay on this computer. Your library, sync, and exports never include assistant settings."
-          : `Forgetting the key here does not revoke it with ${preset.label}. Your library, sync, and exports never include it.`}
+          ? "Requests stay on this computer."
+          : `Forgetting does not revoke the key with ${preset.label}.`}
       </p>
     </>
   );
@@ -435,12 +426,7 @@ function AssistantForm({ onCancel, onSaved }: { onCancel: (() => void) | null; o
         {preset ? (
           <div className="field">
             <label className="field-caption" htmlFor={`${id}-model`}>
-              Model{" "}
-              <small>
-                {models.length > 0 && !customModel
-                  ? "newest first"
-                  : "load the provider’s list, or type a model ID"}
-              </small>
+              Model
             </label>
             <div className="assistant-model-row">
               {models.length > 0 && !customModel ? (
@@ -501,8 +487,7 @@ function AssistantForm({ onCancel, onSaved }: { onCancel: (() => void) | null; o
               <span>Remember key in this browser</span>
             </label>
             <p className="sync-help">
-              Off by default: the key stays in this tab’s memory. Only remember it in a browser you
-              trust—anyone with access to this browser profile could use it.
+              Only in a browser you trust: anyone using this browser profile can use the key.
             </p>
           </>
         ) : null}
@@ -511,9 +496,8 @@ function AssistantForm({ onCancel, onSaved }: { onCancel: (() => void) | null; o
           <p className="assistant-disclosure">
             {local
               ? `Requests go to ${preset.label} on this computer.`
-              : `Requests go directly from this browser to ${preset.label} (${preset.origin}) and are billed to your key.`}{" "}
-            Each request is one you start from a save. Before it is sent you can see which fields it
-            includes. Nothing is applied to your library until you accept it.
+              : `Requests go directly from this browser to ${preset.label} (${preset.origin}), billed to your key.`}{" "}
+            You see what each request sends, and nothing changes until you accept.
           </p>
         ) : null}
       </fieldset>

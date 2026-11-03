@@ -2560,7 +2560,7 @@ function SettingsPanel({
                 onClick={() => onFontChange("")}
                 type="button"
               >
-                Reset font
+                Reset
               </button>
             </span>
           </div>

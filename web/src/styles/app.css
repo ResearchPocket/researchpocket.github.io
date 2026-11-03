@@ -7102,6 +7102,18 @@ button.omnibar-hint {
     bottom: calc(2.25rem + env(safe-area-inset-bottom));
   }
 
+  /* The font name takes whatever the row leaves, so the field and its reset
+     never push the settings page past the screen edge. */
+  .font-setting {
+    flex: 1 1 auto;
+    justify-content: flex-end;
+  }
+
+  .font-setting input {
+    flex: 1 1 auto;
+    width: auto;
+  }
+
   button.omnibar-hint {
     font-size: var(--font-size-sm);
     min-height: 2.75rem;
