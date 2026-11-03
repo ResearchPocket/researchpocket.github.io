@@ -145,8 +145,12 @@ publication artifacts.
 
 ### Payloads are declared, bounded, and disclosed
 
-Each feature builds its request in `web/src/assistant/prompts.ts`. The Reader
-lists every field and character count before sending.
+Each feature builds its request in `web/src/assistant/prompts.ts`. Before
+sending, the Reader names every field in shorthand, the total size, whether
+anything was trimmed, and the provider, with its full address on hover; for
+example, "Sends title, URL, excerpt, tags · 1.6k → OpenAI". The one line covers
+every Reader action, so it lists tag names even though only **Suggest tags**
+sends them.
 
 | Feature | Sends |
 | --- | --- |

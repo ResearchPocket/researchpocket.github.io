@@ -2,13 +2,28 @@ import type { AssistantTaskHandle } from "../assistant/useAssistantTask.ts";
 import type { RequestField } from "../assistant/prompts.ts";
 import { MarkdownDocument } from "./MarkdownDocument.tsx";
 
-/** "title, URL, excerpt (1.2k)" — what a request sends, on one line. */
+const SHORT_FIELD_NAMES: Record<string, string> = {
+  "Your note": "note",
+  "Captured page": "page",
+  "Document up to the cursor": "text to cursor",
+  "Selected text": "selection",
+  "End of the document": "document end",
+};
+
+/** "title, URL, excerpt · 1.2k" — every field a request sends, and its size. */
 export function describeFields(fields: RequestField[]) {
   if (fields.length === 0) return "nothing yet";
-  return fields
-    .map(({ label, characters, truncated }) =>
-      `${label.charAt(0).toLowerCase()}${label.slice(1)} (${compactCount(characters)}${truncated ? ", shortened" : ""})`)
-    .join(", ");
+  const names = fields.map(({ label }) => SHORT_FIELD_NAMES[label] ?? shortFieldName(label));
+  const total = fields.reduce((sum, { characters }) => sum + characters, 0);
+  const trimmed = fields.some(({ truncated }) => truncated) ? ", trimmed" : "";
+  return `${names.join(", ")} · ${compactCount(total)}${trimmed}`;
+}
+
+/** "Your tag names (200)" → "tags"; "Linked saves (3): title, …" → "linked saves". */
+function shortFieldName(label: string) {
+  const name = label.replace(/\s*[(:].*$/u, "").replace(/^Your /u, "");
+  if (name === "tag names") return "tags";
+  return name === name.toUpperCase() ? name : name.toLowerCase();
 }
 
 function compactCount(characters: number) {
@@ -29,10 +44,9 @@ export function AssistantProgress({ task, onOpenSettings }: {
   if (state.kind === "consent") {
     return (
       <div className="assistant-row assistant-consent" role="group" aria-label="Confirm sending">
-        <p>
-          {state.task.label} sends {describeFields(state.task.request.fields)} to{" "}
-          <strong>{task.destination}</strong>, using your key under the provider’s data policy.
-          This is asked once per provider.
+        <p title={task.destination}>
+          <strong>Send to {task.snapshot.preset?.label ?? task.destination}?</strong>{" "}
+          {describeFields(state.task.request.fields)} · its data policy applies · asked once
         </p>
         <div className="assistant-actions">
           <button className="assistant-action assistant-action-primary" onClick={task.confirm} type="button">

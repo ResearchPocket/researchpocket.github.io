@@ -225,15 +225,15 @@ export const DOCUMENT_ACTIONS: {
   sends: string;
   needs?: "selection" | "links";
 }[] = [
-  { id: "continue", label: "Continue writing", sends: "the document up to the cursor" },
-  { id: "improve", label: "Improve selection", sends: "the selected text", needs: "selection" },
-  { id: "shorten", label: "Shorten selection", sends: "the selected text", needs: "selection" },
-  { id: "summarize", label: "Summarize document", sends: "the whole document" },
-  { id: "todos", label: "Extract todos", sends: "the whole document" },
+  { id: "continue", label: "Continue writing", sends: "text to cursor" },
+  { id: "improve", label: "Improve selection", sends: "selection", needs: "selection" },
+  { id: "shorten", label: "Shorten selection", sends: "selection", needs: "selection" },
+  { id: "summarize", label: "Summarize document", sends: "document" },
+  { id: "todos", label: "Extract todos", sends: "document" },
   {
     id: "linked",
     label: "Draft from linked saves",
-    sends: "the title, URL, and excerpt of each save this document links to",
+    sends: "linked saves: title, URL, excerpt",
     needs: "links",
   },
 ];

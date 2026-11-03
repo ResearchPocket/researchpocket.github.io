@@ -1156,16 +1156,18 @@ export function App() {
     return saved;
   }
 
-  async function editCapturedPage(item: LibraryItemView, markdown: string) {
-    const current = item.capturedDocument;
-    if (!current) return false;
+  /** The excerpt is the save's one editable body; Undo restores the last one. */
+  async function saveExcerpt(item: LibraryItemView, excerpt: string) {
     let undo: UndoableChange | null = null;
-    const saved = await runAction("Save page", "Page saved.", () =>
-      libraryRepository.editCapturedPage(item.id, current, markdown).then((change) => {
+    const saved = await runAction("Save excerpt", "Excerpt saved.", () =>
+      libraryRepository.edit(item.id, {
+        excerpt,
+        expectedNote: item.note ?? null,
+      }).then((change) => {
         undo = change;
       }),
     );
-    if (saved) offerUndo(undo, "Page saved.");
+    if (saved) offerUndo(undo, "Excerpt saved.");
     return saved;
   }
 
@@ -1720,7 +1722,7 @@ export function App() {
             onOpenAssistantSettings={openAssistantSettings}
             capturing={capturingIds.has(readerItem.id)}
             onCapturePage={(item) => void capturePage(item.id, item.url)}
-            onEditPage={editCapturedPage}
+            onSaveExcerpt={saveExcerpt}
             tagVocabulary={tagVocabulary}
             documents={zenDocuments}
             onOpenDocument={(documentId) => {
@@ -1951,7 +1953,7 @@ export function App() {
                   title="Close filters"
                   type="button"
                 >
-                  <span aria-hidden="true">×</span>
+                  <AppIcon name="close" />
                 </button>
               </div>
             </div>
@@ -2135,7 +2137,7 @@ export function App() {
             onClick={() => setUndoNotice(null)}
             type="button"
           >
-            ×
+            <AppIcon name="close" />
           </button>
         </div>
       ) : null}
@@ -3052,7 +3054,7 @@ function Omnibar({
           title="Clear search"
           type="button"
         >
-          <span aria-hidden="true">×</span>
+          <AppIcon name="close" />
         </button>
       ) : (
         <kbd className="omnibar-key">/</kbd>
@@ -3337,7 +3339,7 @@ function KeyboardShortcutsDialog({ onClose }: { onClose: () => void }) {
           <h2 id="shortcuts-heading">Keyboard shortcuts</h2>
           <p>Shortcuts for this workspace</p>
         </div>
-        <button aria-label="Close keyboard shortcuts" onClick={onClose} type="button">×</button>
+        <button aria-label="Close keyboard shortcuts" onClick={onClose} type="button"><AppIcon name="close" /></button>
       </div>
       <div className="shortcuts-body">
         <section>
@@ -3386,7 +3388,7 @@ function ReaderView({
   capturing,
   item,
   onCapturePage,
-  onEditPage,
+  onSaveExcerpt,
   onAddSuggestedTags,
   onAppendToNote,
   onSetSuggestedTitle,
@@ -3402,7 +3404,7 @@ function ReaderView({
   busy: boolean;
   capturing: boolean;
   onCapturePage: (item: LibraryItemView) => void;
-  onEditPage: (item: LibraryItemView, markdown: string) => Promise<boolean>;
+  onSaveExcerpt: (item: LibraryItemView, excerpt: string) => Promise<boolean>;
   documents: PersistedZenDocument[];
   onOpenDocument(documentId: string): void;
   item: LibraryItemView;
@@ -3428,7 +3430,7 @@ function ReaderView({
     null,
   );
   const [capturedContextLoading, setCapturedContextLoading] = useState(false);
-  const [pageDraft, setPageDraft] = useState<string | null>(null);
+  const [excerptDraft, setExcerptDraft] = useState<string | null>(null);
   const assistant = useSyncExternalStore(assistantSession.subscribe, assistantSession.getSnapshot);
   const assistantAvailable = assistant.status === "ready" || assistant.status === "locked";
   const pageCapture = useSyncExternalStore(captureSession.subscribe, captureSession.getSnapshot);
@@ -3438,21 +3440,34 @@ function ReaderView({
     pageCapture.status === "ready" ? onCapturePage(item) : onOpenAssistantSettings();
   const imageCloseRef = useRef<HTMLButtonElement | null>(null);
   const label = item.title?.trim() || item.url;
-  // A save has one body. A captured page is the fuller text, so it is what the
-  // Reader shows, with a provenance line saying so; the excerpt stays the short
-  // summary in lists and search, and is the body only when nothing is captured.
+  // The excerpt is the save's one editable body and its source of truth. A
+  // captured page is a read-only original: it stands in only while there is no
+  // excerpt, and its text enters the excerpt only when the owner edits it or
+  // chooses to use it, so unedited captures never cost merged text.
   const authoredContext = item.excerpt?.trim() ? item.excerpt : null;
   const capture = item.capturedDocument ?? null;
   const imagesAllowed = itemsWithImages.has(item.id);
 
   useEffect(() => {
     setExpandedImage(null);
-    setPageDraft(null);
+    setExcerptDraft(null);
   }, [item.id]);
 
-  async function savePageDraft() {
-    if (pageDraft !== null && pageDraft.trim() && (await onEditPage(item, pageDraft))) {
-      setPageDraft(null);
+  async function saveExcerptDraft() {
+    if (excerptDraft !== null && (await onSaveExcerpt(item, excerptDraft))) {
+      setExcerptDraft(null);
+    }
+  }
+
+  async function useCapturedPage() {
+    if (!capture) return;
+    try {
+      const markdown = capturedContext ?? (await browserSync.loadCapturedDocument(capture));
+      await onSaveExcerpt(item, markdown);
+    } catch (error: unknown) {
+      setCapturedContextError(
+        error instanceof Error ? error.message : "Captured page content could not be loaded.",
+      );
     }
   }
 
@@ -3461,9 +3476,9 @@ function ReaderView({
     setCapturedContext(null);
     setCapturedContextError(null);
     const reference = item.capturedDocument;
-    // A captured page is fetched when its save is opened, never with the
-    // library: the bytes live outside the projection for exactly that reason.
-    if (!reference) {
+    // Fetched only when the page is the body: the bytes live outside the
+    // projection so that neither the library nor an excerpted save pulls them.
+    if (!reference || authoredContext) {
       setCapturedContextLoading(false);
       return () => {
         cancelled = true;
@@ -3489,7 +3504,7 @@ function ReaderView({
     return () => {
       cancelled = true;
     };
-  }, [item.id, item.capturedDocument?.sha256]);
+  }, [item.id, item.capturedDocument?.sha256, authoredContext === null]);
 
   useEffect(() => {
     if (expandedImage) imageCloseRef.current?.focus();
@@ -3607,13 +3622,23 @@ function ReaderView({
           ) : null}
           <ZenBacklinks target={`item:${item.id}`} documents={documents} onOpen={onOpenDocument} />
           <div className="reader-body">
-            {pageDraft !== null ? (
+            {excerptDraft !== null ? (
               <textarea
-                aria-label="Captured page Markdown"
+                aria-label="Excerpt"
                 className="reader-page-editor"
-                onChange={(event) => setPageDraft(event.target.value)}
+                onChange={(event) => setExcerptDraft(event.target.value)}
                 spellCheck={false}
-                value={pageDraft}
+                value={excerptDraft}
+              />
+            ) : authoredContext ? (
+              <MarkdownDocument
+                imageBaseUrl={item.url}
+                imagesAllowed={imagesAllowed}
+                onLoadImages={loadImagesForItem}
+                onOpenImage={(image, opener) =>
+                  setExpandedImage({ image, opener })
+                }
+                source={authoredContext}
               />
             ) : capturedContext ? (
               <MarkdownDocument
@@ -3626,66 +3651,61 @@ function ReaderView({
                 source={capturedContext}
               />
             ) : capture && capturedContextLoading ? (
-              <p role="status">Loading the captured page…</p>
-            ) : authoredContext ? (
-              <MarkdownDocument
-                imageBaseUrl={item.url}
-                imagesAllowed={imagesAllowed}
-                onLoadImages={loadImagesForItem}
-                onOpenImage={(image, opener) =>
-                  setExpandedImage({ image, opener })
-                }
-                source={authoredContext}
-              />
-            ) : capture || captureAvailable ? null : (
-              <p>No preview yet.</p>
+              <p role="status">Loading the original page…</p>
+            ) : capture ? null : (
+              <p>Nothing saved from this page yet.</p>
             )}
             {capturedContextError ? (
               <p className="sync-error" role="alert">{capturedContextError}</p>
             ) : null}
-            {capture ? (
-              <p className="reader-capture">
+            <p className="reader-capture">
+              {excerptDraft !== null && !authoredContext && capture ? (
+                <span>Saves as excerpt · original kept</span>
+              ) : capture ? (
                 <span>
-                  Captured with {capture.provenance.provider} ·{" "}
+                  Original page · {providerLabel(capture.provenance.provider)} ·{" "}
                   {formatDate(capture.provenance.captured_at)} ·{" "}
                   {formatBytes(capture.byte_length)}
                 </span>
-                {pageDraft !== null ? (
-                  <>
+              ) : null}
+              {excerptDraft !== null ? (
+                <>
+                  <button
+                    className="assistant-action assistant-action-primary"
+                    disabled={busy || excerptDraft === (item.excerpt ?? "")}
+                    onClick={() => void saveExcerptDraft()}
+                    type="button"
+                  >
+                    Save
+                  </button>
+                  <button className="assistant-action assistant-action-quiet" onClick={() => setExcerptDraft(null)} type="button">
+                    Cancel
+                  </button>
+                </>
+              ) : (
+                <>
+                  {authoredContext || capturedContext !== null || !capture || capturedContextError ? (
                     <button
-                      className="assistant-action assistant-action-primary"
-                      disabled={busy || !pageDraft.trim() || pageDraft === capturedContext}
-                      onClick={() => void savePageDraft()}
+                      className="assistant-action"
+                      onClick={() => setExcerptDraft(authoredContext ?? capturedContext ?? "")}
                       type="button"
                     >
-                      Save page
+                      {authoredContext || capturedContext !== null ? "Edit" : "Write excerpt"}
                     </button>
-                    <button className="assistant-action assistant-action-quiet" onClick={() => setPageDraft(null)} type="button">
-                      Cancel
+                  ) : null}
+                  {authoredContext && capture ? (
+                    <button className="assistant-action" disabled={busy} onClick={() => void useCapturedPage()} type="button">
+                      Use captured page
                     </button>
-                  </>
-                ) : (
-                  <>
-                    {capturedContext !== null ? (
-                      <button className="assistant-action" disabled={capturing} onClick={() => setPageDraft(capturedContext)} type="button">
-                        Edit page
-                      </button>
-                    ) : null}
-                    {captureAvailable ? (
-                      <button className="assistant-action" disabled={capturing} onClick={requestCapture} type="button">
-                        {capturing ? "Capturing…" : "Recapture"}
-                      </button>
-                    ) : null}
-                  </>
-                )}
-              </p>
-            ) : captureAvailable ? (
-              <p className="reader-capture">
-                <button className="assistant-action" disabled={capturing} onClick={requestCapture} type="button">
-                  {capturing ? "Capturing the page…" : "Capture page"}
-                </button>
-              </p>
-            ) : null}
+                  ) : null}
+                  {captureAvailable ? (
+                    <button className="assistant-action" disabled={capturing} onClick={requestCapture} type="button">
+                      {capturing ? "Capturing…" : capture ? "Recapture" : "Capture page"}
+                    </button>
+                  ) : null}
+                </>
+              )}
+            </p>
             <p className="reader-source"><a href={item.url} rel="noreferrer" target="_blank">{readHostname(item.url)} ↗</a></p>
           </div>
         </div>
@@ -3717,7 +3737,7 @@ function ReaderView({
             ref={imageCloseRef}
             type="button"
           >
-            ×
+            <AppIcon name="close" />
           </button>
           <figure className="reader-image-viewer-stage">
             <img
@@ -3892,7 +3912,7 @@ function CaptureDialog({
             title="Close"
             type="button"
           >
-            <span aria-hidden="true">×</span>
+            <AppIcon name="close" />
           </button>
         </div>
         <CaptureForm
@@ -4298,7 +4318,6 @@ function EditDialog({
   const titleRef = useRef<HTMLInputElement>(null);
   const [url, setUrl] = useState(item.url);
   const [title, setTitle] = useState(item.title ?? "");
-  const [excerpt, setExcerpt] = useState(item.excerpt ?? "");
   const [tags, setTags] = useState(item.tags);
   const [tagDraft, setTagDraft] = useState("");
   const [note, setNote] = useState(item.note ?? "");
@@ -4323,7 +4342,6 @@ function EditDialog({
   async function submit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     await onSave(item, {
-      excerpt: optionalText(excerpt),
       favorite,
       note: optionalText(note),
       tags: withTagDraft(tags, tagDraft),
@@ -4356,7 +4374,7 @@ function EditDialog({
             title="Close"
             type="button"
           >
-            <span aria-hidden="true">×</span>
+            <AppIcon name="close" />
           </button>
         </div>
 
@@ -4382,16 +4400,6 @@ function EditDialog({
               ref={titleRef}
               type="text"
               value={title}
-            />
-          </label>
-          <label className="field">
-            <span>Excerpt</span>
-            <textarea
-              id="edit-excerpt"
-              name="excerpt"
-              onChange={(event) => setExcerpt(event.target.value)}
-              rows={3}
-              value={excerpt}
             />
           </label>
           <TagField
@@ -4624,6 +4632,10 @@ function pendingFieldLabel(field: PendingSyncChange["fields"][number]) {
     default:
       return field;
   }
+}
+
+function providerLabel(provider: string) {
+  return provider === "firecrawl" ? "Firecrawl" : provider;
 }
 
 function formatDate(value: string) {

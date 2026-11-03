@@ -2278,6 +2278,13 @@ kbd {
   width: 2.5rem;
 }
 
+.search-clear .app-icon,
+.undo-dismiss .app-icon,
+.graph-inspector-close .app-icon {
+  height: 1rem;
+  width: 1rem;
+}
+
 .app-icon {
   fill: none;
   flex: 0 0 auto;

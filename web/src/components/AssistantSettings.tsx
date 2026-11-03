@@ -209,7 +209,7 @@ function AssistantSummary({ onChange }: { onChange: () => void }) {
           <p className="sync-help" id="assistant-remember-help">
             {snapshot.keyRemembered
               ? "Never synced or exported."
-              : "Only in a browser you trust: anyone using this browser profile can use the key."}
+              : "Trusted browsers only · anyone on this profile can use it"}
           </p>
         </>
       ) : null}
@@ -487,7 +487,7 @@ function AssistantForm({ onCancel, onSaved }: { onCancel: (() => void) | null; o
               <span>Remember key in this browser</span>
             </label>
             <p className="sync-help">
-              Only in a browser you trust: anyone using this browser profile can use the key.
+              Trusted browsers only · anyone on this profile can use it
             </p>
           </>
         ) : null}

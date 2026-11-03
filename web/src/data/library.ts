@@ -569,19 +569,6 @@ class LibraryRepository {
   }
 
   /**
-   * Saves the owner's edit of a captured page as a new immutable version. It
-   * keeps the capture's provenance, so clients that know only Firecrawl
-   * captures still accept it; the previous version stays recoverable.
-   */
-  async editCapturedPage(
-    itemId: string,
-    current: CapturedDocumentReference,
-    markdown: string,
-  ): Promise<UndoableChange | null> {
-    return this.attachCapturedPage(itemId, markdown, current.provenance);
-  }
-
-  /**
    * The bytes are stored first and marked for upload, so the update that
    * references them can never reach the repository ahead of its content.
    */
@@ -2520,14 +2507,6 @@ class LibraryWorkspace {
     sourceUrl: string,
   ): Promise<UndoableChange | null> {
     return (await this.instance()).captureItemPage(itemId, markdown, sourceUrl);
-  }
-
-  async editCapturedPage(
-    itemId: string,
-    current: CapturedDocumentReference,
-    markdown: string,
-  ): Promise<UndoableChange | null> {
-    return (await this.instance()).editCapturedPage(itemId, current, markdown);
   }
 
   async pendingCapturedDocuments(): Promise<PersistedCapturedDocument[]> {
