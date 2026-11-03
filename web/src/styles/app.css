@@ -1577,6 +1577,10 @@ footer {
   text-align: center;
 }
 
+.boot-shell[role="alert"] {
+  gap: var(--space-3);
+}
+
 .boot-shell .welcome-monogram {
   margin-bottom: var(--space-5);
 }
