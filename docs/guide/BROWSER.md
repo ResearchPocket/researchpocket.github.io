@@ -18,7 +18,9 @@ connect them through private sync.
 Zen is the default workspace. Use the navigation rail on desktop or the bottom
 navigation on small screens. The Library's List/Graph switch changes how the
 current results are presented. Settings includes the Kanagawa Wave theme along
-with other presets; appearance preferences are local to the browser.
+with other presets, and **Font** sets the typeface to any font installed on your
+device, such as `Georgia` or `system-ui`; **Reset font** returns to the default.
+Appearance preferences are local to the browser.
 
 ## Search and keyboard navigation
 

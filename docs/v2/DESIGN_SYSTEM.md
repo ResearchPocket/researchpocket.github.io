@@ -126,6 +126,10 @@ the mobile text navigation compact and retain accessible destination labels.
 All surfaces use the self-hosted Berkeley Mono family, falling back to the
 system UI monospace when the webfont is unavailable. Regular, italic, bold, and
 bold italic WOFF2 sources are bundled locally; the desktop font files are not.
+The owner may name a font installed on their device under **Settings → Font**.
+It is a browser-local preference applied to the root, with the bundled family
+kept as its fallback, so an unavailable name still renders in the default. No
+font is ever downloaded for it, and **Reset font** returns to the default.
 Body copy remains at a readable size and line height. Headings are modest,
 weight-based, and sentence case. Uppercase is reserved for short metadata labels
 such as `local`, `remote`, and item source.

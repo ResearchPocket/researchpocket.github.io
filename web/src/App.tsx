@@ -108,6 +108,20 @@ const RAIL_COLLAPSED_STORAGE_KEY = "researchpocket.ui.rail-collapsed";
 const THEME_STORAGE_KEY = "researchpocket.ui.theme";
 const IMAGE_BACKGROUND_STORAGE_KEY = "researchpocket.ui.image-background";
 const READER_MEASURE_STORAGE_KEY = "researchpocket.ui.reader-measure";
+const FONT_STORAGE_KEY = "researchpocket.ui.font";
+const FONT_NAME_LIMIT = 80;
+const FONT_SUGGESTIONS = ["system-ui", "ui-serif", "ui-monospace", "Georgia", "Charter", "Helvetica Neue"];
+const GENERIC_FONT_FAMILIES = new Set([
+  "serif",
+  "sans-serif",
+  "monospace",
+  "cursive",
+  "system-ui",
+  "ui-serif",
+  "ui-sans-serif",
+  "ui-monospace",
+  "ui-rounded",
+]);
 const DEFAULT_IMAGE_BACKGROUND = "#ffffff";
 
 /**
@@ -254,6 +268,7 @@ export function App() {
   const [imageBackground, setImageBackground] = useState(
     () => readImageBackgroundPreference(),
   );
+  const [font, setFont] = useState(() => readFontPreference());
   const [readerMeasure, setReaderMeasure] = useState<ReaderMeasure>(() =>
     readReaderMeasurePreference(),
   );
@@ -446,6 +461,24 @@ export function App() {
       // The preference remains active for this tab when storage is unavailable.
     }
   }, [readerMeasure]);
+
+  useEffect(() => {
+    const family = normalizeFontName(font);
+    const root = document.documentElement;
+    // The shipped typeface lives in tokens.css and stays the fallback, so a
+    // name this device does not have still renders in TX-02.
+    if (family) {
+      root.style.fontFamily = `${fontFamilyValue(family)}, "TX-02", ui-monospace, monospace`;
+    } else {
+      root.style.removeProperty("font-family");
+    }
+    try {
+      if (family) window.localStorage.setItem(FONT_STORAGE_KEY, family);
+      else window.localStorage.removeItem(FONT_STORAGE_KEY);
+    } catch {
+      // The preference remains active for this tab when storage is unavailable.
+    }
+  }, [font]);
 
   useEffect(() => {
     let shortcutModifierHeld = false;
@@ -1720,6 +1753,8 @@ export function App() {
           onImageBackgroundChange={setImageBackground}
           onProfilesChanged={refreshProfiles}
           onReaderMeasureChange={setReaderMeasure}
+          font={font}
+          onFontChange={setFont}
           onSwitchLibrary={switchLibrary}
           onThemeChange={setTheme}
           profiles={profiles}
@@ -2421,6 +2456,8 @@ function SettingsPanel({
   onImageBackgroundChange,
   onProfilesChanged,
   onReaderMeasureChange,
+  font,
+  onFontChange,
   onSwitchLibrary,
   onThemeChange,
   profiles,
@@ -2435,6 +2472,8 @@ function SettingsPanel({
   onImageBackgroundChange: (color: string) => void;
   onProfilesChanged: () => Promise<void>;
   onReaderMeasureChange: (measure: ReaderMeasure) => void;
+  font: string;
+  onFontChange: (font: string) => void;
   onSwitchLibrary: (profileId: string) => Promise<void>;
   onThemeChange: (theme: ThemeColors) => void;
   profiles: LibraryProfile[];
@@ -2496,6 +2535,35 @@ function SettingsPanel({
               ))}
             </select>
           </label>
+          <div className="setting-row">
+            <label htmlFor="font-family">
+              <strong>Font</strong>
+            </label>
+            <span className="font-setting">
+              <input
+                autoCapitalize="none"
+                autoComplete="off"
+                id="font-family"
+                list="font-suggestions"
+                maxLength={FONT_NAME_LIMIT}
+                onChange={(event) => onFontChange(event.target.value)}
+                placeholder="TX-02 (default)"
+                spellCheck={false}
+                value={font}
+              />
+              <datalist id="font-suggestions">
+                {FONT_SUGGESTIONS.map((name) => <option key={name} value={name} />)}
+              </datalist>
+              <button
+                className="secondary-button"
+                disabled={!font}
+                onClick={() => onFontChange("")}
+                type="button"
+              >
+                Reset font
+              </button>
+            </span>
+          </div>
           <fieldset className="theme-editor">
             <legend>Color theme</legend>
             <label className="theme-preset" htmlFor="theme-preset">
@@ -4677,6 +4745,24 @@ function readImageBackgroundPreference() {
       : DEFAULT_IMAGE_BACKGROUND;
   } catch {
     return DEFAULT_IMAGE_BACKGROUND;
+  }
+}
+
+/** A font name is a family the owner has installed; anything else is dropped. */
+function normalizeFontName(value: string): string {
+  const name = value.replace(/\s+/gu, " ").trim();
+  return name.length <= FONT_NAME_LIMIT && !/[\p{Cc};{}<>"'\\]/u.test(name) ? name : "";
+}
+
+function fontFamilyValue(name: string): string {
+  return GENERIC_FONT_FAMILIES.has(name.toLowerCase()) ? name.toLowerCase() : `"${name}"`;
+}
+
+function readFontPreference(): string {
+  try {
+    return normalizeFontName(window.localStorage.getItem(FONT_STORAGE_KEY) ?? "");
+  } catch {
+    return "";
   }
 }
 
