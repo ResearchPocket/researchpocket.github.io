@@ -83,7 +83,7 @@ jobs:
 
           formula = pathlib.Path("tap/Formula/researchpocket.rb")
           text = formula.read_text()
-          for platform in ("macos-arm64", "macos-amd64", "linux-amd64"):
+          for platform in ("macos-arm64", "macos-amd64"):
               archive = f"research-v{version}-{platform}.tar.gz"
               pattern = re.compile(
                   r'(url "https://github\.com/ResearchPocket/researchpocket\.github\.io'
