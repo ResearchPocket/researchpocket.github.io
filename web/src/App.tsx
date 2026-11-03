@@ -1,7 +1,6 @@
 import {
   Fragment,
   type SubmitEvent,
-  type ReactNode,
   useDeferredValue,
   useEffect,
   useMemo,
@@ -2023,7 +2022,7 @@ export function App() {
             gone entirely under a pushed screen, which has its own footer. */}
         {pushedScreen || readerItem ? null : (
           <nav aria-label="Mobile actions" className="mobile-actions">
-            <button className="primary-button" onClick={(event) => openCapture(event.currentTarget)} type="button">＋ Save a link</button>
+            <button className="primary-button" onClick={(event) => openCapture(event.currentTarget)} type="button">＋ New save</button>
             <button className="secondary-button" onClick={() => navigateToView("settings")} type="button">Settings</button>
           </nav>
         )}
@@ -2057,7 +2056,6 @@ export function App() {
 
       {displayedError && !editingItem && !capturing ? (
         <div className="error-banner" role="alert">
-          <strong>Something needs your attention.</strong>
           <span>{displayedError}</span>
           {localError ? (
             <button onClick={() => setLocalError(null)} type="button">
@@ -2150,8 +2148,7 @@ function BootScreen() {
   return (
     <main aria-busy="true" aria-live="polite" className="boot-shell">
       <span aria-hidden="true" className="welcome-monogram">rp</span>
-      <p className="eyebrow">ResearchPocket / owner app</p>
-      <h1>Opening this browser's library…</h1>
+      <h1>Opening library…</h1>
     </main>
   );
 }
@@ -2211,28 +2208,23 @@ function Welcome({
             ? "Bring your library into this browser."
             : "Set up this browser."}
         </h1>
-        <p className="welcome-copy">
-          No library is stored in this browser yet. Create an empty local library
-          or restore one you already use.
-        </p>
-
         {error ? <p role="alert">{error}</p> : null}
 
         <div className="onboarding-options">
           <button className={!restoreFirst ? "onboarding-choice onboarding-choice-priority" : "onboarding-choice"} disabled={busy} onClick={() => void onInitialize()} type="button">
             <span aria-hidden="true">&gt;</span>
-            <span><strong>Create a local library</strong><small>Start empty in this browser. Connect private sync whenever.</small></span>
+            <span><strong>Create a local library</strong><small>Starts empty. Sync later.</small></span>
             <kbd>↵</kbd>
           </button>
           <button className={restoreFirst ? "onboarding-choice onboarding-choice-priority" : "onboarding-choice"} disabled={busy} onClick={() => void onRestore()} type="button">
             <span aria-hidden="true">&gt;</span>
-            <span><strong>Restore an existing library</strong><small>Pull the library your CLI or another browser already syncs.</small></span>
+            <span><strong>Restore from sync</strong><small>Already syncing elsewhere? Restore before creating.</small></span>
             <kbd>R</kbd>
           </button>
         </div>
 
         <p className="welcome-footnote">
-          Restoring first avoids merges. Keep browser storage enabled. <a href="../">Product overview</a>
+          <a href="../">Product overview</a>
         </p>
       </section>
     </main>
@@ -2409,7 +2401,6 @@ function SettingsPanel({
       id="settings"
     >
       <header className="settings-heading">
-        <p className="eyebrow">Workspace</p>
         <h2 id="settings-heading">Settings</h2>
       </header>
 
@@ -2441,10 +2432,6 @@ function SettingsPanel({
           <label className="setting-row" htmlFor="reader-measure">
             <span>
               <strong>Reading width</strong>
-              <small>
-                How far a line of text runs in an opened save. Anything short of
-                full width is centered in the column.
-              </small>
             </span>
             <select
               id="reader-measure"
@@ -2537,7 +2524,7 @@ function SettingsPanel({
 
       <AssistantSettings />
 
-      <div className="settings-group">
+      <div className="settings-group settings-keyboard">
         <div>
           <h3>Keyboard</h3>
         </div>
@@ -2737,7 +2724,7 @@ function SyncPanel({
           <>
             <label className="check-field sync-session-choice">
               <input
-                aria-describedby="saved-token-help"
+                aria-describedby={state.credentialRemembered ? undefined : "saved-token-help"}
                 checked={state.credentialRemembered}
                 disabled={state.syncing || (!state.credentialRemembered && !online)}
                 onChange={(event) => void changeRememberedToken(event.target.checked)}
@@ -2745,11 +2732,11 @@ function SyncPanel({
               />
               <span>Remember token in this browser</span>
             </label>
-            <p className="sync-help" id="saved-token-help">
-              {state.credentialRemembered
-                ? "Token saved in this browser. You can return without entering it again."
-                : "Token kept in memory for this page. Only remember it in a browser you trust—anyone with access to this browser profile may be able to use it."}
-            </p>
+            {state.credentialRemembered ? null : (
+              <p className="sync-help" id="saved-token-help">
+                Only in a browser you trust: anyone using this browser profile can use the token.
+              </p>
+            )}
             <button
               className="secondary-button"
               disabled={state.syncing}
@@ -2758,7 +2745,7 @@ function SyncPanel({
             >
               Forget token
             </button>
-            <p className="sync-help">Forgetting keeps your local library and queued edits. It does not revoke the token on GitHub.</p>
+            <p className="sync-help">Local edits stay. The token is not revoked on GitHub.</p>
           </>
         )}
       </details>
@@ -2874,7 +2861,7 @@ function TokenFields() {
         <span>Remember token in this browser</span>
       </label>
       <p className="sync-help" id="remember-token-help">
-        Automatically reconnect this library when you return. Only enable this in a browser you trust—anyone with access to this browser profile may be able to use your token.
+        Only in a browser you trust: anyone using this browser profile can use the token.
       </p>
       <p className="sync-help" id="sync-token-help">
         Expiring token · private data repository only · Contents read/write.
@@ -2926,17 +2913,18 @@ function Omnibar({
         autoCapitalize="none"
         autoComplete="off"
         disabled={busy}
+        enterKeyHint={parsed ? "go" : "search"}
         id="library-search"
         name="query"
         onChange={(event) => onQueryChange(event.target.value)}
-        placeholder="Search — or paste a URL to save it"
+        placeholder="Search or paste a URL"
         type="text"
         value={query}
       />
       {parsed ? (
-        <span className="omnibar-hint">
+        <button className="omnibar-hint" disabled={busy} type="submit">
           <kbd>↵</kbd> save{parsed.tags.length > 0 ? ` · ${parsed.tags.length} tag${parsed.tags.length === 1 ? "" : "s"}` : ""}
-        </span>
+        </button>
       ) : query ? (
         <button
           aria-label="Clear search"
@@ -3501,7 +3489,7 @@ function ReaderView({
                 source={authoredContext}
               />
             ) : capture ? null : (
-              <p>This save has no extracted preview yet. Open the original to read the full page, or add a private note to keep the context that matters.</p>
+              <p>No preview yet.</p>
             )}
             {capture ? (
               <section className="reader-capture">
@@ -3549,7 +3537,7 @@ function ReaderView({
                 ) : null}
               </section>
             ) : null}
-            <p className="reader-source">ResearchPocket keeps the URL and your authored context locally. The original page remains at <a href={item.url} rel="noreferrer" target="_blank">{readHostname(item.url)}</a>.</p>
+            <p className="reader-source"><a href={item.url} rel="noreferrer" target="_blank">{readHostname(item.url)} ↗</a></p>
           </div>
         </div>
       </article>
@@ -3647,7 +3635,7 @@ function CaptureForm({
           inputMode="url"
           name="url"
           onChange={(event) => setUrl(event.target.value)}
-          placeholder="https://example.com/a-useful-page"
+          placeholder="https://"
           required
           type="url"
           value={url}
@@ -3655,13 +3643,12 @@ function CaptureForm({
       </label>
 
       <label className="field">
-        <span>Title <small>optional</small></span>
+        <span>Title</span>
         <input
           autoComplete="off"
           id="capture-title"
           name="title"
           onChange={(event) => setTitle(event.target.value)}
-          placeholder="What will help you recognize it?"
           type="text"
           value={title}
         />
@@ -3677,12 +3664,11 @@ function CaptureForm({
       />
 
       <label className="field field-note">
-        <span>Private note <small>optional</small></span>
+        <span>Note</span>
         <textarea
           id="capture-note"
           name="note"
           onChange={(event) => setNote(event.target.value)}
-          placeholder="Why are you keeping this?"
           rows={3}
           value={note}
         />
@@ -3748,7 +3734,6 @@ function CaptureDialog({
         <div className="dialog-heading">
           <div>
             <h2 id="capture-dialog-heading">New save</h2>
-            <p>Committed locally before synchronization.</p>
           </div>
           <button
             aria-label="Close capture form"
@@ -3799,7 +3784,7 @@ function TagField({
   return (
     <div className="field tag-field">
       <label className="field-caption" htmlFor={id}>
-        Tags <small>Enter or comma to add</small>
+        Tags
       </label>
       <input
         aria-autocomplete="list"
@@ -4316,21 +4301,11 @@ function EmptyLibrary({
   filter: LifecycleFilter;
   hasQuery: boolean;
 }) {
-  let heading = "Your library is ready.";
-  let body: ReactNode = (
-    <>
-      Choose New save to keep your first link. A title or note can help your
-      future self remember why it mattered.
-    </>
-  );
-
-  if (hasQuery) {
-    heading = "No saves match that search.";
-    body = "Try fewer words, another tag, or clear the search field.";
-  } else if (filter === "deleted") {
-    heading = "Nothing is waiting for recovery.";
-    body = "Deleted saves stay here so an accidental click is easy to undo.";
-  }
+  const heading = hasQuery
+    ? "No matches."
+    : filter === "deleted"
+      ? "Archive is empty."
+      : "Paste a URL to save it.";
 
   return (
     <div className="empty-state">
@@ -4338,7 +4313,6 @@ function EmptyLibrary({
         {filter === "deleted" ? "↶" : "+"}
       </p>
       <h3>{heading}</h3>
-      <p>{body}</p>
     </div>
   );
 }
@@ -4677,6 +4651,11 @@ function applyThemePreference(theme: ThemeColors) {
 
   if (custom) root.style.colorScheme = prefersLightControls(theme.background) ? "light" : "dark";
   else root.style.removeProperty("color-scheme");
+
+  // The browser chrome and the installed app's status bar take this color.
+  document
+    .querySelector('meta[name="theme-color"]')
+    ?.setAttribute("content", theme.background);
 }
 
 function prefersLightControls(color: string) {

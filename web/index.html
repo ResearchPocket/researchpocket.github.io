@@ -6,7 +6,7 @@
       http-equiv="Content-Security-Policy"
       content="default-src 'none'; base-uri 'none'; connect-src 'self' https://api.github.com; font-src 'self'; form-action 'none'; frame-src 'none'; img-src 'self'; manifest-src 'self'; object-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; worker-src 'self'; upgrade-insecure-requests"
     />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="dark" />
     <meta name="theme-color" content="#1a150c" />
     <meta
@@ -56,8 +56,7 @@
         <span aria-hidden="true" class="landing-mark">rp</span>
         <h1 id="landing-heading">Where should this browser start?</h1>
         <p class="landing-copy">
-          Your library lives on this device. Nothing leaves it until you connect
-          private sync.
+          Your library stays on this device until you connect private sync.
         </p>
 
         <nav aria-label="Choose how to start" class="landing-choices">
@@ -65,25 +64,24 @@
             <span aria-hidden="true" class="landing-choice-arrow">&gt;</span>
             <span>
               <strong>Start a new library</strong>
-              <small>Empty, offline, ready now. Connect sync whenever.</small>
+              <small>Starts empty. Sync later.</small>
             </span>
             <kbd>↵</kbd>
           </a>
           <a class="landing-choice" href="./app/#restore">
             <span aria-hidden="true" class="landing-choice-arrow">&gt;</span>
             <span>
-              <strong>Restore from private sync</strong>
-              <small>Pull the library your CLI or another browser already syncs.</small>
+              <strong>Restore from sync</strong>
+              <small>Already syncing elsewhere? Restore before creating.</small>
             </span>
             <kbd>R</kbd>
           </a>
         </nav>
 
         <p class="landing-footnote">
-          Restoring first avoids merges. Keep browser storage enabled.
-          <a href="./app/">Open an existing library</a> ·
+          <a href="./app/">Open library</a> ·
           <a href="./overview/">Product overview</a> ·
-          <a href="./docs/">Reference guide</a>
+          <a href="./docs/">Docs</a>
         </p>
       </section>
     </main>

@@ -223,7 +223,7 @@ export function ReaderAssistant({
           </div>
         ) : (
           <fieldset className="assistant-row assistant-tags">
-            <legend>Suggested tags <small>· existing tags are preselected</small></legend>
+            <legend>Suggested tags</legend>
             <div className="assistant-tag-list">
               {suggestions.map(({ tag, existing }) => (
                 <button
