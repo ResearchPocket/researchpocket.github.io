@@ -10,11 +10,21 @@ The bookmarklet invokes the installed native CLI through a per-user URL handler.
 It needs a native installation on that computer; opening the hosted app alone
 does not install the handler.
 
-1. Install the CLI in a stable location and run `research init`.
+1. Install the CLI in a stable location, for example with
+   `brew install korigamik/tap/researchpocket`, and run `research init`.
 2. Run `research capture install`, then `research capture status`.
 3. Create a bookmark named **Save to ResearchPocket**.
-4. Copy the single line in [bookmarklet.js](../../bookmarklet.js) into its URL field.
+4. Copy the single line in [bookmarklet.js](../../bookmarklet.js) into its URL field,
+   or run `research capture bookmarklet | pbcopy` on macOS.
 5. Open an HTTP(S) page and activate the bookmark.
+
+The handler is registered with the operating system, not with one browser, so
+the same bookmarklet works in Firefox, Chrome, Edge, Brave, Arc, and Safari. In
+Chrome, show the bookmarks bar with **⇧⌘B** (**Ctrl+Shift+B** elsewhere),
+right-click it, choose **Add page…**, and paste the bookmarklet into **URL**.
+On the first capture from a site, Chrome asks whether to open ResearchPocket
+Capture; choose **Open**. Chrome remembers that choice per site only when you
+tick its **Always allow** box, so it asks again on each new site.
 
 The bookmarklet reads the already-loaded page's URL, title, description, and
 language, and prompts for tags. Its prompt runs inside the page, so add sensitive
@@ -40,6 +50,10 @@ Direct fetching fills eligible missing title, excerpt, and language values; it
 does not retain an entire page. Enrichment leaves private notes, tags, favorites,
 and your authored values alone. An empty merged-text excerpt can still be
 eligible for filling; see the [exact replacement rules](../v2/CLI.md#metadata-enrichment).
+
+Configuring a provider also enriches every browser capture right after it is
+saved. Run `research enrich configure --no-on-capture` to keep captures exactly
+as the bookmarklet sent them, or `--on-capture` to resume.
 
 An unsuccessful request leaves a durable retryable job. The browser app does
 not expose provider configuration or run enrichment requests; configure and run

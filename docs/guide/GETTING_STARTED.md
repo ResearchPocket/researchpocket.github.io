@@ -24,7 +24,22 @@ to recover it. The public docs do not open or read your private library.
 
 ## Install the CLI
 
-With Rust installed:
+On macOS (or Linux on x86-64), install with [Homebrew](https://brew.sh):
+
+```sh
+brew install korigamik/tap/researchpocket
+research --version
+```
+
+The formula installs the release binary as `research`, and `brew upgrade` keeps
+it current. A [browser capture handler](READING.md#save-the-page-you-are-reading)
+installed by a release after 2.3.0 keeps working after an upgrade; if 2.3.0
+installed yours, run `research capture install` once after upgrading. Before
+removing the formula,
+run `research capture uninstall`; `brew uninstall researchpocket` leaves your
+library and settings in place.
+
+With Rust installed, build it from crates.io instead:
 
 ```sh
 cargo install --locked research

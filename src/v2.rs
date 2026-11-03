@@ -318,12 +318,31 @@ async fn handle_capture(
     match command {
         CaptureCommands::Install => {
             let result = capture::install(data_dir).await?;
+            match enrichment::status(data_dir) {
+                Ok(status) if !status.configured => eprintln!(
+                    "Browser captures are saved without enrichment. To fetch each page right \
+                     after it is saved, run `research enrich configure firecrawl \
+                     --api-key-stdin` or `research enrich configure direct`."
+                ),
+                Ok(status) if !status.on_capture => eprintln!(
+                    "Browser captures are saved without enrichment. Run `research enrich \
+                     configure --on-capture` to enrich each page right after it is saved."
+                ),
+                _ => {}
+            }
             let output = command_output("capture_install", result)?;
             write_single(format, &output, human_capture_install)
         }
         CaptureCommands::Status => {
             let output = command_output("capture_status", capture::status()?)?;
             write_single(format, &output, human_capture_status)
+        }
+        CaptureCommands::Bookmarklet => {
+            let output = command_output(
+                "capture_bookmarklet",
+                json!({ "bookmarklet": capture::BOOKMARKLET.trim_end() }),
+            )?;
+            write_single(format, &output, human_capture_bookmarklet)
         }
         CaptureCommands::Uninstall => {
             let output = command_output("capture_uninstall", capture::uninstall()?)?;
@@ -366,7 +385,22 @@ async fn handle_enrich(
     let store = V2Store::open(data_dir).await?;
     match command {
         EnrichCommands::Configure(configure) => {
-            let provider = store_provider(configure.provider);
+            let provider = match configure.provider {
+                Some(provider) => store_provider(provider),
+                None => enrichment::status(data_dir)
+                    .ok()
+                    .and_then(|status| status.provider)
+                    .ok_or_else(|| {
+                        io::Error::other(
+                            "no enrichment provider is configured; pass direct or firecrawl",
+                        )
+                    })?,
+            };
+            let on_capture = match (configure.on_capture, configure.no_on_capture) {
+                (true, _) => Some(true),
+                (_, true) => Some(false),
+                _ => None,
+            };
             if provider == EnrichmentProvider::Direct
                 && (configure.api_key_stdin || configure.api_url.is_some())
             {
@@ -383,7 +417,7 @@ async fn handle_enrich(
             let status = enrichment::configure(
                 data_dir,
                 provider,
-                configure.on_capture,
+                on_capture,
                 configure.api_url.as_deref(),
                 api_key.as_deref(),
             )?;
@@ -1263,6 +1297,13 @@ fn human_capture_status(value: &Value) {
     print_string(value, "executable", "Executable");
 }
 
+fn human_capture_bookmarklet(value: &Value) {
+    // Only the bookmarklet reaches stdout, so it can be piped to a clipboard.
+    if let Some(bookmarklet) = value.get("bookmarklet").and_then(Value::as_str) {
+        println!("{bookmarklet}");
+    }
+}
+
 fn human_capture_uninstall(value: &Value) {
     println!("Removed browser capture handler");
     print_string(value, "scheme", "Scheme");
@@ -1497,7 +1538,7 @@ mod tests {
         enrichment::configure(
             directory.path(),
             EnrichmentProvider::Firecrawl,
-            false,
+            Some(false),
             None,
             None,
         )
@@ -1593,7 +1634,7 @@ mod tests {
         enrichment::configure(
             directory.path(),
             EnrichmentProvider::Direct,
-            false,
+            Some(false),
             None,
             None,
         )

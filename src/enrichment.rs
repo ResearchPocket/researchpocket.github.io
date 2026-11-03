@@ -125,14 +125,27 @@ struct EnrichmentConfiguration {
     firecrawl_api_base: Option<String>,
 }
 
+/// Writes the enrichment policy, keeping every setting the caller leaves out.
+///
+/// Reconfiguring one aspect, such as rotating the Firecrawl key, must not
+/// silently turn browser-capture enrichment off. A first configuration enables
+/// it: choosing a provider is the owner's opt-in, and capture is where
+/// enrichment is wanted.
 pub fn configure(
     data_dir: &Path,
     provider: EnrichmentProvider,
-    on_capture: bool,
+    on_capture: Option<bool>,
     api_base: Option<&str>,
     firecrawl_key: Option<&str>,
 ) -> EnrichmentResult<EnrichmentStatus> {
     fs::create_dir_all(data_dir)?;
+    // An unreadable earlier configuration is replaced rather than blocking repair.
+    let existing = read_configuration(data_dir).ok().flatten();
+    let on_capture = on_capture
+        .or(existing
+            .as_ref()
+            .map(|configuration| configuration.on_capture))
+        .unwrap_or(true);
     let firecrawl_api_base = match provider {
         EnrichmentProvider::Direct => {
             if api_base.is_some() || firecrawl_key.is_some() {
@@ -142,7 +155,14 @@ pub fn configure(
             None
         }
         EnrichmentProvider::Firecrawl => {
-            let api_base = api_base.map(validate_api_base).transpose()?;
+            let api_base = match api_base {
+                Some(api_base) => Some(validate_api_base(api_base)?),
+                None => existing
+                    .filter(|configuration| {
+                        configuration.provider == EnrichmentProvider::Firecrawl
+                    })
+                    .and_then(|configuration| configuration.firecrawl_api_base),
+            };
             if let Some(key) = firecrawl_key {
                 validate_api_key(key)?;
                 atomic_private_write(&key_path(data_dir), key.as_bytes())?;
@@ -959,17 +979,50 @@ mod tests {
 
         let directory = tempfile::tempdir().expect("temporary data directory");
         let secret = "fc-test-secret";
-        configure(
+        let configured = configure(
             directory.path(),
             EnrichmentProvider::Firecrawl,
-            true,
             None,
+            Some("http://127.0.0.1:3002/"),
             Some(secret),
         )
         .expect("configure Firecrawl");
+        assert!(
+            configured.on_capture,
+            "a first configuration enriches captures"
+        );
         let configuration = fs::read_to_string(config_path(directory.path()))
             .expect("read non-secret configuration");
         assert!(!configuration.contains(secret));
+
+        // Rotating the key keeps the capture policy and the self-hosted origin.
+        let rotated = configure(
+            directory.path(),
+            EnrichmentProvider::Firecrawl,
+            None,
+            None,
+            Some("fc-rotated-secret"),
+        )
+        .expect("rotate the Firecrawl key");
+        assert!(rotated.on_capture);
+        assert_eq!(rotated.api_base.as_deref(), Some("http://127.0.0.1:3002"));
+        let paused = configure(
+            directory.path(),
+            EnrichmentProvider::Firecrawl,
+            Some(false),
+            None,
+            None,
+        )
+        .expect("pause capture enrichment");
+        assert!(!paused.on_capture && paused.credential_available);
+        configure(
+            directory.path(),
+            EnrichmentProvider::Firecrawl,
+            None,
+            None,
+            Some(secret),
+        )
+        .expect("restore the original key");
         assert_eq!(
             fs::read_to_string(key_path(directory.path())).expect("read separate key"),
             secret

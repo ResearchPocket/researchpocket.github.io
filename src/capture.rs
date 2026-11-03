@@ -24,6 +24,8 @@ const MAX_NOTE_BYTES: usize = 32 * 1024;
 const MAX_TAGS: usize = 64;
 const MAX_TAG_BYTES: usize = 1024;
 const REGISTRATION_SCHEMA_VERSION: u8 = 1;
+/// The supplied bookmarklet, shipped in the binary for package installs.
+pub const BOOKMARKLET: &str = include_str!("../bookmarklet.js");
 const REGISTRATION_FILE: &str = "capture-handler.json";
 const NOTIFICATION_SECRET_ENV_VARS: [&str; 6] = [
     "FIRECRAWL_API_KEY",
@@ -83,7 +85,7 @@ pub async fn install(data_dir: &Path) -> CaptureResult<RegistrationStatus> {
     // Refuse to install a handler that can only fail later in the desktop shell.
     V2Store::open(data_dir).await?;
 
-    let executable = env::current_exe()?.canonicalize()?;
+    let executable = stable_executable(env::current_exe()?.canonicalize()?);
     let data_dir = data_dir.canonicalize()?;
     let manifest = RegistrationManifest {
         schema_version: REGISTRATION_SCHEMA_VERSION,
@@ -155,6 +157,30 @@ pub async fn handle(
         notify(result.is_ok());
     }
     result
+}
+
+/// Prefers Homebrew's version-independent `opt` link to a resolved keg path.
+///
+/// `brew upgrade` removes `<prefix>/Cellar/<formula>/<version>`, which would
+/// strand a handler bound to it. The `opt` link is bound only when it resolves
+/// to this very binary, so the binding is still fixed at installation time and
+/// carries no more authority than the keg it points into.
+fn stable_executable(resolved: PathBuf) -> PathBuf {
+    let homebrew_opt = resolved
+        .ancestors()
+        .filter(|ancestor| ancestor.file_name() == Some("Cellar".as_ref()))
+        .find_map(|cellar| {
+            let mut keg_relative = resolved.strip_prefix(cellar).ok()?.components();
+            let formula = keg_relative.next()?;
+            let _version = keg_relative.next()?;
+            let candidate = cellar
+                .parent()?
+                .join("opt")
+                .join(formula)
+                .join(keg_relative.as_path());
+            (candidate.canonicalize().ok()? == resolved).then_some(candidate)
+        });
+    homebrew_opt.unwrap_or(resolved)
 }
 
 fn parse_capture_uri(capture_uri: &str) -> CaptureResult<CaptureRequest> {
@@ -698,9 +724,13 @@ fn platform_install(manifest: &RegistrationManifest) -> CaptureResult<()> {
 #[cfg(target_os = "macos")]
 fn platform_is_registered(manifest: &RegistrationManifest) -> CaptureResult<bool> {
     let app = mac_app_path()?;
+    // A helper from an earlier release still forwards to the bound executable,
+    // so it is current whenever that binding resolves to this binary.
+    let forwards_here = manifest.executable.canonicalize().ok()
+        == env::current_exe().and_then(|path| path.canonicalize()).ok();
     Ok(app.is_dir()
         && app.join("Contents/MacOS").join(MAC_EXECUTABLE).is_file()
-        && manifest.binary_version == env!("CARGO_PKG_VERSION")
+        && (manifest.binary_version == env!("CARGO_PKG_VERSION") || forwards_here)
         && mac_app_owned(&app, Some(manifest))?
         && mac_is_effective_handler(&app)?)
 }
@@ -827,7 +857,14 @@ pub fn run_macos_handler() -> CaptureResult<()> {
             "capture helper configuration is invalid".into(),
         ));
     }
-    let executable = env::current_exe()?;
+    // The bundled copy only receives the URL. Saving runs the executable bound
+    // at installation, so a package upgrade takes effect without reinstalling;
+    // the copy remains the fallback when that binary is gone.
+    let executable = if manifest.executable.is_absolute() && manifest.executable.is_file() {
+        manifest.executable
+    } else {
+        env::current_exe()?
+    };
     macos_app::run(executable, manifest.data_dir)
 }
 
@@ -1149,6 +1186,30 @@ const WINDOWS_FAILURE_NOTIFICATION: &str = r#"$x=[Windows.Data.Xml.Dom.XmlDocume
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_homebrew_keg_binds_its_upgrade_stable_opt_link() {
+        let prefix = tempfile::tempdir().expect("temporary prefix");
+        let prefix = prefix.path().canonicalize().expect("resolved prefix");
+        let keg_binary = prefix.join("Cellar/researchpocket/2.3.0/bin/research");
+        fs::create_dir_all(keg_binary.parent().expect("keg bin")).expect("keg");
+        fs::write(&keg_binary, b"").expect("keg binary");
+        fs::create_dir_all(prefix.join("opt")).expect("opt");
+        std::os::unix::fs::symlink(
+            prefix.join("Cellar/researchpocket/2.3.0"),
+            prefix.join("opt/researchpocket"),
+        )
+        .expect("opt link");
+
+        assert_eq!(
+            stable_executable(keg_binary.clone()),
+            prefix.join("opt/researchpocket/bin/research")
+        );
+        // A link that resolves elsewhere is never bound in its place.
+        fs::remove_file(prefix.join("opt/researchpocket")).expect("unlink");
+        assert_eq!(stable_executable(keg_binary.clone()), keg_binary);
+    }
 
     #[tokio::test]
     async fn versioned_capture_validation_and_v2_mutation_are_one_atomic_boundary() {

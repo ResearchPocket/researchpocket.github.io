@@ -237,13 +237,17 @@ pub struct EnrichForgetArgs {
 
 #[derive(Args)]
 pub struct EnrichConfigureArgs {
-    /// Provider used by queued and automatic enrichment
+    /// Provider used by queued and automatic enrichment; omit it to keep the configured one
     #[arg(value_enum)]
-    pub provider: EnrichmentProviderArg,
+    pub provider: Option<EnrichmentProviderArg>,
 
-    /// Automatically enrich browser captures after their durable local save
-    #[arg(long)]
+    /// Enrich browser captures right after their durable local save (default for a new setup)
+    #[arg(long, conflicts_with = "no_on_capture")]
     pub on_capture: bool,
+
+    /// Keep browser captures exactly as the bookmarklet saved them
+    #[arg(long)]
+    pub no_on_capture: bool,
 
     /// Read a Firecrawl API key from standard input without echoing or persisting it in SQLite
     #[arg(long)]
@@ -396,6 +400,9 @@ pub enum CaptureCommands {
 
     /// Remove the per-user researchpocket:// handler
     Uninstall,
+
+    /// Print the browser bookmarklet to paste into a bookmark's URL field
+    Bookmarklet,
 
     /// Accept one versioned capture URI from the operating system
     #[command(hide = true)]

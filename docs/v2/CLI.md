@@ -15,6 +15,7 @@ research enrich disable
 research capture install
 research capture status
 research capture uninstall
+research capture bookmarklet
 research edit <ITEM_ID>
 research delete <ITEM_ID>
 research restore <ITEM_ID>
@@ -148,6 +149,16 @@ research enrich configure direct --on-capture
 research enrich status
 ```
 
+Configuring a provider for the first time enriches browser captures unless
+`--no-on-capture` is given. Later `enrich configure` runs change only what they
+name: the capture policy, Firecrawl key, and self-hosted API origin otherwise
+stay as they were. Omit the provider to change only the capture policy:
+
+```sh
+research enrich configure --no-on-capture   # keep captures as saved
+research enrich configure --on-capture      # enrich them again
+```
+
 The direct provider sends an unauthenticated HTTP(S) request from the local
 device. It sends no cookie, authorization header, referrer, or browser state;
 validates every redirect and resolved address; rejects private and special-use
@@ -270,18 +281,25 @@ research --data-dir /absolute/path/to/private/library capture install
 `RESEARCHPOCKET_DATA_DIR` follows the usual global precedence and is resolved at
 installation time. Neither selection method puts a database path in a capture
 URI. Re-run `capture install` after moving the executable or switching the target
-library. On macOS, the application bridge contains a private copy of the CLI, so
-re-run installation after every CLI upgrade as well.
+library. On macOS, the application bridge contains a private copy of the CLI
+that only receives the URL; it saves through the bound executable and falls back
+to its copy when that executable is gone. A Homebrew installation binds the
+formula's version-independent `opt` link, so `brew upgrade` needs no
+reinstallation. Bridges installed by 2.3.0 or earlier save through their copy;
+re-run installation once after upgrading from them.
 
 ### Add and use the browser bookmarklet
 
 1. Create a bookmark in a browser that permits JavaScript bookmark URLs. In
    Firefox, show the Bookmarks Toolbar, right-click it, and choose
-   **Add Bookmark**.
+   **Add Bookmark**. In Chrome and other Chromium browsers, show the bookmarks
+   bar (**⇧⌘B** on macOS, **Ctrl+Shift+B** elsewhere), right-click it, and
+   choose **Add page…**.
 2. Set the name to `Save to ResearchPocket`.
 3. Copy the entire one-line [bookmarklet.js](../../bookmarklet.js) into the
    bookmark's **URL** or **Location** field. It must begin immediately with
-   `javascript:`.
+   `javascript:`. `research capture bookmarklet` prints the same line, so
+   `research capture bookmarklet | pbcopy` copies it on macOS.
 4. Visit an HTTP(S) page and click the bookmarklet. Enter optional
    comma-separated tags, leave the prompt blank for an untagged save, or choose
    **Cancel** to abort the capture.
@@ -301,9 +319,19 @@ browsing or when site permissions are cleared. Do not disable external-protocol
 safety checks globally. In Firefox, the handler appears under
 **Settings → General → Applications** as the `researchpocket` action.
 
+The registration belongs to the operating system rather than a browser, so
+Chrome, Edge, Brave, Arc, and Safari open the same handler without extra setup:
+macOS routes the link through LaunchServices, Linux through `xdg-open`, and
+Windows through the per-user protocol key. Chromium browsers ask per site
+whether that site may open ResearchPocket Capture. Choose **Open**; ticking
+**Always allow** remembers the choice for that site only. A dismissed prompt is
+not remembered, so clicking the bookmarklet again asks again.
+
 Automatic bookmarklet enrichment is a local library policy, not a bookmarklet
-option. Configure it before capture with `research enrich configure direct
---on-capture`, or configure Firecrawl with the same flag. The capture URI still
+option. Configuring a provider turns it on; `research enrich configure
+--no-on-capture` turns it off and `--on-capture` turns it back on. With
+Firecrawl, each capture keeps the bookmarklet's excerpt and gains the whole page
+as its captured document. The capture URI still
 contains no provider or credential. The handler commits the item and durable job
 before attempting the selected provider. If the bookmarklet supplied every
 eligible metadata field, the job is skipped without a provider request.
@@ -387,7 +415,8 @@ For a failed launch or a capture that appears to be missing:
    directory shown by capture status;
 4. check the browser's external-protocol or application settings, then trigger
    the bookmarklet again; in Firefox, inspect **Settings → General →
-   Applications** for the `researchpocket` action; and
+   Applications** for the `researchpocket` action, and in Chrome click the
+   bookmarklet again and choose **Open** when asked; and
 5. on Linux, verify that `xdg-mime` is installed and available.
 
 The custom protocol is an append-only integration surface. A site for which the
