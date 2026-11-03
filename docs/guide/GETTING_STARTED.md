@@ -24,7 +24,7 @@ to recover it. The public docs do not open or read your private library.
 
 ## Install the CLI
 
-On macOS (or Linux on x86-64), install with [Homebrew](https://brew.sh):
+On macOS, install with [Homebrew](https://brew.sh):
 
 ```sh
 brew install korigamik/tap/researchpocket
