@@ -83,9 +83,8 @@ reading plan to your synthesis, and saved-item links for the original sources.
 Open a document or save and look at **Linked from** to find the live documents
 referencing it. Backlinks are read from local Markdown while you view the
 target. You do not maintain a separate index, and no backlink structure is
-uploaded. These browser additions are beyond published 2.3.0; see
-[Zen links and backlinks](ZEN.md#insert-links-and-follow-backlinks) for controls
-and older-reader behavior.
+uploaded. See [Zen links and backlinks](ZEN.md#insert-links-and-follow-backlinks)
+for controls and older-reader behavior.
 
 ## Find sources and explore connections
 

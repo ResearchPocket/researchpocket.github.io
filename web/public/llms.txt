@@ -1,6 +1,6 @@
 # ResearchPocket
 
-ResearchPocket 2.3.0 is a local-first personal library for useful HTTP(S) URLs
+ResearchPocket 2.4.0 is a local-first personal library for useful HTTP(S) URLs
 and bounded private Zen documents. The static public site explains the product;
 the owner app stores its replica in the visitor's browser. No private library
 or token is bundled in the public shell.
@@ -9,18 +9,19 @@ Available now: offline URL capture and curation; CLI and TUI; V1 SQLite import;
 native bookmarklet capture; optional direct/Firecrawl enrichment; separately
 stored captured Markdown; private GitHub sync, checkpoints, and restore;
 browser library profiles; Zen Markdown, todos, and saved-item mentions;
-a derived library graph; TUI documents; opt-in remembered browser tokens.
+a derived library graph; TUI documents; opt-in remembered browser tokens;
+Homebrew installation; bring-your-own-key assistance and Firecrawl page
+capture in the browser app; Zen link completion and Linked from backlinks.
 
 Planned: selective public collections/publication, the loopback web server,
 broader import/export formats, background-service installation, and the
 item-aggregate migration. Zen documents already use their own sync aggregate;
 saves still use protocol v1. Contracts and ADRs may include target behavior.
 
-Current browser updates beyond the published 2.3.0 release add Zen link
-completion on [[, an Insert link picker, research:zen/<uuid> document links,
-internal saved-item navigation, and on-demand Linked from backlinks. These
-are local presentation and Markdown features, not a persistent relationship
-index. Native completion and item-note completion are not included.
+Zen links use research:zen/<uuid> Markdown references and on-demand Linked
+from backlinks: local presentation and Markdown features, not a persistent
+relationship index. Native completion and item-note completion are not
+included.
 
 ## User guides
 
@@ -40,7 +41,7 @@ index. Native completion and item-note completion are not included.
 - [Data, sync, and privacy](https://researchpocket.github.io/docs/?page=data-and-privacy)
 - [Migration from V1](https://researchpocket.github.io/docs/?page=migration)
 - [Technical contracts and architecture decisions](https://researchpocket.github.io/docs/?page=technical)
-- [ResearchPocket 2.3.0 release notes](https://researchpocket.github.io/docs/?page=release)
+- [ResearchPocket 2.4.0 release notes](https://researchpocket.github.io/docs/?page=release)
 - [Project source](https://github.com/ResearchPocket/researchpocket.github.io)
 - [Product overview](https://researchpocket.github.io/overview/)
 - [Hosted owner app](https://researchpocket.github.io/app/)

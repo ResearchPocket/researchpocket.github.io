@@ -13,7 +13,7 @@ connection. GitHub sync and page enrichment are optional.
 [Download the CLI](https://github.com/ResearchPocket/researchpocket.github.io/releases) |
 [Read the documentation](https://researchpocket.github.io/docs/)
 
-The current release is **2.3.0**. Alongside saved URLs, Research Zen holds
+The current release is **2.4.0**. Alongside saved URLs, Research Zen holds
 bounded Markdown documents, task lists, and references to your saves. The browser
 offers Library list/graph views and optional remembered sync tokens; the native
 CLI and TUI manage both saves and documents. See the
@@ -84,7 +84,7 @@ accept one, install [Rust](https://www.rust-lang.org/tools/install) and build th
 matching release tag from source instead of weakening system-wide security:
 
 ```sh
-git clone --branch v2.3.0 --depth 1 \
+git clone --branch v2.4.0 --depth 1 \
   https://github.com/ResearchPocket/researchpocket.github.io.git
 cd researchpocket.github.io
 cargo build --locked --release

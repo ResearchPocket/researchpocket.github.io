@@ -32,10 +32,9 @@ In Zen's **Open or create a document…** field, typing filters titles, arrow ke
 select a row, Enter opens it, and **Ctrl+Enter** or **Cmd+Enter** creates a new
 document. The [Zen guide](ZEN.md) covers editing and save timing.
 
-The current browser update also offers `[[` completion and an **Insert link**
-button (the link icon in the Zen toolbar while editing). Follow document links within Zen or saved
-links in the Reader, and use **Linked from** to return to referencing documents.
-These additions are beyond the published 2.3.0 browser. See
+Zen also offers `[[` completion and an **Insert link** button (the link icon in
+the Zen toolbar while editing). Follow document links within Zen or saved links
+in the Reader, and use **Linked from** to return to referencing documents. See
 [Zen links and backlinks](ZEN.md#insert-links-and-follow-backlinks).
 
 ## Work offline

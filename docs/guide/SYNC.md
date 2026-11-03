@@ -84,8 +84,8 @@ cannot be combined by connecting them to the same repository; a mismatch stops
 sync rather than discarding work. Do not copy a live SQLite file between devices
 as a sync method.
 
-Use 2.3.0 on your devices for the current behavior. Zen requires 2.2.1 or newer;
-older clients do not see its documents. Review [release notes](../releases/v2.3.0.md)
+Use 2.4.0 on your devices for the current behavior. Zen requires 2.2.1 or newer;
+older clients do not see its documents. Review [release notes](../releases/v2.4.0.md)
 before upgrades, especially if coming from preview clients.
 
 ## Recover from a failed cycle

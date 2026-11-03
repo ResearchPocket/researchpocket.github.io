@@ -5,8 +5,7 @@ Status: public product explainer, offline owner editing, and private GitHub brow
 This is the implementation reference. For current user workflows, start with
 [Browser workspace](../guide/BROWSER.md), [Zen documents](../guide/ZEN.md),
 [Capture and reading](../guide/READING.md), or [Sync and recovery](../guide/SYNC.md).
-The current published release is 2.3.0; the Zen linking update at the end of this
-document describes additional current browser work.
+This document describes the 2.4.0 release.
 
 ## What works now
 

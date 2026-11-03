@@ -63,9 +63,9 @@ also find an item's ID in its open Reader URL after `#item=`. You can type the
 Markdown directly, or use the current browser's link picker described below.
 
 When rendered, a mention shows the save's current title and host. Renaming that
-save updates the rendered reference without rewriting your document. The current
-browser opens an active saved-item link in its local Reader; the 2.3.0 browser
-opens the saved URL.
+save updates the rendered reference without rewriting your document. The browser
+opens an active saved-item link in its local Reader; 2.3.0 and earlier open the
+saved URL.
 A deleted save appears as a non-clickable **deleted save** marker; an unknown
 ID appears **unresolved**.
 The authored Markdown remains available in either case.
@@ -76,9 +76,8 @@ for a complete reading-plan example and graph connections.
 
 ## Insert links and follow backlinks
 
-The current browser update adds link completion, document-to-document links,
-and **Linked from** views. These changes extend the published 2.3.0 browser;
-they do not add a native CLI or TUI completion picker.
+Since 2.4.0, the browser offers link completion, document-to-document links,
+and **Linked from** views. There is no native CLI or TUI completion picker.
 
 1. Open a Zen document and choose **edit**.
 2. Type `[[` followed by part of a document title, saved-item title, or URL.

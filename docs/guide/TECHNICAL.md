@@ -3,7 +3,7 @@
 These documents describe ResearchPocket's implementation, invariants, and target
 architecture. Start with the [user documentation](INDEX.md) for current workflows.
 Some contracts and ADRs describe planned capabilities or the state when a
-decision was made; the [2.3.0 release notes](../releases/v2.3.0.md) establish the
+decision was made; the [2.4.0 release notes](../releases/v2.4.0.md) establish the
 current release behavior.
 
 ## Interface and storage contracts

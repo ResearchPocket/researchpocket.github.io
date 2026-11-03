@@ -34,7 +34,8 @@ import adrBrowserTokenSource from "../../../docs/v2/ADR_0013_REMEMBER_BROWSER_TO
 import adrZenLinksSource from "../../../docs/v2/ADR_0014_ZEN_LINK_COMPLETION.md?raw";
 import adrAssistantSource from "../../../docs/v2/ADR_0015_BYOK_AI_ASSISTANCE.md?raw";
 import adrPageCaptureSource from "../../../docs/v2/ADR_0016_BROWSER_PAGE_CAPTURE.md?raw";
-import releaseSource from "../../../docs/releases/v2.3.0.md?raw";
+import releaseSource from "../../../docs/releases/v2.4.0.md?raw";
+import release230Source from "../../../docs/releases/v2.3.0.md?raw";
 import release222Source from "../../../docs/releases/v2.2.2.md?raw";
 import release221Source from "../../../docs/releases/v2.2.1.md?raw";
 import release211Source from "../../../docs/releases/v2.1.1.md?raw";
@@ -46,7 +47,7 @@ import releasePreview3Source from "../../../docs/releases/v2.0.0-preview.3.md?ra
 import releasePreview2Source from "../../../docs/releases/v2.0.0-preview.2.md?raw";
 import releasePreview1Source from "../../../docs/releases/v2.0.0-preview.1.md?raw";
 
-export const DOCS_VERSION = "2.3.0";
+export const DOCS_VERSION = "2.4.0";
 
 export interface ReferenceSection {
   id: string;
@@ -365,10 +366,18 @@ export const referenceDocuments: ReferenceDocument[] = [
   {
     id: "release",
     section: "release",
-    title: "ResearchPocket 2.3.0",
-    description: "Current release: TUI documents, remembered browser tokens, separate captured pages, and upgrade notes.",
-    sourcePath: "docs/releases/v2.3.0.md",
+    title: "ResearchPocket 2.4.0",
+    description: "Current release: Homebrew, enriched browser captures, assistance, page capture, Zen links, and upgrade notes.",
+    sourcePath: "docs/releases/v2.4.0.md",
     source: releaseSource,
+  },
+  {
+    id: "release-2-3-0",
+    section: "release-archive",
+    title: "ResearchPocket 2.3.0",
+    description: "Historical release notes and compatibility information for 2.3.0.",
+    sourcePath: "docs/releases/v2.3.0.md",
+    source: release230Source,
   },
   {
     id: "release-2-2-2",

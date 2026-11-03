@@ -39,7 +39,7 @@ Pages owner editing are implemented. Background-service installation and V2
 publication are not implemented in this slice. Git is never used to resolve
 application changes.
 
-This reference describes 2.3.0. For a workflow introduction, start with
+This reference describes 2.4.0. For a workflow introduction, start with
 [Getting started](../guide/GETTING_STARTED.md), [Zen documents](../guide/ZEN.md),
 or [Documentation and references](../guide/REFERENCES.md).
 
