@@ -102,7 +102,7 @@ place: its title, tags, excerpt, and note become fields, and **Save** and
 **Cancel** stay at the top while you scroll. The page's capture line and its
 actions sit under the title.
 
-- With an excerpt, you read the excerpt. **Use captured page** replaces it with
+- With an excerpt, you read the excerpt. **Use as excerpt** replaces it with
   the original page (Undo restores it).
 - With only an original page, you read the page. Captures often include menus,
   footers, and other noise: choose edit, trim the excerpt field, and **Save**.

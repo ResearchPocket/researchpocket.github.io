@@ -415,6 +415,11 @@
   margin-bottom: var(--space-2);
 }
 
+.local-status .app-icon {
+  height: 1rem;
+  width: 1rem;
+}
+
 .local-status {
   flex-wrap: nowrap;
   font-size: var(--font-size-xs);
@@ -6638,14 +6643,15 @@ kbd {
   padding: var(--space-3) var(--space-4);
 }
 
-/* The Reader keeps assistance out of the way: a muted toggle, then a light
-   panel without the accent rule or tinted surface. */
+/* The Reader keeps assistance out of the way: a muted toggle, then its
+   actions and results flowing under it like the rest of the page, with no
+   rule or indent that would read as a quotation. */
 .assistant-block-reader {
   background: transparent;
-  border-left: var(--rule) solid var(--color-border);
+  border-left: 0;
   gap: var(--space-2);
   margin: var(--space-3) 0;
-  padding: var(--space-1) 0 var(--space-1) var(--space-3);
+  padding: 0;
 }
 
 .app-shell .assistant-toggle {

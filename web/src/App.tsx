@@ -1396,16 +1396,24 @@ export function App() {
               title="Open sync"
               type="button"
             >
-              <span aria-hidden="true" className="status-dot" />
-              <span className="status-label">local</span>
-              <span aria-live="polite" className="status-copy" role="status">
-                {formatSyncCopy(libraryState.status, libraryState.pendingCount)}
-              </span>
-              {/* The full status sentence does not fit on a phone, so a shorter
-                  reading of the same state stands in for it there. */}
-              <span aria-hidden="true" className="status-chip">
-                {formatSyncChip(libraryState.status, libraryState.pendingCount)}
-              </span>
+              {/* A settled library needs no words: the icon stays as the way
+                  to Sync, and text appears only when something needs a look. */}
+              {syncSettled(libraryState.status, libraryState.pendingCount) ? (
+                <AppIcon name="sync" />
+              ) : (
+                <>
+                  <span aria-hidden="true" className="status-dot" />
+                  <span className="status-label">local</span>
+                  <span aria-live="polite" className="status-copy" role="status">
+                    {formatSyncCopy(libraryState.status, libraryState.pendingCount)}
+                  </span>
+                  {/* The full status sentence does not fit on a phone, so a
+                      shorter reading of the same state stands in for it there. */}
+                  <span aria-hidden="true" className="status-chip">
+                    {formatSyncChip(libraryState.status, libraryState.pendingCount)}
+                  </span>
+                </>
+              )}
             </button>
             <button
               className="command-trigger"
@@ -3664,12 +3672,12 @@ function ReaderView({
               {draft ? null : (
                 <>
                   {authoredContext && capture ? (
-                    <button className="assistant-action" disabled={busy} onClick={() => void useCapturedPage()} type="button">
-                      Use captured page
+                    <button className="assistant-action assistant-action-quiet" disabled={busy} onClick={() => void useCapturedPage()} type="button">
+                      Use as excerpt
                     </button>
                   ) : null}
                   {captureAvailable ? (
-                    <button className="assistant-action" disabled={capturing} onClick={requestCapture} type="button">
+                    <button className="assistant-action assistant-action-quiet" disabled={capturing} onClick={requestCapture} type="button">
                       {capturing ? "Capturing…" : capture ? "Recapture" : "Capture page"}
                     </button>
                   ) : null}
@@ -4925,6 +4933,11 @@ function formatViewLabel(view: WorkspaceView) {
  * this device, so the word "pending" beside it is saying it twice — it stays
  * only in the accessible name, where there is no arrow to read.
  */
+/** Nothing pending, saving, opening, or failing: the header has nothing to say. */
+function syncSettled(status: unknown, pendingCount: number) {
+  return formatHeaderStatus(status, pendingCount) === "ready";
+}
+
 function formatSyncChip(status: unknown, pendingCount: number) {
   if (pendingCount > 0) return `↑ ${pendingCount.toLocaleString()}`;
   if (status === "error") return "! attention";

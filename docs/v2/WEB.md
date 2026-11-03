@@ -318,8 +318,8 @@ edited in place when the Reader's pencil turns the Reader into the editor
 (title, tags, excerpt, note, with Save and Cancel in the sticky toolbar); the
 list and palette Edit save dialog has no excerpt field. A
 captured page is shown only while a save has no excerpt, labelled as the
-original page; editing it saves the trimmed text as the excerpt. **Use captured
-page** copies the original into the excerpt with Undo, and **Recapture** fetches
+original page; editing it saves the trimmed text as the excerpt. **Use as
+excerpt** copies the original into the excerpt with Undo, and **Recapture** fetches
 it again.
 `src/capture/firecrawl.ts` sends the CLI's exact `/v2/scrape` request with an
 8 MiB response bound; the domain core's `createCapturedDocument` normalizes,
