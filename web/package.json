@@ -14,7 +14,7 @@
     "verify": "bun run test && bun run build",
     "preview": "vite preview",
     "audit": "bun audit",
-    "check:offline": "node ./scripts/check-offline-shell.mjs"
+    "check:offline": "node --experimental-strip-types ./scripts/check-offline-shell.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "4.0.94",
@@ -37,6 +37,7 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "@types/node": "24.19.2",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.3",

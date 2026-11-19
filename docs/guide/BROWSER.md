@@ -43,6 +43,12 @@ After one successful online load has installed the app, you can reopen it
 offline. Saves and accepted edits commit to local storage and queue updates
 before synchronization. Offline work does not require a token.
 
+On iOS, open the installed Home Screen app while connected after an app update
+and let it finish loading before going offline. This installs the current
+offline shell in that app's browser storage. Older Home Screen shortcuts to
+`/ResearchPocket/app/` continue to open the owner workspace. Updating the shell
+does not require clearing site data or recreating your library.
+
 The pending-change count means work is durable on this device and still needs
 to upload. It is not a remote-backup confirmation. Captured pages you have not
 cached, source websites, and explicitly loaded external images can still need a

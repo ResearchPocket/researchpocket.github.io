@@ -396,7 +396,13 @@ The service worker caches only versioned, same-origin public shell assets. Its
 fetch handler bypasses every cross-origin request and every request carrying an
 `Authorization` header. It does not cache API responses, private projections,
 owner HTML variants, publication previews, POST/PUT requests, or error bodies.
-Activating a new shell version removes old caches.
+Its root registration includes the domain worker's `/assets/` URL and old
+installed owner launch URLs (ADR 0017). Navigation handling is restricted to
+the exact current and former owner entries; resource caching is restricted to
+the owner build graph and worker WASM dependencies. Resource query variants
+are excluded, and navigation queries never enter cache keys. Public-site
+navigations and unrelated same-origin responses are not cached. Activating a
+new shell version removes old caches.
 
 ## Logging, caching, and browser persistence
 

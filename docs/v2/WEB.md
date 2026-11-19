@@ -154,8 +154,10 @@ The public documents' CSP allows only same-origin resources and connections to
 assistant provider origins, the Firecrawl page-capture origin, and loopback model
 servers listed in `src/assistant/providers.json`, and omits `upgrade-insecure-requests` so loopback
 HTTP is not rewritten; `check:dist` fails if either policy drifts from that
-registry. The service worker handles only GETs
-from pages controlled beneath `/app/` for same-origin shell resources and WASM.
+registry. The service worker is registered at `/` so dedicated worker clients
+under `/assets/` are controlled too (ADR 0017). It handles only allowlisted owner
+navigations and GETs for the owner build graph and its WASM dependencies.
+Public landing and documentation navigations bypass its offline handler.
 It explicitly bypasses all GitHub API
 traffic, cross-origin traffic, and non-GET requests, so it cannot cache a token,
 private API response, or upload body.
@@ -186,6 +188,9 @@ compatibility documents at the former `/ResearchPocket/` paths preserve query
 and hash fragments, remove only ResearchPocket's retired worker scopes and
 shell cache, and redirect on the same origin. IndexedDB therefore remains the
 same local library; the URL migration does not copy or rewrite private state.
+Once the current shell is installed, the service worker redirects the exact
+former owner entry paths to `/app/` offline as well. It retires the old app-only
+worker scope after the replacement has activated.
 
 Vite development servers generate a fresh nonce when they start and attach it
 to development-only injected scripts and styles. This keeps CSS hot reload and
@@ -205,8 +210,12 @@ worker script, because the worker bundle is outside the entry manifest). Fonts
 and same-origin images are served from that cache, so an installed app reloads
 and opens its domain worker offline. `bun run build` ends with
 `check:offline`, which runs the built service worker against `dist/`, installs
-it, cuts the network, and requires the navigation, app script, worker, WASM,
-font, and favicon to come from the cache. Lazily loaded chunks such as the
+it using the actual registration routine, checks worker-client scope matching,
+cuts the network, and requires the navigation, app script, worker, WASM,
+font, and favicon to come from the cache. Legacy Home Screen entry redirects
+and exclusion of unrelated/private responses are checked too. This simulated
+contract supplements headed browser and physical iOS checks; it does not run
+a browser engine. Lazily loaded chunks such as the
 assistant SDK are cached on first use.
 
 ## Owner synchronization lifecycle

@@ -339,6 +339,9 @@ if (existsSync(compatibilityScriptPath)) {
 const serviceWorkerPath = resolve(distRoot, "sw.js");
 if (existsSync(serviceWorkerPath)) {
   const serviceWorker = readFileSync(serviceWorkerPath, "utf8");
+  if (serviceWorker.includes("__SHELL_REVISION__")) {
+    failures.push("The service worker is missing its build-specific shell revision");
+  }
   if (!serviceWorker.includes('collectEntry("app/index.html")')) {
     failures.push("The owner service worker does not scope precaching to the app entry");
   }
