@@ -35,7 +35,9 @@ Bun and the committed `bun.lock` define the canonical reproducible install;
 Node.js runs the build scripts and the `node:test` contracts. `bun run verify`
 runs the browser data contracts, strict type checking, the design-system policy,
 the Rust/WASM build, the Vite production build, and the deployable-artifact
-checks used by GitHub Pages. `bun audit` checks the locked dependencies, as CI
+checks and the scope-aware offline shell contract used by GitHub Pages.
+`bun run check:offline` reruns that contract against an existing `dist/`.
+`bun audit` checks the locked dependencies, as CI
 does.
 
 `bun run dev` starts the public welcome at `http://localhost:5173/`, product
@@ -56,8 +58,9 @@ immutable bytes without a replacement SHA.
 `wasm32-unknown-unknown`, runs the matching `wasm-bindgen` CLI, type-checks the
 app, checks the canonical design-system rules, creates the script-free public
 pages, Markdown-backed reference, and relative-path owner app in `dist/`, and
-rejects unsafe deployment artifacts. The app-scoped service worker caches only
-same-origin owner-shell resources and bypasses `api.github.com`.
+rejects unsafe deployment artifacts. The root-scoped service worker covers
+domain worker clients under `/assets/` and legacy Home Screen launch URLs. It caches only allowlisted owner-shell
+resources and bypasses `api.github.com` and unrelated public-site navigations.
 
 Production is served from `https://researchpocket.github.io/`, with the owner
 application at `/app/`. The build also emits noindex compatibility redirects

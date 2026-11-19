@@ -1,8 +1,25 @@
 import react from "@vitejs/plugin-react";
+import { createHash } from "node:crypto";
+import { readFileSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { defineConfig, type Plugin } from "vite";
 
 const productionScriptPolicy = "script-src 'self' 'wasm-unsafe-eval';";
 const productionStylePolicy = "style-src 'self';";
+
+function offlineShellRevision(): Plugin {
+  return {
+    name: "researchpocket-offline-shell-revision",
+    apply: "build",
+    writeBundle(output) {
+      const directory = resolve(output.dir ?? "dist");
+      const manifest = readFileSync(resolve(directory, "asset-manifest.json"));
+      const revision = createHash("sha256").update(manifest).digest("hex");
+      const worker = resolve(directory, "sw.js");
+      writeFileSync(worker, readFileSync(worker, "utf8").replaceAll("__SHELL_REVISION__", revision));
+    },
+  };
+}
 
 function developmentCsp(nonce: string): Plugin {
   return {
@@ -58,7 +75,7 @@ export default defineConfig(({ command }) => {
       target: "es2022",
     },
     html: nonce ? { cspNonce: nonce } : undefined,
-    plugins: [react(), ...(nonce ? [developmentCsp(nonce)] : [])],
+    plugins: [react(), offlineShellRevision(), ...(nonce ? [developmentCsp(nonce)] : [])],
     server: {
       fs: {
         allow: [".."],

@@ -348,5 +348,10 @@ bun run verify
 bun run dev
 ```
 
+`bun run verify` includes the production offline-shell contract. Run
+`bun run check:offline` in `web/` to check an existing build's launch routes,
+worker scope, cached dependencies, and cache exclusions. Physical iOS Home
+Screen verification is documented in [the browser guide](docs/guide/BROWSER.md#work-offline).
+
 Tests focus on persistence, convergence, migration, privacy, and deployment
 boundaries rather than framework details.
