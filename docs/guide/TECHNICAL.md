@@ -44,6 +44,7 @@ current release behavior.
 | [0014](../v2/ADR_0014_ZEN_LINK_COMPLETION.md) | Current browser update: Zen link completion, document references, and derived backlinks |
 | [0015](../v2/ADR_0015_BYOK_AI_ASSISTANCE.md) | Bring-your-own-key assistance in the owner app: provider allowlist, key lifecycle, disclosed payloads, accept-only output |
 | [0017](../v2/ADR_0017_OFFLINE_WORKER_SCOPE.md) | Offline worker scope, installed launch compatibility, and the shell cache boundary |
+| [0018](../v2/ADR_0018_CHRONO_MAINTENANCE_EXCEPTION.md) | Temporary chrono maintenance exception and compatibility-preserving replacement |
 
 Zen has shipped in its own aggregate namespace; saves still use protocol v1.
 The item-aggregate migration described by ADR 0010 has not shipped. An ADR's

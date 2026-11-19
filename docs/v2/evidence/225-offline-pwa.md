@@ -68,3 +68,13 @@ and let it finish loading, close it, enable airplane mode, and reopen it from
 Home Screen. Verify an existing save and Zen document, make an edit, close and
 reopen offline again, then reconnect and confirm the queued edit remains.
 Do not clear website data or remove the installed app to perform this check.
+
+## Deployment dependency gate (#227)
+
+The required remote Rust audit found pre-existing findings in the native lock
+graph. SQLx was updated to 0.9.1, libsqlite3-sys to 0.39.1, quinn-udp to 0.5.16,
+and rustix to 1.1.6. ADR 0018 records the separate, unmaintained-only chrono
+warning exception; #228 owns its compatibility-reviewed replacement. No
+patchable vulnerability or required branch check is suppressed. The native
+format, Clippy, workspace tests, audit and release build are checked alongside
+the existing web verification before merge.

@@ -4,6 +4,11 @@
 # feature builds it (`cargo tree -i atomic-polyfill` is empty). Keep this narrow
 # exception until Loro's lock graph drops that unmaintained optional package.
 ignore = [
+  # RUSTSEC-2026-0543 reports unmaintained chrono, not a known vulnerability.
+  # Preserve the released native/WASM RFC3339 acceptance and timestamp output
+  # during the offline-app deployment (#227). ADR 0018 scopes this exception;
+  # #228 tracks the compatibility-reviewed replacement and its removal.
+  "RUSTSEC-2026-0543",
   "RUSTSEC-2023-0089",
   # Loro 1.13.7 uses im::HashMap and im::HashSet, not the OrdSet insertion
   # affected by RUSTSEC-2023-0126. Upstream still carries im 15.1.0 as of

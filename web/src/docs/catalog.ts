@@ -35,6 +35,7 @@ import adrZenLinksSource from "../../../docs/v2/ADR_0014_ZEN_LINK_COMPLETION.md?
 import adrAssistantSource from "../../../docs/v2/ADR_0015_BYOK_AI_ASSISTANCE.md?raw";
 import adrPageCaptureSource from "../../../docs/v2/ADR_0016_BROWSER_PAGE_CAPTURE.md?raw";
 import adrOfflineScopeSource from "../../../docs/v2/ADR_0017_OFFLINE_WORKER_SCOPE.md?raw";
+import adrChronoMaintenanceSource from "../../../docs/v2/ADR_0018_CHRONO_MAINTENANCE_EXCEPTION.md?raw";
 import releaseSource from "../../../docs/releases/v2.4.0.md?raw";
 import release230Source from "../../../docs/releases/v2.3.0.md?raw";
 import release222Source from "../../../docs/releases/v2.2.2.md?raw";
@@ -371,6 +372,14 @@ export const referenceDocuments: ReferenceDocument[] = [
     description: "Worker client control, installed launch compatibility, and the restricted shell cache boundary.",
     sourcePath: "docs/v2/ADR_0017_OFFLINE_WORKER_SCOPE.md",
     source: adrOfflineScopeSource,
+  },
+  {
+    id: "adr-chrono-maintenance",
+    section: "decisions",
+    title: "0018: Temporary chrono maintenance exception",
+    description: "A narrow maintenance exception while timestamp compatibility is preserved for a reviewed replacement.",
+    sourcePath: "docs/v2/ADR_0018_CHRONO_MAINTENANCE_EXCEPTION.md",
+    source: adrChronoMaintenanceSource,
   },
   {
     id: "release",
