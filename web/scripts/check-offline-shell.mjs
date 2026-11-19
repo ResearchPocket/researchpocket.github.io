@@ -33,6 +33,11 @@ await registerOfflineShell();
 
 function fileResponse(url) {
   const { pathname } = new URL(url);
+  if (["/assets/unrelated.js", "/assets/private.wasm"].includes(pathname)) {
+    // A successful same-origin response outside the build graph must still
+    // never enter the shell cache. A missing/404 fixture would not prove that.
+    return new Response("synthetic non-shell response", { status: 200 });
+  }
   const relative = pathname.replace(/^\//, "") || "index.html";
   const path = resolve(distRoot, relative.endsWith("/") ? `${relative}index.html` : relative);
   try {
@@ -170,20 +175,22 @@ for (const path of ["app", "ResearchPocket/app", "ResearchPocket/app/", "Researc
 // same-origin responses, authorization requests, nor GitHub data may be cached.
 online = true;
 const before = new Set(store.keys());
-for (const [path, destination, mode, headers = new Headers()] of [
-  ["docs/", "document", "navigate"],
-  ["index.html", "document", "navigate"],
+for (const [path, destination, mode, headers = new Headers(), bypass = false, method = "GET"] of [
+  ["docs/", "document", "navigate", new Headers(), true],
+  ["index.html", "document", "navigate", new Headers(), true],
   ["assets/unrelated.js", "script", "same-origin"],
   ["assets/private.wasm", "", "same-origin"],
   ["favicon.png?secret=value", "image", "same-origin"],
-  ["favicon.png", "image", "same-origin", new Headers({ Authorization: "Bearer private" })],
-  ["https://api.github.com/repos/private", "", "same-origin"],
+  ["favicon.png", "image", "same-origin", new Headers({ Authorization: "Bearer private" }), true],
+  ["https://api.github.com/repos/private", "", "same-origin", new Headers(), true],
+  ["app/", "document", "navigate", new Headers(), true, "POST"],
 ]) {
   let response;
   listeners.fetch({
-    request: { url: new URL(path, `${ORIGIN}/`).href, method: "GET", destination, mode, headers },
+    request: { url: new URL(path, `${ORIGIN}/`).href, method, destination, mode, headers },
     respondWith: (promise) => (response = promise),
   });
+  if (bypass && response) failures.push(`The service worker intercepted excluded ${method} ${path}`);
   if (response) await response;
 }
 if ([...store.keys()].some((url) => !before.has(url))) {
